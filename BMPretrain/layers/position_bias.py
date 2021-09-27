@@ -6,13 +6,16 @@ class PositionBiasEmbedding(torch.nn.Module):
     This is used to add bias to the positional embedding.
     """
 
-    def __init__(self, num_buckets, num_heads):
+    def __init__(self, num_buckets, num_heads, max_distance, bidirectional=True):
         super().__init__()
         self.num_buckets = num_buckets
         self.num_heads = num_heads
-        self.weight = torch.nn.Embedding(self.num_buckets, self.num_heads)
+        self.max_distance = max_distance
+        self.bidirectional = bidirectional
 
-    def _relative_position_bucket(self, relative_position, bidirectional=True, max_distance=128):
+        self.embedding = torch.nn.Embedding(self.num_buckets, self.num_heads)
+
+    def _relative_position_bucket(self, relative_position):
         """
         Adapted from Mesh Tensorflow:
         https://github.com/tensorflow/mesh/blob/0cb87fe07da627bf0b7e60475d59f95ed6b5be3d/mesh_tensorflow/transformer/transformer_layers.py#L593
@@ -61,15 +64,16 @@ class PositionBiasEmbedding(torch.nn.Module):
 
     def compute_bias(self, query_length, key_length):
         """ Compute binned relative position bias """
-        context_position = torch.arange(query_length, dtype=torch.long)[:, None]
-        memory_position = torch.arange(key_length, dtype=torch.long)[None, :]
-        relative_position = memory_position - context_position  # shape (query_length, key_length)
+        device = self.embedding.weight.device
+        context_position = torch.arange(query_length, dtype=torch.int32, device=device)[:, None]
+        memory_position = torch.arange(key_length, dtype=torch.int32, device=device)[None, :]
+        relative_position = context_position - memory_position  # shape (key_length, query_length)
         relative_position_bucket = self._relative_position_bucket(
-            relative_position,  # shape (query_length, key_length)
+            relative_position,  # shape (key_length, query_length)
             bidirectional=(not self.is_decoder),
             num_buckets=self.relative_attention_num_buckets,
         )
-        relative_position_bucket = relative_position_bucket.to(self.relative_attention_bias.weight.device)
+        relative_position_bucket = relative_position_bucket.to()
         values = self.relative_attention_bias(relative_position_bucket)  # shape (query_length, key_length, num_heads)
         values = values.permute([2, 0, 1]).unsqueeze(0)  # shape (1, num_heads, query_length, key_length)
         return values
