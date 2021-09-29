@@ -1,4 +1,4 @@
-#include "healper.h"
+#include "helper.h"
 #include <torch/extension.h>
 
 namespace {
@@ -28,6 +28,18 @@ __global__ void scale_2dim_kernel(
         else if (broad_cast1 && broad_cast2) {
             out[n][x][y] = (scalar_t)((float)(input_tensor[n][x][y]) * (float)(scale_1[0][x]) * (float)(scale_2[0][y]));
         }
+    }
+}
+
+template<typename T>
+__global__ void round_to_int8_kernel(
+    const torch::PackedTensorAccessor32<T, 1, torch::RestrictPtrTraits> x,
+    const torch::PackedTensorAccessor32<T, 1, torch::RestrictPtrTraits> scale,
+    torch::PackedTensorAccessor32<int8_t, 1, torch::RestrictPtrTraits> out
+) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < out.size(0)) {
+        out[idx] = (int8_t)nearbyintf(x[idx] / scale[idx]);
     }
 }
 
@@ -154,4 +166,19 @@ void LtIgemm(cublasLtHandle_t ltHandle,
     if (Bdesc) checkCublasStatus(cublasLtMatrixLayoutDestroy(Bdesc));
     if (Adesc) checkCublasStatus(cublasLtMatrixLayoutDestroy(Adesc));
     if (matmulDesc) checkCublasStatus(cublasLtMatmulDescDestroy(matmulDesc));
+}
+
+
+void round_to_int8(torch::Tensor x, torch::Tensor scale, torch::Tensor out) {
+    int32_t thread_size = 1024;
+    const dim3 threads(thread_size);
+    const dim3 blocks((x.size(0) + thread_size - 1) / thread_size);
+
+    AT_DISPATCH_INTEGRAL_TYPES(out.type(), "calc_bias_bucket_cuda", ([&] {
+        round_to_int8_kernel<scalar_t><<<blocks,threads>>>(
+            x.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+            scale.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+            out.packed_accessor32<int8_t, 1, torch::RestrictPtrTraits>()
+        );
+    }));
 }

@@ -1,14 +1,11 @@
+import BMPretrain.layers as layers
+import unittest
 import torch
-import BMPretrain._c as C
 import math
 
-class PositionBiasEmbedding(torch.nn.Module):
-    """Position bias embedding.
 
-    This is used to add bias to the positional embedding.
-    """
-
-    def __init__(self, num_buckets, num_heads, max_distance, bidirectional=True):
+class TorchRelativePositionEmbedding(torch.nn.Module):
+    def __init__(self, num_buckets, num_heads, max_distance, bidirectional=True) -> None:
         super().__init__()
         self.num_buckets = num_buckets
         self.num_heads = num_heads
@@ -17,7 +14,7 @@ class PositionBiasEmbedding(torch.nn.Module):
 
         self.embedding = torch.nn.Embedding(self.num_buckets, self.num_heads)
 
-    def _relative_position_bucket(self, relative_position):
+    def relative_position_bucket(self, relative_position, bidirectional=True, num_buckets=32, max_distance=128):
         """
         Adapted from Mesh Tensorflow:
         https://github.com/tensorflow/mesh/blob/0cb87fe07da627bf0b7e60475d59f95ed6b5be3d/mesh_tensorflow/transformer/transformer_layers.py#L593
@@ -39,8 +36,7 @@ class PositionBiasEmbedding(torch.nn.Module):
             a Tensor with the same shape as relative_position, containing int32 values in the range [0, num_buckets)
         """
         relative_buckets = 0
-        num_buckets = self.num_buckets
-        if self.bidirectional:
+        if bidirectional:
             num_buckets //= 2
             relative_buckets += (relative_position > 0).to(torch.long) * num_buckets
             relative_position = torch.abs(relative_position)
@@ -53,31 +49,63 @@ class PositionBiasEmbedding(torch.nn.Module):
         is_small = relative_position < max_exact
 
         # The other half of the buckets are for logarithmically bigger bins in positions up to max_distance
-        relative_postion_if_large = max_exact + \
-            C.pb_calc(
-                num_buckets - max_exact, 
-                num_buckets - max_exact, 
-                math.log(max_exact), 
-                1 / math.log(self.max_distance / max_exact), 
-                relative_position
-            )
-        
+        relative_postion_if_large = max_exact + (
+            torch.log(relative_position.float() / max_exact)
+            / math.log(max_distance / max_exact)
+            * (num_buckets - max_exact)
+        ).to(torch.long)
+        relative_postion_if_large = torch.min(
+            relative_postion_if_large, torch.full_like(relative_postion_if_large, num_buckets - 1)
+        )
+
         relative_buckets += torch.where(is_small, relative_position, relative_postion_if_large)
         return relative_buckets
 
     def compute_bias(self, query_length, key_length):
         """ Compute binned relative position bias """
-        device = self.embedding.weight.device
-        context_position = torch.arange(query_length, dtype=torch.long, device=device)[:, None]
-        memory_position = torch.arange(key_length, dtype=torch.long, device=device)[None, :]
+        context_position = torch.arange(query_length, dtype=torch.long, device="cuda")[:, None]
+        memory_position = torch.arange(key_length, dtype=torch.long, device="cuda")[None, :]
         relative_position = memory_position - context_position  # shape (query_length, key_length)
-        relative_position_bucket = self._relative_position_bucket(
-            relative_position,  # shape (query_length, key_length)
+        relative_position_bucket = self.relative_position_bucket(
+            relative_position,
+            bidirectional=self.bidirectional,
+            num_buckets=self.num_buckets,
+            max_distance=self.max_distance,
         )
-        relative_position_bucket = relative_position_bucket.to()
         values = self.embedding(relative_position_bucket)  # shape (query_length, key_length, num_heads)
         values = values.permute([2, 0, 1]).unsqueeze(0)  # shape (1, num_heads, query_length, key_length)
         return values
     
     def forward(self, query_length, key_length):
         return self.compute_bias(query_length, key_length)
+
+class TestNormalize(unittest.TestCase):
+    def test_position_bias(self):
+
+        for args in [
+            (32, 12, 128, False),
+            (32, 12, 128, True),
+            (32, 24, 256, True),
+            (128, 64, 128, True),
+            (16, 64, 256, False),
+            (16, 16, 512, True),
+        ]:
+            l1 = TorchRelativePositionEmbedding(*args)
+            l2 = layers.PositionBiasEmbedding(*args)
+
+            state_dict = {
+                'embedding.weight': torch.randn(args[0], args[1])
+            }
+            
+            l1.load_state_dict(state_dict)
+            l2.load_state_dict(state_dict)
+
+            l1 = l1.cuda()
+            l2 = l2.cuda()
+
+            a = l1(128, 128)
+            torch.cuda.synchronize()
+            b = l2(128, 128)
+            diff = (a - b).abs()
+            self.assertTrue(diff.max() < 1e-6)
+    

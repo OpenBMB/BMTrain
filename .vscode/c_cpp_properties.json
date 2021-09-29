@@ -3,14 +3,18 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/**",
-                "/mnt/sfs_turbo/chengjiali/anaconda3/lib/python3.8/site-packages/torch/include",
-                "/mnt/sfs_turbo/chengjiali/anaconda3/lib/python3.8/site-packages/torch/include/TH",
-                "/mnt/sfs_turbo/chengjiali/anaconda3/include/python3.8/"
+                "/root/igemm/venv/lib/python3.8/site-packages/torch/include",
+                "/root/igemm/venv/lib/python3.8/site-packages/torch/include/torch/csrc/api/include",
+                "/root/igemm/venv/lib/python3.8/site-packages/torch/include/TH",
+                "/root/igemm/venv/lib/python3.8/site-packages/torch/include/THC",
+                "/usr/local/cuda-11.1/targets/x86_64-linux/include/",
+                "/usr/include/python3.8",
+                "${workspaceFolder}/csrc/common"
             ],
-            "defines": [],
+            "defines": [
+            ],
             "compilerPath": "/usr/bin/gcc",
-            "cStandard": "gnu11",
+            "cStandard": "gnu17",
             "cppStandard": "gnu++14",
             "intelliSenseMode": "linux-gcc-x64"
         }

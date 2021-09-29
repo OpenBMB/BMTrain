@@ -1,5 +1,5 @@
 #include <torch/extension.h>
-#include "healper.h"
+#include "helper.h"
 #include <vector>
 #include <cstdio>
 #include <c10/cuda/CUDAGuard.h>
@@ -19,6 +19,7 @@
 void LtIgemm(cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t *A, int64_t stride_a, const int8_t *B, int64_t stride_b, int32_t *C, int64_t stride_c, int32_t num_batches);
 void* create_cublaslt_handle();
 void scale_2dim(torch::Tensor x, torch::Tensor scale_1, torch::Tensor scale_2, torch::Tensor out);
+void round_to_int8(torch::Tensor x, torch::Tensor scale, torch::Tensor out);
 
 torch::Tensor i8linear_scale(
         torch::Tensor x,
@@ -98,8 +99,15 @@ torch::Tensor i8linear_forward(
 }
 
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("forward", &i8linear_forward, "IGEMM forward (CUDA)");
-    m.def("create_handle", &create_cublaslt_handle, "create cublasLt handle");
-    m.def("scale_2d", &i8linear_scale, "scale in two dimensions");
+torch::Tensor round_scale(torch::Tensor x, torch::Tensor scale) {
+    CHECK_CUDA(x);
+    CHECK_CUDA(scale);
+    AT_ASSERTM( (x.device().index() == scale.device().index()), "x and scale not on the same device" );
+    torch::Tensor out = torch::empty_like(x, torch::TensorOptions().dtype(torch::kInt8).device(x.device()));
+
+    torch::Tensor viewd_out = out.view(-1);
+    torch::Tensor viewd_x = x.view(-1);
+    torch::Tensor viewd_scale = scale.broadcast_to(x.sizes()).view(-1);
+    round_to_int8(viewd_x, viewd_scale, viewd_out);
+    return out;
 }
