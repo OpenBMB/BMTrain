@@ -1,5 +1,6 @@
-#include "helper.h"
-#include "reduce.cuh"
+#include "common/helper.h"
+#include "common/reduce.cuh"
+#include "ops/layernorm.h"
 
 namespace {
 
@@ -134,8 +135,8 @@ __global__ void layernorm_backward_kernel(
 template<typename scalar_t>
 void layernorm_forward_launcher(
     int32_t batch, int32_t n,
-    const __restrict__ scalar_t *mat, 
-    __restrict__ scalar_t *out,
+    const scalar_t *mat, 
+    scalar_t *out,
     bool rd_mean,
     float eps,
     cudaStream_t stream
@@ -154,12 +155,19 @@ void layernorm_forward_launcher(
     }
 }
 
+void layernorm_forward(int32_t batch, int32_t n, const half *mat, half *out, bool rd_mean, float eps, cudaStream_t stream) {
+    layernorm_forward_launcher<half>(batch, n, mat, out, rd_mean, eps, stream);
+}
+void layernorm_forward(int32_t batch, int32_t n, const float *mat, float *out, bool rd_mean, float eps, cudaStream_t stream) {
+    layernorm_forward_launcher<float>(batch, n, mat, out, rd_mean, eps, stream);
+}
+
 template<typename scalar_t>
 void layernorm_backward_launcher(
     int32_t batch, int32_t n,
-    const __restrict__ scalar_t *x,         // b, n
-    const __restrict__ scalar_t *grad_in,   // b, n
-    __restrict__ scalar_t *grad_out,        // b, n
+    const scalar_t *x,         // b, n
+    const scalar_t *grad_in,   // b, n
+    scalar_t *grad_out,        // b, n
     bool rd_mean,
     float eps,
     cudaStream_t stream
@@ -176,4 +184,20 @@ void layernorm_backward_launcher(
         );
     }
 
+}
+
+void layernorm_backward(
+    int32_t batch, int32_t n,
+    const half *x, const half *grad_in,
+    half *grad_out, bool rd_mean, float eps, cudaStream_t stream
+) {
+    layernorm_backward_launcher<half>(batch, n, x, grad_in, grad_out, rd_mean, eps, stream);
+}
+
+void layernorm_backward(
+    int32_t batch, int32_t n,
+    const float *x, const float *grad_in,
+    float *grad_out, bool rd_mean, float eps, cudaStream_t stream
+) {
+    layernorm_backward_launcher<float>(batch, n, x, grad_in, grad_out, rd_mean, eps, stream);
 }

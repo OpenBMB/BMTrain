@@ -1,5 +1,5 @@
-#include "helper.h"
-#include "reduce.cuh"
+#include "common/helper.h"
+#include "common/reduce.cuh"
 
 namespace {
 template<typename scalar_t>

@@ -9,10 +9,9 @@
                 "/root/igemm/venv/lib/python3.8/site-packages/torch/include/THC",
                 "/usr/local/cuda-11.1/targets/x86_64-linux/include/",
                 "/usr/include/python3.8",
-                "${workspaceFolder}/csrc/common"
+                "${workspaceFolder}/csrc/includes"
             ],
-            "defines": [
-            ],
+            "defines": [],
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "gnu17",
             "cppStandard": "gnu++14",

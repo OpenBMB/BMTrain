@@ -1,6 +1,6 @@
-#include "helper.h"
-#include <cublasLt.h>
-#include "reduce.cuh"
+#include "common/helper.h"
+#include "common/reduce.cuh"
+#include "ops/gemm.h"
 
 namespace {
 template<typename scalar_t>
@@ -67,30 +67,15 @@ __global__ void calc_scale_kernel(
 
 }
 
-struct GemmMatrixContext {
-    cublasLtMatrixLayout_t layout, layout_transform;
-    cublasLtMatrixTransformDesc_t transform;
-    void *buffer;
-};
-
-struct GemmContext {
-    cublasLtHandle_t handle;
-    cublasLtMatmulAlgo_t algo;
-    cublasLtMatmulDesc_t matmul_desc;
-    GemmMatrixContext A, B, C;
-    void *workspace;
-    size_t workspace_size;
-};
 
 void bmm_i8_kernel(
     GemmContext ctx,
-    int32_t batch, int n, int m, int k,
+    int32_t batch_size,
     const int8_t *A,
-    int64_t stride_a,
+    bool cast_A,
     const int8_t *B,
-    int64_t stride_b,
+    bool cast_B,
     int32_t *C,
-    int64_t stride_c,
     cudaStream_t stream
 ) {
     cublasLtMatrixLayout_t layout_A, layout_B, layout_C;
@@ -100,7 +85,7 @@ void bmm_i8_kernel(
     int32_t batch_count_1 = 1;
 
     if (ctx.A.transform != NULL) {
-        if (stride_a == 0) {
+        if (cast_A) {
             checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
                 ctx.A.layout,
                 CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
@@ -117,14 +102,14 @@ void bmm_i8_kernel(
             checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
                 ctx.A.layout,
                 CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                &batch,
-                sizeof(batch)
+                &batch_size,
+                sizeof(batch_size)
             ));
             checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
                 ctx.A.layout_transform,
                 CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                &batch,
-                sizeof(batch)
+                &batch_size,
+                sizeof(batch_size)
             ));
         }
         checkCublasStatus(cublasLtMatrixTransform(
@@ -148,7 +133,7 @@ void bmm_i8_kernel(
     }
     
     if (ctx.B.transform != NULL) {
-        if (stride_b == 0) {
+        if (cast_B == 0) {
             checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
                 ctx.B.layout,
                 CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
@@ -165,14 +150,14 @@ void bmm_i8_kernel(
             checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
                 ctx.B.layout,
                 CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                &batch,
-                sizeof(batch)
+                &batch_size,
+                sizeof(batch_size)
             ));
             checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
                 ctx.B.layout_transform,
                 CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                &batch,
-                sizeof(batch)
+                &batch_size,
+                sizeof(batch_size)
             ));
         }
         checkCublasStatus(cublasLtMatrixTransform(
@@ -206,20 +191,20 @@ void bmm_i8_kernel(
     checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
         layout_A,
         CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-        &batch,
-        sizeof(batch)
+        &batch_size,
+        sizeof(batch_size)
     ));
     checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
         layout_B,
         CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-        &batch,
-        sizeof(batch)
+        &batch_size,
+        sizeof(batch_size)
     ));
     checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
         layout_C,
         CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-        &batch,
-        sizeof(batch)
+        &batch_size,
+        sizeof(batch_size)
     ));
 
 
@@ -239,7 +224,7 @@ void bmm_i8_kernel(
             layout_C,
             buffer_C,
             layout_C,
-            &ctx.algo,
+            NULL, // &ctx.algo,
             ctx.workspace,
             ctx.workspace_size,
             stream
@@ -263,37 +248,35 @@ void bmm_i8_kernel(
     }
 }
 
-void bmm_f16_kernel(
+template<typename sclar_t>
+void bmm_fp_kernel(
     GemmContext ctx,
-    int32_t batch, int n, int m, int k,
-    const __half *A,
-    int64_t stride_a,
-    const __half *B,
-    int64_t stride_b,
-    __half *C,
-    int64_t stride_c,
+    int32_t batch_size,
+    const sclar_t *A,
+    const sclar_t *B,
+    sclar_t *C,
     cudaStream_t stream
 ) {
 
-    __half alpha = 1, beta = 0;
+    sclar_t alpha = 1, beta = 0;
 
     checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
         ctx.A.layout,
         CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-        &batch,
-        sizeof(batch)
+        &batch_size,
+        sizeof(batch_size)
     ));
     checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
         ctx.B.layout,
         CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-        &batch,
-        sizeof(batch)
+        &batch_size,
+        sizeof(batch_size)
     ));
     checkCublasStatus(cublasLtMatrixLayoutSetAttribute(
         ctx.C.layout,
         CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-        &batch,
-        sizeof(batch)
+        &batch_size,
+        sizeof(batch_size)
     ));
     checkCublasStatus(cublasLtMatmul(
         ctx.handle,
@@ -308,12 +291,36 @@ void bmm_f16_kernel(
         ctx.C.layout,
         C,
         ctx.C.layout,
-        &ctx.algo,
+        NULL,   // &ctx.algo
         ctx.workspace,
         ctx.workspace_size,
         stream
     ));
 }
+
+void bmm_f16_kernel(
+    GemmContext ctx,
+    int32_t batch_size,
+    const half *A,
+    const half *B,
+    half *C,
+    cudaStream_t stream
+) {
+    bmm_fp_kernel<half>(ctx, batch_size, A, B, C, stream);
+}
+
+void bmm_f32_kernel(
+    GemmContext ctx,
+    int32_t batch_size,
+    const float *A,
+    const float *B,
+    float *C,
+    cudaStream_t stream
+) {
+    bmm_fp_kernel<float>(ctx, batch_size, A, B, C, stream);
+}
+
+
 
 template<typename scalar_t>
 void round_i8_launcher(
@@ -333,6 +340,9 @@ void round_i8_launcher(
         out
     );
 }
+
+void round_scale_i8(int batch, int n, int m, const float *mat, const float *scale, int8_t *out, cudaStream_t stream) { round_i8_launcher<float>(batch, n, m, mat, scale, out, stream); }
+void round_scale_i8(int batch, int n, int m, const half *mat, const half *scale, int8_t *out, cudaStream_t stream) { round_i8_launcher<half>(batch, n, m, mat, scale, out, stream); }
 
 template<typename scalar_t>
 void scale_i32_launcher(
@@ -387,6 +397,13 @@ void scale_i32_launcher(
     }
 }
 
+void scale_i32_f16(int batch, int n, int m, const int32_t *mat, const half *scale_x, const half *scale_y, half *out, bool broadcast_x, bool broadcast_y, cudaStream_t stream) {
+    scale_i32_launcher<half>(batch, n, m, mat, scale_x, scale_y, out, broadcast_x, broadcast_y, stream);
+}
+void scale_i32_f32(int batch, int n, int m, const int32_t *mat, const float *scale_x, const float *scale_y, float *out, bool broadcast_x, bool broadcast_y, cudaStream_t stream) {
+    scale_i32_launcher<float>(batch, n, m, mat, scale_x, scale_y, out, broadcast_x, broadcast_y, stream);
+}
+
 template<typename scalar_t>
 void calc_scale_launcher(
     int batch, int n, int m,
@@ -402,4 +419,12 @@ void calc_scale_launcher(
         mat,
         out
     );
+}
+
+void calc_scale_f16(int batch, int n, int m, const half *mat, half *out, cudaStream_t stream) {
+    calc_scale_launcher<half>(batch, n, m, mat, out, stream);
+}
+
+void calc_scale_f32(int batch, int n, int m, const float *mat, float *out, cudaStream_t stream) {
+    calc_scale_launcher<float>(batch, n, m, mat, out, stream);
 }
