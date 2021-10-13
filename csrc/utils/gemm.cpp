@@ -80,6 +80,7 @@ GemmContext create_gemm_context_i8(
         ));
     }
     ctx.workspace = NULL; ctx.workspace_size = 0;
+    return ctx;
 }
 
 
@@ -153,6 +154,7 @@ GemmContext create_gemm_context_fp(
         ));
     }
     ctx.workspace = NULL; ctx.workspace_size = 0;
+    return ctx;
 }
 
 void release_matrix(GemmMatrixContext mat) {

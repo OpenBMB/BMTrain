@@ -3,6 +3,9 @@
 #include <cuda_runtime.h>
 #include <cstdint>
 #include <stdexcept>
+#include <cassert>
+
+const int32_t WARP_SZ = 32;
 
 inline void checkCudaStatus(cudaError_t status) {
     if (status != cudaSuccess) {

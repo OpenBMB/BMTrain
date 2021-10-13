@@ -23,13 +23,16 @@ void bmm_f32_kernel(GemmContext ctx, int32_t batch_size, const float *A, const f
 
 void round_scale_i8(int batch, int n, int m, const float *mat, const float *scale, int8_t *out, cudaStream_t stream);
 void round_scale_i8(int batch, int n, int m, const half *mat, const half *scale, int8_t *out, cudaStream_t stream);
+void round_scale_i8_transpose(int batch, int n, int m, const float *mat, const float *scale, int8_t *out, cudaStream_t stream);
+void round_scale_i8_transpose(int batch, int n, int m, const half *mat, const half *scale, int8_t *out, cudaStream_t stream);
 
-void scale_i32_f16(int batch, int n, int m, const int32_t *mat, const half *scale_x, const half *scale_y, half *out, bool broadcast_x, bool broadcast_y, cudaStream_t stream);
-void scale_i32_f32(int batch, int n, int m, const int32_t *mat, const float *scale_x, const float *scale_y, float *out, bool broadcast_x, bool broadcast_y, cudaStream_t stream);
+void scale_i32(int batch, int n, int m, const int32_t *mat, const half *scale_x, const half *scale_y, half *out, bool broadcast_x, bool broadcast_y, cudaStream_t stream);
+void scale_i32(int batch, int n, int m, const int32_t *mat, const float *scale_x, const float *scale_y, float *out, bool broadcast_x, bool broadcast_y, cudaStream_t stream);
 
-void calc_scale_f16(int batch, int n, int m, const half *mat, half *out, cudaStream_t stream);
-void calc_scale_f32(int batch, int n, int m, const float *mat, float *out, cudaStream_t stream);
-
+void calc_scale(int batch, int n, int m, const half *mat, half *out, cudaStream_t stream);
+void calc_scale(int batch, int n, int m, const float *mat, float *out, cudaStream_t stream);
+void calc_scale_transpose(int batch, int n, int m, const half *mat, half *out, cudaStream_t stream);
+void calc_scale_transpose(int batch, int n, int m, const float *mat, float *out, cudaStream_t stream);
 
 void release_gemm_context(GemmContext ctx);
 GemmContext create_gemm_context_i8(

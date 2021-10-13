@@ -79,7 +79,7 @@ class TorchRelativePositionEmbedding(torch.nn.Module):
     def forward(self, query_length, key_length):
         return self.compute_bias(query_length, key_length)
 
-class TestNormalize(unittest.TestCase):
+class TestPositionBias(unittest.TestCase):
     def test_position_bias(self):
 
         for args in [

@@ -4,12 +4,18 @@ import torch
 
 
 @torch.jit.script
-def softmax(x):
+def softmax_(x):
     mx_x = torch.max(x, dim=-1, keepdim=True)[0]
     x = x - mx_x
     x = torch.exp(x)
     x = x / torch.sum(x, dim=-1, keepdim=True)
     return x
+
+def softmax(x):
+    old_type = x.dtype
+    x = x.to(torch.float32)
+    x = softmax_(x)
+    return x.to(old_type)
 
 class TestSoftmax(unittest.TestCase):
     def test_softmax(self):

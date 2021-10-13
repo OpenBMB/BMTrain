@@ -15,9 +15,9 @@ torch::Tensor layernorm_forward(
     auto ret = torch::empty_like(x);
 
     if (x.dtype() == torch::kFloat32) {
-        layernorm_forward(x_view.size(0), x_view.size(1), x.data<float>(), ret.data<float>(), rd_mean, eps, curr_stream.stream());
+        layernorm_forward(x_view.size(0), x_view.size(1), x.data_ptr<float>(), ret.data_ptr<float>(), rd_mean, eps, curr_stream.stream());
     } else {
-        layernorm_forward(x_view.size(0), x_view.size(1), x.data<half>(), ret.data<half>(), rd_mean, eps, curr_stream.stream());
+        layernorm_forward(x_view.size(0), x_view.size(1), (half *)x.data_ptr<at::Half>(), (half *)ret.data_ptr<at::Half>(), rd_mean, eps, curr_stream.stream());
     }
     return ret;
 }
@@ -39,9 +39,9 @@ torch::Tensor layernorm_backward(
     auto ret = torch::empty_like(x);
     auto x_view = x.view({-1, x.size(-1)});
     if (x.dtype() == torch::kFloat16) {
-        layernorm_backward(x_view.size(0), x_view.size(1), x.data<half>(), grad_.data<half>(), ret.data<half>(), rd_mean, eps, curr_stream.stream());
+        layernorm_backward(x_view.size(0), x_view.size(1), (half *)x.data_ptr<at::Half>(), (half *)grad_.data_ptr<at::Half>(), (half *)ret.data_ptr<at::Half>(), rd_mean, eps, curr_stream.stream());
     } else {
-        layernorm_backward(x_view.size(0), x_view.size(1), x.data<float>(), grad_.data<float>(), ret.data<float>(), rd_mean, eps, curr_stream.stream());
+        layernorm_backward(x_view.size(0), x_view.size(1), x.data_ptr<float>(), grad_.data_ptr<float>(), ret.data_ptr<float>(), rd_mean, eps, curr_stream.stream());
     }
     return ret;
 }

@@ -12,6 +12,8 @@ torch::Tensor bmm(
     AT_ASSERTM(B.is_cuda(), "B must be a CUDA tensor");
     AT_ASSERTM(A.stride(-1) == 1, "A must be contiguous");
     AT_ASSERTM(B.stride(-1) == 1, "B must be contiguous");
+    AT_ASSERTM(A.ndimension() == 3, "A must be 3D");
+    AT_ASSERTM(B.ndimension() == 3, "A must be 3D");
     AT_ASSERTM(A.device().index() == B.device().index(), "A and B must be on the same device");
     AT_ASSERTM(A.dtype() == B.dtype(), "A and B must have the same dtype");
     auto dtype = A.dtype();
@@ -26,10 +28,10 @@ torch::Tensor bmm(
         k = A.size(-1);
     }
     if (bT) {
-        AT_ASSERTM(B.size(-1) == k, "B.size(-1) must equal to k");
+        AT_ASSERTM(B.size(2) == k, "B.size(-1) must equal to k");
         n = B.size(-2);
     } else {
-        AT_ASSERTM(B.size(-2) == k, "B.size(-2) must equal to k");
+        AT_ASSERTM(B.size(1) == k, "B.size(-2) must equal to k");
         n = B.size(-1);
     }
 
@@ -38,66 +40,50 @@ torch::Tensor bmm(
     int32_t batch_size;
     int64_t stride_A, stride_B;
 
-    if (A.ndimension() == 2 && B.ndimension() == 2) {
-        batch_size = 1;
-        stride_A = 0;
-        stride_B = 0;
-    } 
-    else if (A.ndimension() == 3 && B.ndimension() == 2) {
-        batch_size = A.size(0);
-        stride_A = A.stride(0);
-        stride_B = 0;
-    }
-    else if (A.ndimension() == 2 && B.ndimension() == 3) {
+   
+    AT_ASSERTM(A.size(0) == B.size(0) || A.size(0) == 1 || B.size(0) == 1, "batch size mismatch");
+    if (A.size(0) == 1) {
         batch_size = B.size(0);
-        stride_A = 0;
-        stride_B = B.stride(0);
-    }
-    else if (A.ndimension() == 3 && B.ndimension() == 3) {
-        AT_ASSERTM(A.size(0) == B.size(0), "batch size mismatch");
+    } else {
         batch_size = A.size(0);
+    }
+    if (A.size(0) == 1) {
+        stride_A = 0;
+    } else {
         stride_A = A.stride(0);
+    }
+    if (B.size(0) == 1) {
+        stride_B = 0;
+    } else {
         stride_B = B.stride(0);
     }
-    else {
-        throw std::runtime_error("bmm: A and B must be 2D or 3D tensors");
-    }
-
+  
     torch::Tensor ret;
     auto curr_stream = at::cuda::getCurrentCUDAStream(device_idx);
-
-    cudaSetDevice(device_idx);
+    
     if (dtype == torch::kInt8) {
-        if (A.ndimension() == 2 && B.ndimension() == 2) {
-            ret = torch::empty({m, n}, torch::TensorOptions().dtype(torch::kInt32).device(device_idx));
-        } else {
-            ret = torch::empty({batch_size, m, n}, torch::TensorOptions().dtype(torch::kInt32).device(device_idx));
-        }
+        ret = torch::empty({batch_size, m, n}, torch::TensorOptions().dtype(torch::kInt32).device_index(device_idx));
         auto ctx = create_gemm_context_i8(
             n, m, k,
             bT, aT,
-            B.stride(-2), A.stride(-2), ret.stride(-2),
+            B.stride(1), A.stride(1), ret.stride(1),
             stride_B, stride_A, ret.stride(0)
         );
-        bmm_i8_kernel(ctx, batch_size, B.data<int8_t>(), B.ndimension() == 2, A.data<int8_t>(), A.ndimension() == 2, ret.data<int32_t>(), curr_stream.stream());
+        bmm_i8_kernel(ctx, batch_size, B.data_ptr<int8_t>(), stride_B == 0, A.data_ptr<int8_t>(), stride_A == 0, ret.data_ptr<int32_t>(), curr_stream.stream());
         release_gemm_context(ctx);
     } else {
-        if (A.ndimension() == 2 && B.ndimension() == 2) {
-            ret = torch::empty({m, n}, torch::TensorOptions().dtype(dtype).device(device_idx));
-        } else {
-            ret = torch::empty({batch_size, m, n}, torch::TensorOptions().dtype(dtype).device(device_idx));
-        }
+        ret = torch::empty({batch_size, m, n}, torch::TensorOptions().dtype(dtype).device_index(device_idx));
         auto ctx = create_gemm_context_fp(
             dtype == torch::kFloat16 ? CUDA_R_16F : CUDA_R_32F,
             n, m, k,
             bT, aT,
-            B.stride(-2), A.stride(-2), ret.stride(-2),
+            B.stride(1), A.stride(1), ret.stride(1),
             stride_B, stride_A, ret.stride(0)
         );
         if (dtype == torch::kFloat16) {
-            bmm_f16_kernel(ctx, batch_size, B.data<half>(), A.data<half>(), ret.data<half>(), curr_stream.stream());
+            bmm_f16_kernel(ctx, batch_size, (half *)B.data_ptr<at::Half>(), (half *)A.data_ptr<at::Half>(), (half *)ret.data_ptr<at::Half>(), curr_stream.stream());
         } else {
-            bmm_f32_kernel(ctx, batch_size, B.data<float>(), A.data<float>(), ret.data<float>(), curr_stream.stream());
+            bmm_f32_kernel(ctx, batch_size, B.data_ptr<float>(), A.data_ptr<float>(), ret.data_ptr<float>(), curr_stream.stream());
         }
         release_gemm_context(ctx);
     }
@@ -106,6 +92,7 @@ torch::Tensor bmm(
 
 torch::Tensor round(
     const torch::Tensor &x,
+    bool transpose,
     const torch::Tensor &scale
 ) {
     CHECK_INPUT(x); CHECK_INPUT(scale);
@@ -115,18 +102,30 @@ torch::Tensor round(
     AT_ASSERTM(x.ndimension() == 3, "x must be a 3-dim tensor");
     AT_ASSERTM(scale.ndimension() == 2, "scale must be a 2-dim tensor");
     AT_ASSERTM(x.size(0) == scale.size(0), "x and scale size not matching");
-    AT_ASSERTM(x.size(1) == scale.size(1), "x and scale size not matching");
+    if (transpose) {
+        AT_ASSERTM(x.size(2) == scale.size(1), "x and scale size not matching");
+    } else {
+        AT_ASSERTM(x.size(1) == scale.size(1), "x and scale size not matching");
+    }
+    AT_ASSERTM(at::cuda::current_device() == x.device().index(), "x not on current device");
 
     int32_t device_idx = x.device().index();
     auto curr_stream = at::cuda::getCurrentCUDAStream(device_idx);
 
-    cudaSetDevice(device_idx);
-    auto ret = torch::empty_like(x, torch::TensorOptions().dtype(torch::kInt8).device(device_idx));
+    auto ret = torch::empty_like(x, torch::TensorOptions().dtype(torch::kInt8).device_index(device_idx));
 
     if (x.dtype() == torch::kFloat16) {
-        round_scale_i8(x.size(0), x.size(1), x.size(2), x.data<half>(), scale.data<half>(), ret.data<int8_t>(), curr_stream.stream());
+        if (transpose) {
+            round_scale_i8_transpose(x.size(0), x.size(1), x.size(2), (half *)x.data_ptr<at::Half>(), (half *)scale.data_ptr<at::Half>(), ret.data_ptr<int8_t>(), curr_stream.stream());
+        } else {
+            round_scale_i8(x.size(0), x.size(1), x.size(2), (half *)x.data_ptr<at::Half>(), (half *)scale.data_ptr<at::Half>(), ret.data_ptr<int8_t>(), curr_stream.stream());
+        }
     } else {
-        round_scale_i8(x.size(0), x.size(1), x.size(2), x.data<float>(), scale.data<float>(), ret.data<int8_t>(), curr_stream.stream());
+        if (transpose) {
+            round_scale_i8_transpose(x.size(0), x.size(1), x.size(2), x.data_ptr<float>(), scale.data_ptr<float>(), ret.data_ptr<int8_t>(), curr_stream.stream());
+        } else {
+            round_scale_i8(x.size(0), x.size(1), x.size(2), x.data_ptr<float>(), scale.data_ptr<float>(), ret.data_ptr<int8_t>(), curr_stream.stream());
+        }
     }
     return ret;
 }
@@ -152,7 +151,7 @@ torch::Tensor scale(
     int32_t device_idx = x.device().index();
     auto curr_stream = at::cuda::getCurrentCUDAStream(device_idx);
 
-    auto ret = torch::empty_like(x, torch::TensorOptions().dtype(dtype).device(device_idx));
+    auto ret = torch::empty_like(x, torch::TensorOptions().dtype(dtype).device_index(device_idx));
 
     bool broad_cast_1 = scale_1.size(0) == 1;
     bool broad_cast_2 = scale_2.size(0) == 1;
@@ -160,15 +159,50 @@ torch::Tensor scale(
     AT_ASSERTM(broad_cast_2 || x.size(0) == scale_2.size(0), "x and scale_2 size not matching");
 
     if (dtype == torch::kFloat16) {
-        scale_i32_f16(
-            x.size(0), x.size(1), x.size(2), x.data<int32_t>(), scale_1.data<half>(), scale_2.data<half>(), 
-            ret.data<half>(), broad_cast_1, broad_cast_2, curr_stream.stream()
+        scale_i32(
+            x.size(0), x.size(1), x.size(2), x.data_ptr<int32_t>(), (half *)scale_1.data_ptr<at::Half>(), (half *)scale_2.data_ptr<at::Half>(), 
+            (half *)ret.data_ptr<at::Half>(), broad_cast_1, broad_cast_2, curr_stream.stream()
         );
     } else {
-        scale_i32_f32(
-            x.size(0), x.size(1), x.size(2), x.data<int32_t>(), scale_1.data<float>(), scale_2.data<float>(), 
-            ret.data<float>(), broad_cast_1, broad_cast_2, curr_stream.stream()
+        scale_i32(
+            x.size(0), x.size(1), x.size(2), x.data_ptr<int32_t>(), scale_1.data_ptr<float>(), scale_2.data_ptr<float>(), 
+            ret.data_ptr<float>(), broad_cast_1, broad_cast_2, curr_stream.stream()
         );
+    }
+    return ret;
+}
+
+torch::Tensor calc_scale(
+    const torch::Tensor &x,  // b, n, m
+    bool transpose
+) {
+    CHECK_INPUT(x);
+    AT_ASSERTM(x.dtype() == torch::kFloat16 || x.dtype() == torch::kFloat32, "round not support dtype");
+    AT_ASSERTM(x.ndimension() == 3, "x must be a 3-dim tensor");
+    AT_ASSERTM(at::cuda::current_device() == x.device().index(), "x not on current device");
+
+    int32_t device_idx = x.device().index();
+    auto curr_stream = at::cuda::getCurrentCUDAStream(device_idx);
+
+    torch::Tensor ret;
+    if (transpose) {
+        ret = torch::empty({x.size(0), x.size(2)}, torch::TensorOptions().dtype(x.dtype()).device_index(device_idx));
+    } else {
+        ret = torch::empty({x.size(0), x.size(1)}, torch::TensorOptions().dtype(x.dtype()).device_index(device_idx));
+    }
+
+    if (x.dtype() == torch::kFloat16) {
+        if (transpose) {
+            calc_scale_transpose(x.size(0), x.size(1), x.size(2), (half *)x.data_ptr<at::Half>(), (half *)ret.data_ptr<at::Half>(), curr_stream.stream());
+        } else {
+            calc_scale(x.size(0), x.size(1), x.size(2), (half *)x.data_ptr<at::Half>(), (half *)ret.data_ptr<at::Half>(), curr_stream.stream());
+        }
+    } else {
+        if (transpose) {
+            calc_scale_transpose(x.size(0), x.size(1), x.size(2), x.data_ptr<float>(), ret.data_ptr<float>(), curr_stream.stream());
+        } else {
+            calc_scale(x.size(0), x.size(1), x.size(2), x.data_ptr<float>(), ret.data_ptr<float>(), curr_stream.stream());
+        }
     }
     return ret;
 }
