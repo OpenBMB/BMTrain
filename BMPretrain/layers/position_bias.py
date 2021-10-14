@@ -1,6 +1,5 @@
 import torch
 import BMPretrain._c as C
-import math
 
 class PositionBiasEmbedding(torch.nn.Module):
     """Position bias embedding.

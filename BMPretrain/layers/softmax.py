@@ -13,3 +13,6 @@ class Softmax(torch.autograd.Function):
     def backward(ctx, grad_output):
         out = ctx.saved_tensors[0]
         return C.softmax_backward(out, grad_output)
+
+def softmax(x : torch.Tensor) -> torch.Tensor:
+    return Softmax.apply(x)

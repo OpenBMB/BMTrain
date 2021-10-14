@@ -35,7 +35,7 @@ class TestSoftmax(unittest.TestCase):
                 x1 = x.clone().requires_grad_()
                 x2 = x.requires_grad_()
                 y1 = softmax(x1)
-                y2 = layers.Softmax.apply(x2)
+                y2 = layers.softmax(x2)
                 diff = (y1 - y2).abs()
                 self.assertTrue(diff.max() < 5e-3)
 
