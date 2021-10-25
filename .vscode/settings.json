@@ -4,6 +4,8 @@
         "cstring": "cpp",
         "iostream": "cpp",
         "algorithm": "cpp",
-        "cmath": "cpp"
+        "cmath": "cpp",
+        "complex": "cpp",
+        "valarray": "cpp"
     }
 }

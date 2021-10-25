@@ -1,5 +1,5 @@
 #pragma once
-const int32_t WARP_SZ = 32;
+
 namespace {
 
 __inline__ __device__ float warpReduceSum(float x) {
@@ -9,7 +9,7 @@ __inline__ __device__ float warpReduceSum(float x) {
 }
 
 __inline__ __device__ float blockReduceSum(float x) {
-    static __shared__ float shared[WARP_SZ]; // blockDim.x / warpSize
+    static __shared__ float shared[32]; // blockDim.x / warpSize
     int lane = threadIdx.x % warpSize;
     int wid = threadIdx.x / warpSize;
     x = warpReduceSum(x);
@@ -27,7 +27,7 @@ __inline__ __device__ float warpReduceMax(float x) {
 }
 
 __inline__ __device__ float blockReduceMax(float x) {
-    static __shared__ float shared[WARP_SZ]; // blockDim.x / warpSize
+    static __shared__ float shared[32]; // blockDim.x / warpSize
     int lane = threadIdx.x % warpSize;
     int wid = threadIdx.x / warpSize;
     x = warpReduceMax(x);
@@ -37,30 +37,4 @@ __inline__ __device__ float blockReduceMax(float x) {
     if (wid == 0) x = warpReduceMax(x);
     return x;
 }
-
-__inline__ __device__ float transposeReduceSum(float x) {
-    static __shared__ float shared[WARP_SZ][WARP_SZ + 1];
-    shared[threadIdx.x][threadIdx.y] = x;
-    __syncthreads();
-    x = warpReduceSum(shared[threadIdx.y][threadIdx.x]);
-    if (threadIdx.x == 0) {
-        shared[threadIdx.y][WARP_SZ] = x;
-    }
-    __syncthreads();
-    return shared[threadIdx.x][WARP_SZ];
-}
-
-__inline__ __device__ float transposeReduceMax(float x) {
-    static __shared__ float shared[WARP_SZ][WARP_SZ + 1];
-    shared[threadIdx.x][threadIdx.y] = x;
-    __syncthreads();
-    x = warpReduceMax(shared[threadIdx.y][threadIdx.x]);
-    if (threadIdx.x == 0) {
-        shared[threadIdx.y][WARP_SZ] = x;
-    }
-    __syncthreads();
-    return shared[threadIdx.x][WARP_SZ];
-}
-
-
 }
