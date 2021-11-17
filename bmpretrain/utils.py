@@ -1,7 +1,7 @@
 import sys
 from typing import Any, Dict
-import torch.distributed as dist
-
+from .global_var import config
+from .synchronize import synchronize
 ALIGN = 4
 ROW_WIDTH = 60
 
@@ -38,3 +38,6 @@ def print_block(title : str, content : str, file=sys.stdout):
     print("=" * left_title + " " + title + " " + "=" * right_title, file=file)
     print(content, file=file)
     
+def print_rank(*args, rank=0, **kwargs):
+    if config["rank"] == rank:
+        print(*args, **kwargs)

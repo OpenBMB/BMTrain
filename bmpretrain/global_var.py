@@ -9,7 +9,14 @@ class ConfigMap(TypedDict):
     calc_stream : torch.cuda.Stream
     load_stream : torch.cuda.Stream
     load_event : torch.cuda.Event
+    barrier_stream : torch.cuda.Stream
 
     comm : 'NCCLCommunicator'
 
 config = ConfigMap()
+
+def rank():
+    return config['rank']
+
+def world_size():
+    return config['world_size']
