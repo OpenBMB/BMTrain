@@ -1,7 +1,7 @@
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 from .global_var import config
-from .synchronize import synchronize
+
 ALIGN = 4
 ROW_WIDTH = 60
 

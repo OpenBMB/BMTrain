@@ -1,3 +1,4 @@
+from typing import Callable, Iterable, Optional
 import torch
 from .utils import round_up, print_rank
 from .global_var import config
@@ -24,8 +25,12 @@ class DistributedParameter(torch.nn.Parameter):
     _original_shape : torch.Size
     _start_partition : int
     _end_partition : int
+    _init_method : Optional[Callable[['DistributedParameter'], None]]
 
-    def __new__(cls, data : torch.Tensor, requires_grad=True):
+    def __new__(cls,
+            data : torch.Tensor, 
+            requires_grad : bool = True, 
+            init_method : Optional[Callable[['DistributedParameter'], None]] = None):
         num_of_elements = data.numel()
 
         cuda_tensor = torch.tensor([], dtype=data.dtype, device="cuda") 
@@ -46,11 +51,16 @@ class DistributedParameter(torch.nn.Parameter):
         setattr(ret, "_original_shape", original_shape)
         setattr(ret, "_start_partition", start_of_partition)
         setattr(ret, "_end_partition", end_of_partition)
+        setattr(ret, "_init_method", init_method)
         return ret
 
     def gather(self) -> torch.Tensor:
-        return OpAllGather.apply(self)
-    
+        with torch.cuda.stream(config['load_stream']):
+            output_tensor = OpAllGather.apply(self)
+        current_stream = torch.cuda.current_stream()
+        output_tensor.record_stream( current_stream )
+        current_stream.wait_stream(config['load_stream'])
+        return output_tensor
 
     def _copy_data(self, data : torch.Tensor):
         self.data.copy_(data.view(-1)[self._start_partition : self._end_partition])
@@ -61,36 +71,35 @@ class OpAllGather(torch.autograd.Function):
     def forward(ctx, value : DistributedParameter):
         assert isinstance(value, DistributedParameter)
 
-        current_stream = torch.cuda.current_stream()
-        with torch.cuda.stream(config['load_stream']):
-            partition_size = value.storage().size()
-            global_size = partition_size * config['world_size']
+        partition_size = value.storage().size()
+        global_size = partition_size * config['world_size']
 
-            storage = value.storage_type()(global_size)
-            
-            nccl.allGather(
-                value.storage(),
-                storage,
-                config['comm']
-            )
+        storage = value.storage_type()(global_size)
+        
+        nccl.allGather(
+            value.storage(),
+            storage,
+            config['comm']
+        )
 
-            output_tensor = torch.tensor([], dtype=value.dtype, device="cuda")
-            output_tensor.set_(storage, 0, value._original_shape)
-        output_tensor.record_stream( current_stream )
-        current_stream.wait_stream(config['load_stream'])
+        output_tensor = torch.tensor([], dtype=value.dtype, device="cuda")
+        output_tensor.set_(storage, 0, value._original_shape)
+    
         ctx.partition_size = partition_size
         ctx.tensor_size = value.size(0)
         return output_tensor
     
     @staticmethod
     def backward(ctx, grad_output : torch.Tensor):
+        if not grad_output.is_contiguous():
+            grad_output = grad_output.contiguous()
+
         grad_storage = grad_output.storage_type()(ctx.partition_size)
         grad_output_storage = grad_output.storage()
         if grad_output_storage.size() == ctx.partition_size * config['world_size']:
             pass
         else:
             grad_output_storage.resize_(ctx.partition_size * config['world_size'])
-        # use default stream here because pytorch backward uses default stream
         nccl.reduceScatter(
             grad_output_storage,
             grad_storage,
@@ -100,4 +109,30 @@ class OpAllGather(torch.autograd.Function):
         grad_tensor = torch.tensor([], dtype=grad_output.dtype, device="cuda")
         grad_tensor.set_(grad_storage, 0, (ctx.tensor_size,))
         return grad_tensor
-        
+
+class ParameterInitializer:
+    def __init__(self, func : Callable, *args, **kwargs) -> None:
+        self.func = func
+        self._args = args
+        self._kwargs = kwargs
+    
+    def __call__(self, param : DistributedParameter):
+        self.func(param, *self._args, **self._kwargs)
+
+def init_parameters(params : Iterable[DistributedParameter]):
+    for param in params:
+        if not isinstance(param, DistributedParameter):
+            continue
+        if param._init_method is None:
+            continue
+        with torch.no_grad():
+            partition_size = param.storage().size()
+            global_size = partition_size * config['world_size']
+            
+            tmp_storage = param.storage_type()(global_size)
+            tmp_tensor = torch.tensor([], dtype=param.dtype, device="cuda")
+            tmp_tensor.set_(tmp_storage, 0, param._original_shape)
+
+            param._init_method(tmp_tensor)
+
+            param.storage().copy_(tmp_storage[partition_size * config['rank'] : partition_size * (config['rank'] + 1)])

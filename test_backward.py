@@ -24,7 +24,7 @@ class TestMLP(bmpretrain.DistributedModule):
         super().__init__()
 
         self.mlp = torch.nn.ModuleList([
-            DistributedLinear(4096, 4096) for _ in range(16)
+            DistributedLinear(8, 8) for _ in range(16)
         ])
     
     @bmpretrain.checkpoint
@@ -53,11 +53,11 @@ def main():
     state = model.state_dict()
     for kw, param in state.items():
         torch.nn.init.normal_(param, std=0.02)
-    model.load_state_dict(state)
+    model.load_state_dict(state)    # split parameters automatically
     print_rank("Model after loading state dict\n", torch.cuda.memory_summary())
     
     for i in range(bmpretrain.world_size()):
-        v = torch.randn(32, 512, 4096, dtype=torch.float, device="cuda")
+        v = torch.randn(4, 8, dtype=torch.float, device="cuda")
         if i == bmpretrain.rank():
             raw_data = v
 
@@ -72,7 +72,7 @@ def main():
         
         loss.backward()
         optimizer.step()
-        bmpretrain.wait_optimizer()
+        bmpretrain.wait_optimizer() # loader stream wait for optimizer
 
     print_rank(torch.cuda.memory_summary())
     bmpretrain.synchronize()

@@ -2,7 +2,7 @@ import torch
 import random
 import torch.distributed as dist
 import os
-from .utils import print_dict, print_rank
+from .utils import print_dict
 from .global_var import config
 from . import nccl
 

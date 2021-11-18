@@ -5,6 +5,10 @@ setup(
     name='bmpretrain',
     version='0.0.1',
     packages=find_packages(),
+    install_requires=[
+        "torch>=1.10",
+        "cpm_kernels>=1.0.3"
+    ],
     ext_modules=[
         CUDAExtension('bmpretrain.nccl._C', [
             'csrc/nccl.cpp',

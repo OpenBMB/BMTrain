@@ -22,7 +22,7 @@ def sum_loss(loss : torch.Tensor):
     nccl.allReduce(
         loss.storage(),
         ret.storage(),
-        'sum',
+        'avg',
         config['comm']
     )
     return ret
