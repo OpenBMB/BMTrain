@@ -7,7 +7,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         "torch>=1.10",
-        "cpm_kernels>=1.0.3"
+        "cpm_kernels>=1.0.7"
     ],
     ext_modules=[
         CUDAExtension('bmpretrain.nccl._C', [
