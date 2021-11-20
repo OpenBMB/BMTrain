@@ -1,7 +1,5 @@
 from typing import Dict, Iterable
 
-from bmpretrain.utils import print_rank
-
 from .global_var import config
 import torch
 from . import nccl

@@ -1,6 +1,5 @@
 from typing import Optional
 import torch
-import bmpretrain as bmp
 import cpm_kernels.torch as ct
 
 from .attention import Attention

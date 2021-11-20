@@ -2,7 +2,6 @@ import torch
 from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 from functools import wraps
-# from torch.utils.checkpoint import CheckpointFunction
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
