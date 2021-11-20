@@ -1,5 +1,7 @@
 from typing import Dict, Iterable
 
+from bmpretrain.utils import print_rank
+
 from .global_var import config
 import torch
 from . import nccl
@@ -423,7 +425,7 @@ class CheckpointBlock(torch.nn.Module):
         if strict:
             all_keys = set(all_keys)
             for key in state_dict.keys():
-                if key not in all_keys:
+                if key.startswith(prefix) and key not in all_keys:
                     unexpected_keys.append(key)
     
 
