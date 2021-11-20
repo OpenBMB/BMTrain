@@ -1,5 +1,6 @@
 import torch
 import bmpretrain as bmp
+from bmpretrain.checkpointing import checkpoint
 import layers
 from tqdm import tqdm
 
@@ -16,7 +17,6 @@ class T5(torch.nn.Module):
         self.num_enc = num_enc
         self.num_dec = num_dec
 
-        """
         self.enc_layers = bmp.TransformerBlockList([
             bmp.CheckpointBlock(
                 layers.TransformerEncoder(dim_model, num_heads, dim_head, dim_ff, eps, int8=int8, dtype=dtype)
@@ -31,17 +31,6 @@ class T5(torch.nn.Module):
             for _ in range(num_dec)
             
         ])
-        """
-
-        self.enc_layers = torch.nn.ModuleList([
-            layers.TransformerEncoder(dim_model, num_heads, dim_head, dim_ff, eps, int8=int8, dtype=dtype)
-                for _ in range(num_enc)
-        ])
-
-        self.dec_layers = torch.nn.ModuleList([
-            layers.TransformerDecoder(dim_model, num_heads, dim_head, dim_ff, eps, int8=int8, dtype=dtype)
-                for _ in range(num_dec)
-        ])
 
         self.layernorm_after_enc = layers.LayerNorm(dim_model, eps, bias=False, dtype=dtype)
         self.layernorm_after_dec = layers.LayerNorm(dim_model, eps, bias=False, dtype=dtype)
@@ -52,6 +41,7 @@ class T5(torch.nn.Module):
         self.position_bias_enc = layers.PositionEmbedding(num_heads, position_bias_num_buckets, position_bias_max_distance, bidirectional=True, dtype=dtype)
         self.position_bias_dec = layers.PositionEmbedding(num_heads, position_bias_num_buckets, position_bias_max_distance, bidirectional=False, dtype=dtype)
     
+
     def forward(self, 
             enc_input : torch.Tensor,       # (batch, seq_enc),
             enc_length : torch.Tensor,      # (batch),
@@ -96,19 +86,13 @@ class T5(torch.nn.Module):
         # (batch, dim_model, seq_enc)
         hidden_enc = self.input_embedding(enc_input)
 
-        # hidden_enc = self.enc_layers(hidden_enc, enc_mask, position_bias_enc)
-        for layer in self.enc_layers:
-            hidden_enc = layer(hidden_enc, enc_mask, position_bias_enc)
-            bmp.wait_loader()
+        hidden_enc = self.enc_layers(hidden_enc, enc_mask, position_bias_enc)    
             
         hidden_enc = self.layernorm_after_enc(hidden_enc)
 
         hidden_dec = self.input_embedding(dec_input)
         
-        # hidden_dec = self.dec_layers(hidden_dec, hidden_enc, dec_mask, cross_mask, position_bias_dec, None)
-        for layer in self.dec_layers:
-            hidden_dec = layer(hidden_dec, hidden_enc, dec_mask, cross_mask, position_bias_dec, None)
-            bmp.wait_loader()
+        hidden_dec = self.dec_layers(hidden_dec, hidden_enc, dec_mask, cross_mask, position_bias_dec, None)
  
         # (batch, dim_model, seq_dec)
         hidden_dec = self.layernorm_after_dec(hidden_dec)
