@@ -1,10 +1,12 @@
-from typing import Dict
+from typing import Dict, Iterable
+
+from bmpretrain.utils import print_rank
 
 from .global_var import config
 import torch
 from . import nccl
 from .synchronize import wait_loader, wait_reducer
-from .parameter import DistributedParameter
+from .parameter import DistributedParameter, OpAllGather
 
 def round_up(x, d):
     return (x + d - 1) // d * d
@@ -95,8 +97,15 @@ class CheckpointBlockContext:
         self._grad_buffer = {}
         self._param_tensor = {}
         self._grad_tensor = {}
+
+        self._need_release = False
     
-    def __enter__(self):
+    def enter(self):
+        if self.block._ready:
+            return
+        self.block._ready = True
+        self._need_release = True
+
         wait_loader()
         requires_grad = torch.is_grad_enabled()
         if requires_grad:
@@ -146,8 +155,16 @@ class CheckpointBlockContext:
             if requires_grad:
                 param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self._grad_buffer[storage_type], offset, shape)
     
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # reduce scatter gradients
+    
+    def __enter__(self):
+        self.enter()
+    
+    def exit(self):
+        if not self._need_release:
+            return
+        self._need_release = False
+        self.block._ready = False
+
         requires_grad = torch.is_grad_enabled()
         if requires_grad:
             for kw, val in self.block._storage_info.items():
@@ -189,6 +206,10 @@ class CheckpointBlockContext:
         self._param_tensor = {}
         self._grad_buffer = {}
         self._param_buffer = {}
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # reduce scatter gradients
+        self.exit()
 
 def storage_type_cuda(storage_type):
     STORAGE_MAP = {
@@ -230,7 +251,7 @@ class CheckpointBlock(torch.nn.Module):
         self._param_info = []
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
         self._storage_info = {}
-
+        self._ready = False
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
@@ -299,33 +320,37 @@ class CheckpointBlock(torch.nn.Module):
                 "storage_type": storage_type,
             })
 
-            if isinstance(param, DistributedParameter):
+            if isinstance(param, DistributedParameter) and param._init_method is not None:
                 # do not copy distributed parameters
                 pass
             else:
                 # copy values to buffer for normal parameter
                 storage_st = self._storage_info[storage_type]["begin"]
                 storage_end = self._storage_info[storage_type]["end"]
-                if param_st >= storage_end:
-                    continue
-                if param_end <= storage_st:
-                    continue
                 
                 # make parameter contiguous in storage
-                contiguous_param = param.contiguous()
                 
-                # copy offset in parameter storage
-                offset_st = max(storage_st - param_st, 0)
-                offset_end = min(storage_end - param_st, contiguous_param.numel())
-                assert offset_st < offset_end
+                if isinstance(param, DistributedParameter):
+                    with torch.no_grad():
+                        contiguous_param = OpAllGather.apply(param)
 
-                # copy to offset in buffer storage
-                to_offset_st = offset_st + param_st - storage_st
-                to_offset_end = offset_end + param_st - storage_st
-                
-                # copy to buffer
-                self._storage_params[storage_type].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
-                del contiguous_param
+                if not (param_st >= storage_end or param_end <= storage_st):
+                    # need copy parameter
+                    if not isinstance(param, DistributedParameter):
+                        contiguous_param = param.contiguous()
+                    
+                    # copy offset in parameter storage
+                    offset_st = max(storage_st - param_st, 0)
+                    offset_end = min(storage_end - param_st, contiguous_param.numel())
+                    assert offset_st < offset_end
+
+                    # copy to offset in buffer storage
+                    to_offset_st = offset_st + param_st - storage_st
+                    to_offset_end = offset_end + param_st - storage_st
+                    
+                    # copy to buffer
+                    self._storage_params[storage_type].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
+                    del contiguous_param
             
             # clear parameter data, but keep the dtype and device
             param.data = torch.tensor([], dtype=param.dtype, device=param.device)
@@ -441,4 +466,112 @@ class CheckpointBlock(torch.nn.Module):
                 # copy to buffer
                 self._storage_params[storage_type].storage()[to_offset_st: to_offset_end].copy_(tmp_tensor.storage()[offset_st: offset_end])
                 del tmp_tensor
+        
+class OpTransformerBlockList(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, self : 'TransformerBlockList', hidden_state, *args):
+        ctx.cuda_rng_state = torch.cuda.get_rng_state()
 
+        tensors = []
+        others = []
+        for arg in args:
+            if torch.is_tensor(arg):
+                tensors.append(arg)
+                others.append(None)
+            else:
+                tensors.append(None)
+                others.append(arg)
+    
+        ctx.nontensor_inputs = others
+        ctx.self = self
+        
+        layer_inputs = []
+        with torch.no_grad():
+            for i in range(len(self)):
+                layer_inputs.append(hidden_state)
+                block_ctx = CheckpointBlockContext(self._modules[str(i)])
+                # gather parameter on load stream
+                block_ctx.enter()
+                # call inner module directly
+                hidden_state = self._modules[str(i)]._module._call_impl(hidden_state, *args)
+                block_ctx.exit()
+        
+        
+        ctx.save_for_backward(*layer_inputs, *tensors)
+        return hidden_state
+
+    @staticmethod
+    def backward(ctx, grad_hidden_state : torch.Tensor):
+        if not torch.autograd._is_checkpoint_valid():
+            raise RuntimeError(
+                "Checkpointing is not compatible with .grad() or when an `inputs` parameter"
+                " is passed to .backward(). Please use .backward() and do not pass its `inputs`"
+                " argument.")
+
+        all_inputs = []
+        input_reqires_grad = []
+        
+        layer_inputs = ctx.saved_tensors[:len(ctx.self)]
+        save_args = ctx.saved_tensors[len(ctx.self):]
+        for tensor, other in zip(save_args, ctx.nontensor_inputs):
+            if tensor is None:
+                all_inputs.append(other)
+                input_reqires_grad.append(False)
+            else:
+                # detach for tensor inputs
+                input_reqires_grad.append( tensor.requires_grad )
+                nw_tensor = tensor.detach()
+                nw_tensor.requires_grad = tensor.requires_grad
+                all_inputs.append(nw_tensor)
+        
+        with torch.random.fork_rng(devices=[torch.cuda.current_device()], enabled=True):
+            torch.cuda.set_rng_state(ctx.cuda_rng_state)
+
+            with torch.enable_grad():
+                # overlap load and scatter here
+                prev_ctx = None
+                for i in list(range(len(ctx.self)))[::-1]:
+                    ipt = layer_inputs[i].detach().requires_grad_()
+                    block_ctx = CheckpointBlockContext(ctx.self._modules[str(i)])
+                    block_ctx.enter()
+                    if prev_ctx is not None:
+                        prev_ctx.exit()
+                        config["reduce_stream"].record_event(config["reduce_event"])
+                    prev_ctx = block_ctx
+                    output = ctx.self._modules[str(i)]._module._call_impl(ipt, *all_inputs)
+                    torch.autograd.backward(
+                        [output],
+                        [grad_hidden_state]
+                    )
+                    grad_hidden_state = ipt.grad
+                
+                if prev_ctx is not None:
+                    prev_ctx.exit()
+                    config["reduce_stream"].record_event(config["reduce_event"])
+
+        grads = []
+        for inp, requires_grad in zip(all_inputs, input_reqires_grad):
+            if requires_grad:
+                grads.append(inp.grad)
+            else:
+                grads.append(None)
+        return (None, grad_hidden_state) + tuple(grads)
+    
+class TransformerBlockList(torch.nn.Module):
+    _modules: Dict[str, CheckpointBlock]
+
+    def __init__(self, modules: Iterable[CheckpointBlock]) -> None:
+        super().__init__()
+        
+        self._modules = {}
+        for i, module in enumerate(modules):
+            if not isinstance(module, CheckpointBlock):
+                module = CheckpointBlock(module)
+            self._modules[str(i)] = module
+            self.add_module(str(i), module)
+
+    def __len__(self) -> int:
+        return len(self._modules)
+
+    def forward(self, hidden_state, *args):
+        return OpTransformerBlockList.apply(self, hidden_state, *args)

@@ -8,7 +8,7 @@ class LayerNorm(bmp.DistributedModule):
         super().__init__()
         self.eps = eps
         self.hidden_size = hidden_size
-        self.weight = bmp.DistributedParameter(torch.ones(hidden_size, dtype=dtype))
+        self.weight = bmp.DistributedParameter(torch.ones(hidden_size, dtype=dtype) * 0.1)
         self.bias = bmp.DistributedParameter(torch.zeros(hidden_size, dtype=dtype)) if bias else None
     
     def forward(self, x : torch.Tensor):
@@ -19,7 +19,7 @@ class LayerNorm(bmp.DistributedModule):
         Returns:
             out : (batch_size, hidden_size, seq_len)    fp16
         """
-        assert x.size(1) == self.weight.size(0)
+        assert x.size(1) == self.hidden_size
         
         if self.bias is not None:
             return  OpLayerNormMean.apply(x, self.eps, self.weight, self.bias)

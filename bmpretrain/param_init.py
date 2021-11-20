@@ -1,5 +1,8 @@
 from typing import Iterable
 import torch
+
+from bmpretrain.utils import print_rank
+
 from .block_layer import CheckpointBlock
 from .parameter import DistributedParameter
 from .global_var import config

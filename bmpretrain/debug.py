@@ -1,4 +1,4 @@
-
+import torch
 
 DEBUG_VARS = {}
 
@@ -8,6 +8,8 @@ def clear():
 
 def set(key, value):
     global DEBUG_VARS
+    if torch.is_tensor(value):
+        value = value.detach().cpu()
     DEBUG_VARS[key] = value
 
 def get(key):
