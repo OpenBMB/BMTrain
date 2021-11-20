@@ -122,12 +122,20 @@ void pyNCCLReduceScatter(
     checkNCCLStatus(ncclReduceScatter(
         reinterpret_cast<void*>(sendbuff),
         reinterpret_cast<void*>(recvbuff),
-        recvcount, 
+        recvcount,
         static_cast<ncclDataType_t>(datatype),
         static_cast<ncclRedOp_t>(op),
         reinterpret_cast<ncclComm_t>(comm), 
         reinterpret_cast<cudaStream_t>(stream)
     ));
+}
+
+void pyNCCLGroupStart() {
+    checkNCCLStatus(ncclGroupStart());
+}
+
+void pyNCCLGroupEnd() {
+    checkNCCLStatus(ncclGroupEnd());
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -139,4 +147,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("ncclBroadcast", &pyNCCLBroadcast, "nccl broadcast");
     m.def("ncclReduce", &pyNCCLReduce, "nccl reduce");
     m.def("ncclReduceScatter", &pyNCCLReduceScatter, "nccl reduce scatter");
+    m.def("ncclGroupStart", &pyNCCLGroupStart, "nccl group start");
+    m.def("ncclGroupEnd", &pyNCCLGroupEnd, "nccl group end");
 }

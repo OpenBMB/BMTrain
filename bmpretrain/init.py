@@ -26,8 +26,10 @@ def init_distributed(
     config["world_size"] = world_size
     config["calc_stream"] = torch.cuda.current_stream()
     config["load_stream"] = torch.cuda.Stream(priority=-1)
+    config["reduce_stream"] = torch.cuda.Stream(priority=-1)
     config['barrier_stream'] = torch.cuda.Stream()
     config["load_event"] = torch.cuda.Event()
+    config["reduce_event"] = torch.cuda.Event()
 
     torch.manual_seed(seed)
     random.seed(seed)

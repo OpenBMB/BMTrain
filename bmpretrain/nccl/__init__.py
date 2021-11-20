@@ -187,3 +187,8 @@ def reduceScatter(
         torch.cuda.current_stream().cuda_stream
     )
 
+def groupStart():
+    C.ncclGroupStart()
+
+def groupEnd():
+    C.ncclGroupEnd()

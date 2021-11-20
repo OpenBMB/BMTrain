@@ -26,6 +26,7 @@ class DistributedParameter(torch.nn.Parameter):
     _start_partition : int
     _end_partition : int
     _init_method : Optional[Callable[['DistributedParameter'], None]]
+    _in_checkpoint_block : bool
 
     def __new__(cls,
             data : torch.Tensor, 
@@ -52,6 +53,7 @@ class DistributedParameter(torch.nn.Parameter):
         setattr(ret, "_start_partition", start_of_partition)
         setattr(ret, "_end_partition", end_of_partition)
         setattr(ret, "_init_method", init_method)
+        setattr(ret, "_in_checkpoint_block", False)
         return ret
 
     def gather(self) -> torch.Tensor:
@@ -118,21 +120,3 @@ class ParameterInitializer:
     
     def __call__(self, param : DistributedParameter):
         self.func(param, *self._args, **self._kwargs)
-
-def init_parameters(params : Iterable[DistributedParameter]):
-    for param in params:
-        if not isinstance(param, DistributedParameter):
-            continue
-        if param._init_method is None:
-            continue
-        with torch.no_grad():
-            partition_size = param.storage().size()
-            global_size = partition_size * config['world_size']
-            
-            tmp_storage = param.storage_type()(global_size)
-            tmp_tensor = torch.tensor([], dtype=param.dtype, device="cuda")
-            tmp_tensor.set_(tmp_storage, 0, param._original_shape)
-
-            param._init_method(tmp_tensor)
-
-            param.storage().copy_(tmp_storage[partition_size * config['rank'] : partition_size * (config['rank'] + 1)])

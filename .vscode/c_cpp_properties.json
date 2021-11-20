@@ -3,7 +3,10 @@
         {
             "name": "Linux",
             "includePath": [
-                "venv/lib/**"
+                "venv/lib/**",
+                "csrc",
+                "/usr/include/python3.8/",
+                "/usr/local/cuda/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

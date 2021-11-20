@@ -144,3 +144,6 @@ cython_debug/
 bminference/version.py
 
 .DS_Store
+
+log
+*.qdrep

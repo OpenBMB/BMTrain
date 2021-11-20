@@ -3,7 +3,7 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension, include_pat
 print(find_packages())
 setup(
     name='bmpretrain',
-    version='0.0.1',
+    version='0.0.2',
     packages=find_packages(),
     install_requires=[
         "torch>=1.10",

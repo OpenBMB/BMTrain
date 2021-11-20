@@ -6,7 +6,8 @@ class DistributedModule(torch.nn.Module):
 
     def __getattr__(self, name: str):
         ret = super().__getattr__(name)
-        if isinstance(ret, DistributedParameter):
+        # gather distributed parameters if not in CheckpointBlock
+        if isinstance(ret, DistributedParameter) and not ret._in_checkpoint_block:
             return ret.gather()
         return ret
     
@@ -113,3 +114,4 @@ class DistributedModule(torch.nn.Module):
                     input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
+

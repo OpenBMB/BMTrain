@@ -17,13 +17,18 @@ class T5(torch.nn.Module):
         self.num_dec = num_dec
 
         self.enc_layers = torch.nn.ModuleList([
-            layers.TransformerEncoder(dim_model, num_heads, dim_head, dim_ff, eps, int8=int8, dtype=dtype)
+            bmp.CheckpointBlock(
+                layers.TransformerEncoder(dim_model, num_heads, dim_head, dim_ff, eps, int8=int8, dtype=dtype)
+            )
             for _ in range(num_enc)
         ])
 
         self.dec_layers = torch.nn.ModuleList([
-            layers.TransformerDecoder(dim_model, num_heads, dim_head, dim_ff, eps, int8=int8, dtype=dtype)
+            bmp.CheckpointBlock(
+                layers.TransformerDecoder(dim_model, num_heads, dim_head, dim_ff, eps, int8=int8, dtype=dtype)
+            )
             for _ in range(num_dec)
+            
         ])
 
         self.layernorm_after_enc = layers.LayerNorm(dim_model, eps, bias=False, dtype=dtype)
@@ -35,25 +40,6 @@ class T5(torch.nn.Module):
         self.position_bias_enc = layers.PositionEmbedding(num_heads, position_bias_num_buckets, position_bias_max_distance, bidirectional=True, dtype=dtype)
         self.position_bias_dec = layers.PositionEmbedding(num_heads, position_bias_num_buckets, position_bias_max_distance, bidirectional=False, dtype=dtype)
     
-    @bmp.checkpoint
-    def forward_encoder_layer(self, layer_id, hidden_enc, enc_mask, position_bias_enc):
-        return self.enc_layers[layer_id](
-                hidden_enc,
-                enc_mask,
-                position_bias_enc,
-            )
-    
-    @bmp.checkpoint
-    def forward_decoder_layer(self, layer_id, hidden_dec, hidden_enc, dec_mask, cross_mask, position_bias_dec):
-        return self.dec_layers[layer_id](
-                hidden_dec,
-                hidden_enc,
-                dec_mask,
-                cross_mask,
-                position_bias_dec,
-                None,   # no cross attention mask
-            )
-
     def forward(self, 
             enc_input : torch.Tensor,       # (batch, seq_enc),
             enc_length : torch.Tensor,      # (batch),
@@ -98,15 +84,14 @@ class T5(torch.nn.Module):
         # (batch, dim_model, seq_enc)
         hidden_enc = self.input_embedding(enc_input)
 
-        for i in range(self.num_enc):
-            hidden_enc = self.forward_encoder_layer(i, hidden_enc, enc_mask, position_bias_enc)
-            bmp.wait_loader()
+        for layer in self.enc_layers:
+            hidden_enc = layer(hidden_enc, enc_mask, position_bias_enc)
+            
         hidden_enc = self.layernorm_after_enc(hidden_enc)
 
         hidden_dec = self.input_embedding(dec_input)
-        for i in range(self.num_enc):
-            hidden_dec = self.forward_decoder_layer(i, hidden_dec, hidden_enc, dec_mask, cross_mask, position_bias_dec)
-            bmp.wait_loader()
+        for layer in self.dec_layers:
+            hidden_dec = layer(hidden_dec, hidden_enc, dec_mask, cross_mask, position_bias_dec, None)
  
         # (batch, dim_model, seq_dec)
         hidden_dec = self.layernorm_after_dec(hidden_dec)
@@ -124,23 +109,26 @@ def main():
         eps=1e-6, int8=True, dtype=torch.half
     )
 
-    bmp.init_parameters(model.parameters())
+    bmp.init_parameters(model)
     
     bmp.print_rank("Model mem\n", torch.cuda.memory_summary())
     bmp.synchronize()
 
     # data
-    batch_size = 4
-    enc_input = torch.randint(0, 26240, (batch_size, 512)).int().cuda()
-    enc_length = torch.randint(1, 512, (batch_size,)).int().cuda()
+    batch_size = 2
+    enc_len = 512
+    dec_len = 512
 
-    dec_input = torch.randint(0, 26240, (batch_size, 512)).int().cuda()
-    dec_length = torch.randint(1, 512, (batch_size,)).int().cuda()
+    enc_input = torch.randint(0, 26240, (batch_size, enc_len)).int().cuda()
+    enc_length = torch.randint(1, enc_len, (batch_size,)).int().cuda()
 
-    targets = torch.randint(0, 26240, (batch_size, 512)).long().cuda()
+    dec_input = torch.randint(0, 26240, (batch_size, dec_len)).int().cuda()
+    dec_length = torch.randint(1, dec_len, (batch_size,)).int().cuda()
+
+    targets = torch.randint(0, 26240, (batch_size, dec_len)).long().cuda()
     
     loss_func = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
 
     bmp.synchronize()
     for iterration in tqdm(range(100)):
@@ -155,9 +143,9 @@ def main():
 
         loss = loss * 1024  # loss scale
         loss.backward()
-        optimizer.step()
-        bmp.wait_optimizer()
-        param = model._modules['output_projection']._parameters['weight']
+        
+        # optimizer step
+        bmp.optimizer_step(optimizer)
 
 
 if __name__ == '__main__':
