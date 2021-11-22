@@ -1,5 +1,5 @@
 import sys
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 from .global_var import config
 
 ALIGN = 4
@@ -31,12 +31,13 @@ def print_dict(title : str, content : Dict[str, Any], file=sys.stdout):
     print_block(title, raw_content, file)
 
 
-def print_block(title : str, content : str, file=sys.stdout):
+def print_block(title : str, content : Optional[str] = None, file=sys.stdout):
     left_title = (ROW_WIDTH - len(title) - 2) // 2
     right_title = ROW_WIDTH - len(title) - 2 - left_title
     
     print("=" * left_title + " " + title + " " + "=" * right_title, file=file)
-    print(content, file=file)
+    if content is not None:
+        print(content, file=file)
     
 def print_rank(*args, rank=0, **kwargs):
     if config["rank"] == rank:

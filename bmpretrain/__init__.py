@@ -12,3 +12,5 @@ from .optimizer import optimizer_step
 
 from . import debug
 from .store import save, load
+
+from . import benchmark
