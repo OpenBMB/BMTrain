@@ -3,11 +3,11 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension, include_pat
 print(find_packages())
 setup(
     name='bmpretrain',
-    version='0.0.3',
+    version='0.0.4',
     packages=find_packages(),
     install_requires=[
         "torch>=1.10",
-        "cpm_kernels>=1.0.7",
+        "cpm_kernels>=1.0.8",
         "numpy"
     ],
     ext_modules=[

@@ -125,12 +125,13 @@ def main():
 
     dec_input = torch.randint(0, 26240, (batch_size, dec_len)).int().cuda()
     dec_length = torch.randint(1, dec_len, (batch_size,)).int().cuda()
+    dec_mask = torch.arange(dec_len, device="cuda")[None, :].repeat(batch_size, 1) < dec_length[:, None]
 
     targets = torch.randint(0, 26240, (batch_size, dec_len)).long().cuda()
     
     
-    loss_func = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
+    loss_func = torch.nn.CrossEntropyLoss(reduction="none")
+    optimizer = torch.optim.SGD(model.parameters(), lr=5e-5)
 
     bmp.synchronize()
     for iterration in tqdm(range(100)):
@@ -140,7 +141,14 @@ def main():
         logits = model(enc_input, enc_length, dec_input, dec_length)
         batch, seq_len, vocab_out_size = logits.size()
 
-        loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
+        bmp.print_rank("enc_length: ", enc_length)
+        bmp.print_rank("dec_length: ", dec_length)
+        bmp.print_rank("reuslt: ", logits.argmax(dim=-1))
+        bmp.print_rank("target: ", targets)
+        loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len)).view(batch, seq_len)
+        loss = torch.where(dec_mask, loss, torch.zeros_like(loss))
+        bmp.print_rank("loss: ", loss)
+        loss = loss.sum() / dec_mask.half().sum()
 
         bmp.print_rank("Iter %d, loss: " % iterration, bmp.sum_loss(loss).item())
 
@@ -149,7 +157,8 @@ def main():
         
         # optimizer step
         bmp.optimizer_step(optimizer)
-
+    
+    bmp.save(model, "checkpoint.pt")
 
 if __name__ == '__main__':
     main()
