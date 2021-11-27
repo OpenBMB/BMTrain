@@ -8,7 +8,7 @@ import torch
 def all_gather():
     current_stream = torch.cuda.current_stream()
     for shape in SHAPES:
-        global_size = round_up(shape, config['world_size'])
+        global_size = round_up(shape, config['world_size'] * 2)
         partition_size = global_size // config['world_size']
 
         partition_tensor = torch.empty( partition_size // 2, dtype=torch.half, device="cuda" )

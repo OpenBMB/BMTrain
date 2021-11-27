@@ -1,0 +1,9 @@
+venv
+dist
+build
+**/*.egg-info
+**/*.pt
+**/__pycache__
+.vscode
+log
+**/*.so
