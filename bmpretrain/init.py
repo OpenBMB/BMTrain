@@ -17,7 +17,7 @@ def init_distributed(
     local_size = int(os.environ["LOCAL_WORLD_SIZE"])
     master = os.environ["MASTER_ADDR"] + ":" + os.environ["MASTER_PORT"]
 
-    store = dist.TCPStore(os.environ["MASTER_ADDR"], int(os.environ["MASTER_PORT"]), world_size, is_master=(rank == 0), wait_for_workers=True)
+    store = dist.TCPStore(os.environ["MASTER_ADDR"], int(os.environ["MASTER_PORT"]) + 1, world_size, is_master=(rank == 0), wait_for_workers=True)
     torch.cuda.set_device(local_rank)
 
     config["local_rank"] = local_rank
