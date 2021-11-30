@@ -103,8 +103,8 @@ def main():
     bmp.init_distributed()
 
     model = T5(
-        num_enc=24, num_dec=24,
-        dim_model=4096, num_heads=64, dim_head=64, dim_ff=10240,
+        num_enc=8, num_dec=8,
+        dim_model=1024, num_heads=32, dim_head=32, dim_ff=2560,
         vocab_input_size=26240, vocab_output_size=26240,
         position_bias_num_buckets=32, position_bias_max_distance=128,
         eps=1e-6, int8=True, dtype=torch.half
@@ -131,7 +131,7 @@ def main():
     
     
     loss_func = torch.nn.CrossEntropyLoss(reduction="none")
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-5)
+    optimizer = bmp.optim.AdamOptimizer(model.parameters(), lr=5e-4)
 
     bmp.synchronize()
     for iterration in tqdm(range(1000)):
@@ -151,12 +151,10 @@ def main():
         loss = loss.sum() / dec_mask.half().sum()
 
         bmp.print_rank("Iter %d, loss: " % iterration, bmp.sum_loss(loss).item())
-
-        loss = loss * 1024 # loss scale
-        loss.backward()
         
         # optimizer step
-        bmp.optimizer_step(optimizer)
+        bmp.backward(loss, optimizer)
+    
     bmp.save(model, "checkpoint.pt")
 
 if __name__ == '__main__':

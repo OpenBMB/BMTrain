@@ -8,7 +8,7 @@ class LayerNorm(bmp.DistributedModule):
         super().__init__()
         self.eps = eps
         self.hidden_size = hidden_size
-        self.weight = bmp.DistributedParameter(torch.ones(hidden_size, dtype=dtype) * 0.1)
+        self.weight = bmp.DistributedParameter(torch.ones(hidden_size, dtype=dtype))
         self.bias = bmp.DistributedParameter(torch.zeros(hidden_size, dtype=dtype)) if bias else None
     
     def forward(self, x : torch.Tensor):

@@ -5,6 +5,7 @@ import cpm_kernels.torch as ct
 from .attention import Attention
 from .layernorm import LayerNorm
 from .feedforward import FeedForward
+import bmpretrain as bmp
 
 class TransformerEncoder(torch.nn.Module):
     def __init__(self, dim_model : int, num_heads : int, dim_head : int, dim_ff : int, eps : float, int8=True, dtype=torch.half):
@@ -32,6 +33,7 @@ class TransformerEncoder(torch.nn.Module):
         x = self.layernorm_before_attention(hidden_state)
         x = self.self_attention(x, x, mask, position_bias)
         hidden_state = ct.element_add(hidden_state, x)      # hidden_state = hidden_state + x
+        
 
         x = self.layernorm_before_ff(hidden_state)
         x = self.ff(x)

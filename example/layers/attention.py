@@ -2,16 +2,17 @@ from typing import Optional
 import torch
 import bmpretrain as bmp
 import cpm_kernels.torch as ct
+import math
 
 class Attention(bmp.DistributedModule):
     def __init__(self, dim_model : int, num_heads : int, dim_head : int, int8=True, dtype=torch.half):
         super().__init__()
 
-        self.project_q = bmp.DistributedParameter(torch.empty(num_heads * dim_head, dim_model, dtype=dtype), init_method=bmp.ParameterInitializer(torch.nn.init.normal_, mean=0.0, std=0.02))
-        self.project_k = bmp.DistributedParameter(torch.empty(num_heads * dim_head, dim_model, dtype=dtype), init_method=bmp.ParameterInitializer(torch.nn.init.normal_, mean=0.0, std=0.02))
-        self.project_v = bmp.DistributedParameter(torch.empty(num_heads * dim_head, dim_model, dtype=dtype), init_method=bmp.ParameterInitializer(torch.nn.init.normal_, mean=0.0, std=0.02))
+        self.project_q = bmp.DistributedParameter(torch.empty(num_heads * dim_head, dim_model, dtype=dtype), init_method=bmp.ParameterInitializer(torch.nn.init.normal_, mean=0.0, std=1))
+        self.project_k = bmp.DistributedParameter(torch.empty(num_heads * dim_head, dim_model, dtype=dtype), init_method=bmp.ParameterInitializer(torch.nn.init.normal_, mean=0.0, std=1))
+        self.project_v = bmp.DistributedParameter(torch.empty(num_heads * dim_head, dim_model, dtype=dtype), init_method=bmp.ParameterInitializer(torch.nn.init.normal_, mean=0.0, std=1))
 
-        self.attention_out = bmp.DistributedParameter(torch.empty(dim_model, num_heads * dim_head, dtype=dtype), init_method=bmp.ParameterInitializer(torch.nn.init.normal_, mean=0.0, std=0.02))
+        self.attention_out = bmp.DistributedParameter(torch.empty(dim_model, num_heads * dim_head, dtype=dtype), init_method=bmp.ParameterInitializer(torch.nn.init.normal_, mean=0.0, std=1))
     
         self.dim_model = dim_model
         self.num_heads = num_heads
@@ -38,9 +39,9 @@ class Attention(bmp.DistributedModule):
         len_k = hidden_kv.size(2)
 
         # (1#batch, num_heads * dim_head, dim_model) @ (batch, dim_model, len_q) = (batch, num_heads * dim_head, len_q)
-        h_q = ct.bmm(self.project_q.unsqueeze(0), False, hidden_q, False, int8=self.int8)
-        h_k = ct.bmm(self.project_k.unsqueeze(0), False, hidden_kv, False, int8=self.int8)
-        h_v = ct.bmm(self.project_v.unsqueeze(0), False, hidden_kv, False, int8=self.int8)
+        h_q = ct.bmm(self.project_q.unsqueeze(0), False, hidden_q, False, int8=self.int8) / math.sqrt(self.dim_model)
+        h_k = ct.bmm(self.project_k.unsqueeze(0), False, hidden_kv, False, int8=self.int8) / math.sqrt(self.dim_model)
+        h_v = ct.bmm(self.project_v.unsqueeze(0), False, hidden_kv, False, int8=self.int8) / math.sqrt(self.dim_model)
 
         # view (batch * num_heads, dim_head, length)
         h_q = h_q.view(batch_size * self.num_heads, self.dim_head, -1)
@@ -49,6 +50,7 @@ class Attention(bmp.DistributedModule):
 
         # (batch * num_heads, dim_head, len_k)T @ (batch * num_heads, dim_head, len_q) = (batch * num_heads, len_k, len_q)
         score = ct.bmm( h_k, True, h_q, False, int8=False)  # use FP 16 here
+        score = score / math.sqrt(self.dim_head)
         
         # (batch, num_heads, len_k, len_q) 
         score = score.view(batch_size, self.num_heads, len_k, len_q)
@@ -75,8 +77,6 @@ class Attention(bmp.DistributedModule):
         attention_result = ct.bmm(h_v, False, masked_score, False, int8=False)  # use FP 16 here
 
         attention_result = attention_result.view(batch_size, self.num_heads * self.dim_head, len_q)
-
         # (1#batch, dim_model, num_heads * dim_head) @ (batch, num_heads * dim_head, len_q) = (batch, dim_model, len_q)
-        attention_out = ct.bmm(self.attention_out.unsqueeze(0), False, attention_result, False, int8=self.int8)
-
+        attention_out = ct.bmm(self.attention_out.unsqueeze(0), False, attention_result, False, int8=self.int8) / math.sqrt(self.dim_head * self.num_heads)
         return attention_out
