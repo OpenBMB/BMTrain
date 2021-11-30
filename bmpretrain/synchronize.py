@@ -13,11 +13,6 @@ def wait_loader():
     config['load_event'].synchronize()
     config['load_stream'].record_event(config['load_event'])
 
-def wait_reducer():
-    # wait lastest reducer event, and set a new one
-    config['reduce_event'].synchronize()
-    config['reduce_stream'].record_event(config['reduce_event'])
-
 
 def sum_loss(loss : torch.Tensor):
     ret = torch.empty_like(loss)

@@ -7,7 +7,10 @@ from .global_var import config
 from . import nccl
 
 def init_distributed(
-        seed : int = 0, 
+        seed : int = 0,
+        loss_scale_factor : float = 2,
+        loss_scale_steps : int = 1024,
+        gradient_inspect : bool = False
     ):
     torch.backends.cudnn.enabled = False
     
@@ -26,10 +29,12 @@ def init_distributed(
     config["world_size"] = world_size
     config["calc_stream"] = torch.cuda.current_stream()
     config["load_stream"] = torch.cuda.Stream(priority=-1)
-    config["reduce_stream"] = torch.cuda.Stream(priority=-1)
     config['barrier_stream'] = torch.cuda.Stream()
     config["load_event"] = torch.cuda.Event()
-    config["reduce_event"] = torch.cuda.Event()
+
+    config["loss_scale_factor"] = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
+    config["loss_scale_steps"] = loss_scale_steps
+    config["gradient_inspect"] = gradient_inspect
 
     torch.manual_seed(seed)
     random.seed(seed)

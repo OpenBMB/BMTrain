@@ -2,9 +2,12 @@ import torch
 
 DEBUG_VARS = {}
 
-def clear():
+def clear(key=None):
     global DEBUG_VARS
-    DEBUG_VARS = {}
+    if key is None:
+        DEBUG_VARS = {}
+    else:
+        DEBUG_VARS.pop(key, None)
 
 def set(key, value):
     global DEBUG_VARS
@@ -12,9 +15,11 @@ def set(key, value):
         value = value.detach().cpu()
     DEBUG_VARS[key] = value
 
-def get(key):
+def get(key, default=None):
     global DEBUG_VARS
-    return DEBUG_VARS[key]
+    if key in DEBUG_VARS:
+        return DEBUG_VARS[key]
+    return default
 
 def append(key, value):
     global DEBUG_VARS

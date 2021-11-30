@@ -9,9 +9,12 @@ class ConfigMap(TypedDict):
     calc_stream : torch.cuda.Stream
     load_stream : torch.cuda.Stream
     load_event : torch.cuda.Event
-    reduce_stream : torch.cuda.Stream
-    reduce_event : torch.cuda.Event
     barrier_stream : torch.cuda.Stream
+
+    loss_scale_factor : float
+    loss_scale_steps : int
+
+    gradient_inspect : bool
 
     comm : 'NCCLCommunicator'
 
