@@ -3,7 +3,7 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension, include_pat
 print(find_packages())
 setup(
     name='bmpretrain',
-    version='0.0.5',
+    version='0.0.6',
     packages=find_packages(),
     install_requires=[
         "torch>=1.10",
@@ -14,6 +14,10 @@ setup(
         CUDAExtension('bmpretrain.nccl._C', [
             'csrc/nccl.cpp',
         ], include_paths=["csrc/nccl/build/include"], extra_compile_args={}),
+        CUDAExtension('bmpretrain.optim._C', [
+            'csrc/adam.cpp',
+            'csrc/cuda/adam.cu'
+        ], extra_compile_args={}),
     ],
     cmdclass={
         'build_ext': BuildExtension
