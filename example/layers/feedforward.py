@@ -23,13 +23,13 @@ class FeedForward(bmp.DistributedModule):
         """
         # (1#batch, dim_ff, dim_model) @ (batch, dim_model, seq_len) = (batch, dim_ff, seq_len)
         gelu_score = ct.gelu(
-            ct.bmm(self.w_0.unsqueeze(0), False, x, False, int8=self.int8) / math.sqrt(self.dim_model)
+            ct.bmm(self.w_0.unsqueeze(0), False, x, False, int8=self.int8)
         )
-        hidden_out = ct.bmm(self.w_1.unsqueeze(0), False, x, False, int8=self.int8) / math.sqrt(self.dim_model)
+        hidden_out = ct.bmm(self.w_1.unsqueeze(0), False, x, False, int8=self.int8)
         
         # (batch, dim_ff, seq_len)
-        x = ct.element_mul(gelu_score, hidden_out) * 2
+        x = ct.element_mul(gelu_score, hidden_out)
 
         # (1#batch, dim_model, dim_ff) @ (batch, dim_ff, seq_len) = (batch, dim_model, seq_len)
-        x = ct.bmm(self.w_out.unsqueeze(0), False, x, False, int8=self.int8) / math.sqrt(self.dim_ff)
+        x = ct.bmm(self.w_out.unsqueeze(0), False, x, False, int8=self.int8)
         return x

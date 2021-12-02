@@ -99,61 +99,77 @@ class T5(torch.nn.Module):
         logits = self.output_projection(hidden_dec)
         return logits
 
+def print_inspect(model, name):
+    bmp.print_rank(
+        bmp.inspect.format_summary(
+            bmp.inspect.inspect_model(model, name)
+        )
+    )
+
 def main():
     bmp.init_distributed()
 
     model = T5(
-        num_enc=8, num_dec=8,
-        dim_model=1024, num_heads=32, dim_head=32, dim_ff=2560,
+        num_enc=24, num_dec=24,
+        dim_model=4096, num_heads=64, dim_head=64, dim_ff=10240,
         vocab_input_size=26240, vocab_output_size=26240,
         position_bias_num_buckets=32, position_bias_max_distance=128,
         eps=1e-6, int8=True, dtype=torch.half
     )
-    bmp.init_parameters(model)
-    bmp.load(model, "checkpoint.pt")
+
+    bmp.load(model, "./cpm2_ckpt.pt")
+    print_inspect(model, "*")
 
     bmp.print_rank("Model mem\n", torch.cuda.memory_summary())
     bmp.synchronize()
-
+    
     # data
     batch_size = 2
     enc_len = 512
     dec_len = 512
 
-    enc_input = torch.randint(0, 26240, (batch_size, enc_len)).int().cuda()
-    enc_length = torch.randint(1, enc_len, (batch_size,)).int().cuda()
+    # generate dummy data for each rank
 
-    dec_input = torch.randint(0, 26240, (batch_size, dec_len)).int().cuda()
-    dec_length = torch.randint(1, dec_len, (batch_size,)).int().cuda()
-    dec_mask = torch.arange(dec_len, device="cuda")[None, :].repeat(batch_size, 1) < dec_length[:, None]
+    for i in range(bmp.world_size()):
+        enc_input = torch.randint(0, 26240, (batch_size, enc_len)).int().cuda()
+        enc_length = torch.randint(1, enc_len, (batch_size,)).int().cuda()
 
-    targets = torch.randint(0, 26240, (batch_size, dec_len)).long().cuda()
+        dec_input = torch.randint(0, 26240, (batch_size, dec_len)).int().cuda()
+        dec_length = torch.randint(1, dec_len, (batch_size,)).int().cuda()
+        dec_mask = torch.arange(dec_len, device="cuda")[None, :].repeat(batch_size, 1) < dec_length[:, None]
+
+        targets = torch.randint(0, 26240, (batch_size, dec_len)).long().cuda()
+        targets = torch.where(dec_mask, targets, torch.scalar_tensor(-100, dtype=torch.long, device="cuda"))
+        if i == bmp.rank():
+            break
     
-    
-    loss_func = torch.nn.CrossEntropyLoss(reduction="none")
-    optimizer = bmp.optim.AdamOptimizer(model.parameters(), lr=5e-4)
+    loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
+    optimizer = bmp.optim.AdamOptimizer(model.parameters(), lr=5e-5)
 
     bmp.synchronize()
-    for iterration in tqdm(range(1000)):
+    for iteration in tqdm(range(1000)):
         # load data
         optimizer.zero_grad()
 
         logits = model(enc_input, enc_length, dec_input, dec_length)
         batch, seq_len, vocab_out_size = logits.size()
 
-        bmp.print_rank("enc_length: ", enc_length)
-        bmp.print_rank("dec_length: ", dec_length)
-        bmp.print_rank("reuslt: ", logits.argmax(dim=-1))
-        bmp.print_rank("target: ", targets)
-        loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len)).view(batch, seq_len)
-        loss = torch.where(dec_mask, loss, torch.zeros_like(loss))
-        bmp.print_rank("loss: ", loss)
-        loss = loss.sum() / dec_mask.half().sum()
-
-        bmp.print_rank("Iter %d, loss: " % iterration, bmp.sum_loss(loss).item())
+        loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
         
+        bmp.print_rank("Iter %d, loss: " % iteration, bmp.sum_loss(loss).item())
+        
+        loss = optimizer.loss_scale(loss)
+        loss.backward()
+
+        # inspect
+
+        # print_inspect(model, "enc_layers.0.self_attention.*")
+        # print_inspect(model, "enc_layers.0.layernorm_before_attention.*")
+        # if iteration % 100 == 0:
+        #     print_inspect(model, "*")
+
         # optimizer step
-        bmp.backward(loss, optimizer)
+        bmp.optim_step(optimizer)
     
     bmp.save(model, "checkpoint.pt")
 

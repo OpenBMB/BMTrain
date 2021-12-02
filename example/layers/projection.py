@@ -16,7 +16,7 @@ class Projection(bmp.DistributedModule):
         Returns:
             logits : (batch, seq_len, vocab_output_size)        fp16
         """
-        logits = ct.bmm(self.weight.unsqueeze(0), False, x, False, int8=False) / math.sqrt(self.dim_model)
+        logits = ct.bmm(self.weight.unsqueeze(0), False, x, False, int8=False)
 
         logits = ct.transpose(logits)   # eqauls to .transpose(1, 2)
         return logits
