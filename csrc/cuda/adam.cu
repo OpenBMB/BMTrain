@@ -16,7 +16,9 @@ __global__ void adam_fp32_accum(
     float eps,
     float lr,
     float scale,
-    float weight_decay
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2
 ) {
     int32_t col = blockIdx.x * blockDim.x + threadIdx.x;
     if (col < n) {
@@ -24,7 +26,7 @@ __global__ void adam_fp32_accum(
         float local_m = beta1 * __half2float(m[col]) + (1 - beta1) * local_g;       // real_m * scale
         float local_v = beta2 * v[col] + (1 - beta2) * local_g * local_g / scale;   // real_v * scale
         float local_p = param[col];
-        local_p = local_p - lr * local_m / (sqrtf(local_v * scale) + eps) - lr * weight_decay * local_p;
+        local_p = local_p - lr * local_m / bias_correction1 / (sqrtf(local_v * scale / bias_correction2) + eps) - weight_decay * local_p;
 
         param_h[col] = __float2half(local_p);
         param[col] = local_p;
@@ -43,7 +45,9 @@ void adam_launcher(
     float beta1, float beta2,
     float eps, float lr,
     float scale,
-    float weight_decay
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2
 ) {
     int32_t n = param_fp32.numel();
     auto g_ptr = reinterpret_cast<half*>(g_fp16.data_ptr<at::Half>());
@@ -55,5 +59,5 @@ void adam_launcher(
     dim3 block_size = dim3(threads, 1, 1);
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
     auto stream = at::cuda::getCurrentCUDAStream();
-    adam_fp32_accum<<<grid_size, block_size, 0, stream.stream()>>>(n, g_ptr, m_ptr, v_ptr, param_ptr, param_h_ptr, beta1, beta2, eps, lr, scale, weight_decay);
+    adam_fp32_accum<<<grid_size, block_size, 0, stream.stream()>>>(n, g_ptr, m_ptr, v_ptr, param_ptr, param_h_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
 }

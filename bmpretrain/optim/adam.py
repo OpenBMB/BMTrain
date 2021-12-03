@@ -132,6 +132,9 @@ class AdamOptimizer(torch.optim.Optimizer):
                     if last_mgr is not None:
                         last_mgr.exit()
                     last_mgr = curr_mgr
+
+                    # update the steps for each param group update
+                    state['step'] += 1
                     
                     C.f_adam(
                         curr_mgr.param_fp32,    # fp32
@@ -143,10 +146,9 @@ class AdamOptimizer(torch.optim.Optimizer):
                         group['eps'],
                         group['lr'],
                         self._scale,
-                        group['weight_decay']
+                        group['weight_decay'],
+                        state['step']
                     )
-                    # update the steps for each param group update
-                    state['step'] += 1
         if last_mgr is not None:
             last_mgr.exit()
         
