@@ -1,7 +1,8 @@
 import torch
 from ..global_var import config
-from . import _C as C
+from . import _cpu as C
 import cpm_kernels.torch as ct
+from .. import nccl
 
 class AdamOffloadOptimizer(torch.optim.Optimizer):
     """
@@ -59,7 +60,11 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 if p.grad is not None:
                     ct.has_nan_inf(p.grad, has_inf_or_nan)
         
-        if has_inf_or_nan:
+        has_inf_or_nan = has_inf_or_nan.to(torch.uint8)
+        if "comm" in config:
+            nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
+
+        if has_inf_or_nan > 0:
             raise OverflowError("Gradient overflow")
         
         self._steps_since_last_scale += 1

@@ -36,6 +36,11 @@ def init_distributed(
     config["loss_scale_steps"] = loss_scale_steps
     config["gradient_inspect"] = gradient_inspect
 
+    if "OMP_NUM_THREADS" in os.environ:
+        torch.set_num_threads( max(int(os.environ["OMP_NUM_THREADS"]), 1) )
+    else:
+        torch.set_num_threads( max(os.cpu_count() // local_size, 1) )
+
     torch.manual_seed(seed)
     random.seed(seed)
     try:
