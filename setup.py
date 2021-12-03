@@ -20,7 +20,7 @@ setup(
         ], extra_compile_args={}),
         CppExtension("bmpretrain.optim._cpu", [
             "csrc/adam_cpu.cpp",
-        ], extra_compile_args=['-fopenmp'], extra_link_args=['-lgomp'])
+        ], extra_compile_args=['-fopenmp', '-march=native'], extra_link_args=['-lgomp'])
     ],
     cmdclass={
         'build_ext': BuildExtension

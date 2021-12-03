@@ -9,6 +9,7 @@ class TestModule(torch.nn.Module):
         self.fc3 = torch.nn.Linear(128, 128)
         self.fc4 = torch.nn.Linear(128, 128)
         self.fc5 = torch.nn.Linear(128, 128)
+        self.param = torch.nn.Parameter(torch.empty(1237))
 
 def main():
     model1 = TestModule()
