@@ -69,7 +69,7 @@ void adam_cpu_launcher(
             float p = param_fp32[i];
             m = beta1 * m + (1 - beta1) * g;
             v = beta2 * v + (1 - beta2) * g * g;
-            p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - weight_decay * p;
+            p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
             
             param_fp32[i] = p;
             param_fp16[i] = at::Half(p);
