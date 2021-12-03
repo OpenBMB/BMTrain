@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension, include_paths
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
 print(find_packages())
 setup(
     name='bmpretrain',
@@ -13,11 +13,14 @@ setup(
     ext_modules=[
         CUDAExtension('bmpretrain.nccl._C', [
             'csrc/nccl.cpp',
-        ], include_paths=["csrc/nccl/build/include"], extra_compile_args={}),
-        CUDAExtension('bmpretrain.optim._C', [
-            'csrc/adam.cpp',
+        ], include_dirs=["csrc/nccl/build/include"], extra_compile_args={}),
+        CUDAExtension('bmpretrain.optim._cuda', [
+            'csrc/adam_cuda.cpp',
             'csrc/cuda/adam.cu'
         ], extra_compile_args={}),
+        CppExtension("bmpretrain.optim._cpu", [
+            "csrc/adam_cpu.cpp",
+        ], extra_compile_args=['-fopenmp'], extra_link_args=['-lgomp'])
     ],
     cmdclass={
         'build_ext': BuildExtension
