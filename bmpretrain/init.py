@@ -36,10 +36,19 @@ def init_distributed(
     config["loss_scale_steps"] = loss_scale_steps
     config["gradient_inspect"] = gradient_inspect
 
-    if "OMP_NUM_THREADS" in os.environ:
-        torch.set_num_threads( max(int(os.environ["OMP_NUM_THREADS"]), 1) )
+    cpus_this_worker = None
+    
+    all_available_cpus = sorted(list(os.sched_getaffinity(0)))
+
+    cpus_per_worker = len(all_available_cpus) // local_size
+        
+    if cpus_per_worker < 1:
+        cpus_this_worker = all_available_cpus
+        torch.set_num_threads(1)
     else:
-        torch.set_num_threads( max(os.cpu_count() // local_size, 1) )
+        cpus_this_worker = all_available_cpus[local_rank * cpus_per_worker : (local_rank + 1) * cpus_per_worker]
+        os.sched_setaffinity(0, cpus_this_worker)
+        torch.set_num_threads( len(cpus_this_worker) )
 
     torch.manual_seed(seed)
     random.seed(seed)
@@ -63,4 +72,5 @@ def init_distributed(
         "local_size": local_size,
         "master" : master,
         "device": torch.cuda.current_device(),
+        "cpus": cpus_this_worker 
     })
