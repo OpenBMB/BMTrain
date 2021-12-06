@@ -8,7 +8,8 @@ setup(
     install_requires=[
         "torch>=1.10",
         "cpm_kernels>=1.0.9",
-        "numpy"
+        "numpy",
+        "typing-extensions>=4.0.0"
     ],
     ext_modules=[
         CUDAExtension('bmpretrain.nccl._C', [

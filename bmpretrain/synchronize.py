@@ -11,7 +11,7 @@ def synchronize():
 def wait_loader():
     # wait lastest loader event, and set a new one
     config['load_event'].synchronize()
-    config['load_stream'].record_event(config['load_event'])
+    config['calc_stream'].record_event(config['load_event'])
 
 
 def sum_loss(loss : torch.Tensor):
