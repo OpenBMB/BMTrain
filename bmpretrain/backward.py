@@ -1,10 +1,11 @@
+from typing import Optional
 import torch
 from .global_var import config
 from .utils import print_rank
+from .lr_scheduler.warmup import WarmupLRSchduler
 
 
-
-def optim_step(optim : torch.optim.Optimizer):
+def optim_step(optim : torch.optim.Optimizer, lr_scheduler : Optional[WarmupLRSchduler] = None):
     """
     Backward with loss scale.
     Synchronize streams before optimizer steps.
@@ -18,6 +19,8 @@ def optim_step(optim : torch.optim.Optimizer):
     if has_scale:
         try:
             optim.step()
+            if lr_scheduler is not None:
+                lr_scheduler.step()
         except OverflowError:
             print_rank("Gradient overflow, change scale from %lf to %lf" % (optim.scale, optim.scale / config["loss_scale_factor"]))
             optim.justify_scale(optim.scale / config["loss_scale_factor"])

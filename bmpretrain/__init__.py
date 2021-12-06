@@ -16,3 +16,4 @@ from .store import save, load
 from . import benchmark
 from . import optim
 from . import inspect
+from . import lr_scheduler
