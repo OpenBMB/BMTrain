@@ -1,3 +1,4 @@
+from typing import Optional
 import torch
 from .. import debug
 from .. import nccl
@@ -7,7 +8,7 @@ import math
 
 class InspectTensor:
     def __init__(self):
-        pass
+        self._summary = []
     
     def _set_summary(self, summary):
         self._summary = []
@@ -50,9 +51,7 @@ class InspectTensor:
                 x_std = math.sqrt(info[1].cpu().item())
                 item["mean"] = x_mean
                 item["std"] = x_std
-                del item["tensor"]
-                del x
-                del info
+
             self._summary.append(item)
             group_idx[group][name] += 1
     
@@ -84,7 +83,8 @@ class InspectTensor:
                     "std": x_std,
                     "shape": item["shape"],
                     "grad_mean" : grad_mean,
-                    "grad_std" : grad_std
+                    "grad_std" : grad_std,
+                    "tensor": item["tensor"]
                 })
             else:
                 nw_summary.append(item)
@@ -111,6 +111,21 @@ class InspectTensor:
                     "grad_std" : item["grad_std"]
                 })
         return ret
+    
+    def get_tensor(self, name : str, group : Optional[str] = None, index : Optional[int] = None) -> torch.Tensor:
+        group_name_prefix = f"{group}." if group is not None else ""
+
+        all_names = []
+        if index is None:
+            all_names.append(f"{group_name_prefix}{name}")
+            all_names.append(f"{group_name_prefix}0.{name}")
+        else:
+            all_names.append(f"{group_name_prefix}{index}.{name}")
+
+        for item in self._summary:
+            if item[name] in all_names:
+                return item["tensor"]
+        return None
 
 
 class InspectTensorManager:

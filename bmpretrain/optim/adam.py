@@ -1,7 +1,6 @@
 import torch
 from ..global_var import config
 from . import _cuda as C
-import cpm_kernels.torch as ct
 from .. import nccl
 class AdamTransferManager:
     def __init__(self, avg_sq_host, param_host, device, stream):
@@ -95,13 +94,12 @@ class AdamOptimizer(torch.optim.Optimizer):
                 loss = closure()
 
         # check overflow
-        has_inf_or_nan = torch.zeros(1, dtype=torch.bool, device="cuda")[0]
+        has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is not None:
-                    ct.has_nan_inf(p.grad, has_inf_or_nan)
+                    C.f_has_inf_nan(p.grad, has_inf_or_nan)
         
-        has_inf_or_nan = has_inf_or_nan.to(torch.uint8)
         if "comm" in config:
             nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
 
