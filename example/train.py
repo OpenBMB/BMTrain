@@ -1,8 +1,8 @@
 import torch
 import bmpretrain as bmp
-from bmpretrain.checkpointing import checkpoint
 import layers
 from tqdm import tqdm
+import time
 
 class T5(torch.nn.Module):
     def __init__(self, 
@@ -124,7 +124,7 @@ def main():
     bmp.synchronize()
 
     # data
-    batch_size = 2
+    batch_size = 8
     enc_len = 512
     dec_len = 512
 
@@ -144,32 +144,50 @@ def main():
             break
     
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = bmp.optim.AdamOptimizer(model.parameters(), lr=5e-5)
+    optimizer = bmp.optim.AdamOptimizer(model.parameters(), scale=2**20)
+    lr_scheduler = bmp.lr_scheduler.Noam(optimizer, start_lr=1e-2, warmup_iter=40, end_iter=1000)
 
     bmp.synchronize()
+    average_time = 0
+    average_time_shift = 0.9
+
     for iteration in tqdm(range(1000)):
         # load data
+        st = time.time()
         optimizer.zero_grad()
 
+        # with bmp.inspect.inspect_tensor() as inspector:
         logits = model(enc_input, enc_length, dec_input, dec_length)
         batch, seq_len, vocab_out_size = logits.size()
 
         loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
-        
-        bmp.print_rank("Iter %d, loss: " % iteration, bmp.sum_loss(loss).item())
-        
+    
+        global_loss = bmp.sum_loss(loss).item()
+    
         loss = optimizer.loss_scale(loss)
         loss.backward()
+        
+        if iteration % 1000 == 0:
+            print_inspect(model, "*")
+        
 
-        # inspect
+        bmp.optim_step(optimizer, lr_scheduler)
 
-        # print_inspect(model, "enc_layers.0.self_attention.*")
-        # print_inspect(model, "enc_layers.0.layernorm_before_attention.*")
-        # if iteration % 100 == 0:
-        #     print_inspect(model, "*")
+        iteration_time = time.time() - st
+        average_time = average_time * average_time_shift + (1 - average_time_shift) * iteration_time
+        bmp.print_rank(
+            "| Iter: {:6d} | loss: {:.4f} | lr: {:.4e}, scale: {:10.4f} | time: {:.4f}".format(
+                iteration,
+                global_loss,
+                lr_scheduler.current_lr,
+                int(optimizer.scale),
+                average_time / (1 - pow(average_time_shift, iteration + 1))
+            )
+        )
 
-        # optimizer step
-        bmp.optim_step(optimizer)
+        if iteration % 1000 == 0:
+            # bmp.save(model, "results/ckpt-%d.pt" % iteration)
+            pass
     
     bmp.save(model, "checkpoint.pt")
 

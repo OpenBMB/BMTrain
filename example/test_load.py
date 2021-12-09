@@ -144,7 +144,7 @@ def main():
             break
     
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = bmp.optim.AdamOptimizer(model.parameters(), lr=5e-5)
+    optimizer = bmp.optim.AdamOffloadOptimizer(model.parameters(), lr=5e-5)
 
     bmp.synchronize()
     for iteration in tqdm(range(1000)):
