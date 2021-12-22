@@ -1,4 +1,4 @@
-from typing import Iterable
+from typing import Generator, Iterable, List, Tuple
 import torch
 
 from .block_layer import CheckpointBlock
@@ -36,8 +36,8 @@ def init_parameters(model : torch.nn.Module):
         else:
             init_distributed_parameter( iterate_parameters(module) )
 
-def grouped_parameters(model : torch.nn.Module):
-    ret = {}
+def grouped_parameters(model : torch.nn.Module) -> Generator[Tuple[str, List[torch.nn.Parameter]], None, None]:
+    ret : List[torch.nn.Parameter] = {}
     for module in model.modules():
         if isinstance(module, CheckpointBlock):
             for kw, params in module.grouped_parameters():

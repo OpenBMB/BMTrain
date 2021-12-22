@@ -142,6 +142,7 @@ def main():
         if i == bmp.rank():
             break
     
+    # loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
     loss_func = bmp.loss.FusedCrossEntropy(ignore_index=-100)
     optimizer = bmp.optim.AdamOffloadOptimizer(model.parameters(), scale=2**30)
     lr_scheduler = bmp.lr_scheduler.Noam(optimizer, start_lr=1e-2, warmup_iter=40, end_iter=1000, num_iter=0)
@@ -150,6 +151,13 @@ def main():
     
     avg_time_recorder = bmp.utils.AverageRecorder()
     avg_loss_recorder = bmp.utils.AverageRecorder()
+
+    for group, params in bmp.grouped_parameters(model):
+        bmp.print_rank(
+            group,
+            [ param.size() for param in params ],
+            rank=1
+        )
 
     for iteration in range(1000):
         # load data
@@ -167,15 +175,15 @@ def main():
             loss = optimizer.loss_scale(loss)
             loss.backward()
         
+        
         # print inspected tensors in the forward & backward pass
-        bmp.print_rank(
-            bmp.inspect.format_summary(
-                inspector.get_summary()
-            )
-        )
-
         # print parameters of the model
         if iteration % 1000 == 0:
+            bmp.print_rank(
+                bmp.inspect.format_summary(
+                    inspector.get_summary()
+                )
+            )
             print_inspect(model, "*")
         
 
