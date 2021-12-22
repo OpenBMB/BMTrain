@@ -65,8 +65,6 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
 
         if has_inf_or_nan > 0:
             raise OverflowError("Gradient overflow")
-        
-        self._steps_since_last_scale += 1
 
         # parameters to be updated
         update_params = []

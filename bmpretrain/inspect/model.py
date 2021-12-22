@@ -71,6 +71,8 @@ def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix :
                 "mean": p.mean().cpu().item(),
                 "grad_std": g.std().cpu().item(),
                 "grad_mean": g.mean().cpu().item(),
+                "max": p.max().cpu().item(),
+                "min": p.min().cpu().item(),
             })
     return ret
 
@@ -91,6 +93,8 @@ def inspect_model(model : torch.nn.Module, param_name : str, prefix : str = ''):
                     'shape': tuple(p.size()),
                     "std": p.std().cpu().item(),
                     "mean": p.mean().cpu().item(),
+                    "max": p.max().cpu().item(),
+                    "min": p.min().cpu().item(),
                 }
                 if param.grad is not None:
                     if isinstance(param, DistributedParameter):

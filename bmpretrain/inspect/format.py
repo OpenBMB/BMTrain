@@ -29,6 +29,8 @@ def format_summary(summary : List[Dict[str, Any]]) -> str:
     headers = [
         "name",
         "shape",
+        "max",
+        "min",
         "std",
         "mean",
         "grad_std",
@@ -37,6 +39,8 @@ def format_summary(summary : List[Dict[str, Any]]) -> str:
     headers_length = [
         max_name_len,
         20,
+        10,
+        10,
         10,
         10,
         10,

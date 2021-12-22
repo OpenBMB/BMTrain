@@ -52,6 +52,19 @@ class InspectTensor:
                 item["mean"] = x_mean
                 item["std"] = x_std
 
+                info[0] = x.max()
+                info[1] = -x.min()
+                nccl.allReduce(
+                    info.storage(),
+                    info.storage(),
+                    'max',
+                    config['comm']
+                )
+                x_max = info[0].cpu().item()
+                x_min = - info[1].cpu().item()
+                item["max"] = x_max
+                item["min"] = x_min
+
             self._summary.append(item)
             group_idx[group][name] += 1
     
@@ -75,10 +88,24 @@ class InspectTensor:
                 x_std = math.sqrt(info[1].cpu().item())
                 grad_mean = info[2].cpu().item()
                 grad_std = math.sqrt(info[3].cpu().item())
+                
+                info[0] = x.max()
+                info[1] = -x.min()
+                nccl.allReduce(
+                    info.storage(),
+                    info.storage(),
+                    'max',
+                    config['comm']
+                )
+                x_max = info[0].cpu().item()
+                x_min = - info[1].cpu().item()
+
                 nw_summary.append({
                     "name": item["name"],
                     "group": item["group"],
                     "requires_grad" : False,
+                    "min": x_min,
+                    "max": x_max,
                     "mean": x_mean,
                     "std": x_std,
                     "shape": item["shape"],
@@ -95,6 +122,8 @@ class InspectTensor:
             if item["requires_grad"]:
                 ret.append({
                     "name": item["name"],
+                    "min": item["min"],
+                    "max": item["max"],
                     "mean": item["mean"],
                     "std": item["std"],
                     "shape": item["shape"],
@@ -104,6 +133,8 @@ class InspectTensor:
             else:
                 ret.append({
                     "name": item["name"],
+                    "min": item["min"],
+                    "max": item["max"],
                     "mean": item["mean"],
                     "std": item["std"],
                     "shape": item["shape"],
@@ -169,6 +200,8 @@ def record_tensor(x : torch.Tensor, name : str, group = None, requires_grad = Tr
         "name": name,
         "group": group,
         "requires_grad": True,
+        "min": None,
+        "max": None,
         "mean": None,
         "std": None,
         "shape": x_shape,

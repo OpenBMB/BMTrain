@@ -1,7 +1,6 @@
 import torch
 import bmpretrain as bmp
 import layers
-from tqdm import tqdm
 import time
 
 class T5(torch.nn.Module):
@@ -144,14 +143,14 @@ def main():
             break
     
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = bmp.optim.AdamOptimizer(model.parameters(), scale=2**20)
+    optimizer = bmp.optim.AdamOffloadOptimizer(model.parameters(), scale=2**20)
     lr_scheduler = bmp.lr_scheduler.Noam(optimizer, start_lr=1e-2, warmup_iter=40, end_iter=1000)
 
     bmp.synchronize()
     average_time = 0
     average_time_shift = 0.9
 
-    for iteration in tqdm(range(1000)):
+    for iteration in range(1000):
         # load data
         st = time.time()
         optimizer.zero_grad()
@@ -167,6 +166,12 @@ def main():
         loss = optimizer.loss_scale(loss)
         loss.backward()
         
+        # bmp.print_rank(
+        #     bmp.inspect.format_summary(
+        #         inspector.get_summary()
+        #     )
+        # )
+
         if iteration % 1000 == 0:
             print_inspect(model, "*")
         
