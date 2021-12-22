@@ -27,11 +27,14 @@ class DistributedParameter(torch.nn.Parameter):
     _end_partition : int
     _init_method : Optional[Callable[['DistributedParameter'], None]]
     _in_checkpoint_block : bool
+    _group : Optional[str]
 
     def __new__(cls,
             data : torch.Tensor, 
             requires_grad : bool = True, 
-            init_method : Optional[Callable[['DistributedParameter'], None]] = None):
+            init_method : Optional[Callable[['DistributedParameter'], None]] = None,
+            group : Optional[str] = None
+        ):
         num_of_elements = data.numel()
 
         cuda_tensor = torch.tensor([], dtype=data.dtype, device="cuda") 
@@ -54,7 +57,12 @@ class DistributedParameter(torch.nn.Parameter):
         setattr(ret, "_end_partition", end_of_partition)
         setattr(ret, "_init_method", init_method)
         setattr(ret, "_in_checkpoint_block", False)
+        setattr(ret, "_group", group)
         return ret
+    
+    @property
+    def group(self):
+        return self._group
 
     def gather(self) -> torch.Tensor:
         with torch.cuda.stream(config['load_stream']):

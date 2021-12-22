@@ -123,11 +123,11 @@ def main():
     bmp.synchronize()
 
     # data
+    # generate dummy data for each rank
+
     batch_size = 8
     enc_len = 512
     dec_len = 512
-
-    # generate dummy data for each rank
 
     for i in range(bmp.world_size()):
         enc_input = torch.randint(0, 26240, (batch_size, enc_len)).int().cuda()
@@ -142,57 +142,66 @@ def main():
         if i == bmp.rank():
             break
     
-    loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = bmp.optim.AdamOffloadOptimizer(model.parameters(), scale=2**20)
-    lr_scheduler = bmp.lr_scheduler.Noam(optimizer, start_lr=1e-2, warmup_iter=40, end_iter=1000)
+    loss_func = bmp.loss.FusedCrossEntropy(ignore_index=-100)
+    optimizer = bmp.optim.AdamOffloadOptimizer(model.parameters(), scale=2**30)
+    lr_scheduler = bmp.lr_scheduler.Noam(optimizer, start_lr=1e-2, warmup_iter=40, end_iter=1000, num_iter=0)
 
     bmp.synchronize()
-    average_time = 0
-    average_time_shift = 0.9
+    
+    avg_time_recorder = bmp.utils.AverageRecorder()
+    avg_loss_recorder = bmp.utils.AverageRecorder()
 
     for iteration in range(1000):
         # load data
         st = time.time()
         optimizer.zero_grad()
 
-        # with bmp.inspect.inspect_tensor() as inspector:
-        logits = model(enc_input, enc_length, dec_input, dec_length)
-        batch, seq_len, vocab_out_size = logits.size()
+        with bmp.inspect.inspect_tensor() as inspector:
+            logits = model(enc_input, enc_length, dec_input, dec_length)
+            batch, seq_len, vocab_out_size = logits.size()
 
-        loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
-    
-        global_loss = bmp.sum_loss(loss).item()
-    
-        loss = optimizer.loss_scale(loss)
-        loss.backward()
+            loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
         
-        # bmp.print_rank(
-        #     bmp.inspect.format_summary(
-        #         inspector.get_summary()
-        #     )
-        # )
+            global_loss = bmp.sum_loss(loss).item()
+        
+            loss = optimizer.loss_scale(loss)
+            loss.backward()
+        
+        # print inspected tensors in the forward & backward pass
+        bmp.print_rank(
+            bmp.inspect.format_summary(
+                inspector.get_summary()
+            )
+        )
 
+        # print parameters of the model
         if iteration % 1000 == 0:
             print_inspect(model, "*")
         
 
         bmp.optim_step(optimizer, lr_scheduler)
 
+        # record time and loss
         iteration_time = time.time() - st
-        average_time = average_time * average_time_shift + (1 - average_time_shift) * iteration_time
+
+        avg_time_recorder.record(iteration_time)
+        avg_loss_recorder.record(global_loss)
+
+        # print time and loss
         bmp.print_rank(
-            "| Iter: {:6d} | loss: {:.4f} | lr: {:.4e}, scale: {:10.4f} | time: {:.4f}".format(
+            "| Iter: {:6d} | loss: {:.4f} average_loss: {:.4f} | lr: {:.4e}, scale: {:10.4f} | time: {:.4f}".format(
                 iteration,
                 global_loss,
+                avg_loss_recorder.value,
                 lr_scheduler.current_lr,
                 int(optimizer.scale),
-                average_time / (1 - pow(average_time_shift, iteration + 1))
+                avg_time_recorder.value
             )
         )
 
-        if iteration % 1000 == 0:
-            # bmp.save(model, "results/ckpt-%d.pt" % iteration)
-            pass
+        # save model
+        # if iteration % 1000 == 0:
+        #     bmp.save(model, "results/ckpt-%d.pt" % iteration)
     
     bmp.save(model, "checkpoint.pt")
 

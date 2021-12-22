@@ -57,13 +57,13 @@ def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix :
     for param in model._param_info:
         abs_name = prefix + param["name"]
         if fnmatch.fnmatch(abs_name, param_name):
-            storage_type = param["storage_type"]
-            dtype = _param_buffer[storage_type].dtype
-            device = _param_buffer[storage_type].device
+            kw_name = param["kw_name"]
+            dtype = _param_buffer[kw_name].dtype
+            device = _param_buffer[kw_name].device
             offset = param["offset"]
             shape = param["shape"]
-            p = torch.tensor([], dtype=dtype, device=device).set_(_param_buffer[storage_type], offset, shape)
-            g = torch.tensor([], dtype=dtype, device=device).set_(_grad_buffer[storage_type], offset, shape)
+            p = torch.tensor([], dtype=dtype, device=device).set_(_param_buffer[kw_name], offset, shape)
+            g = torch.tensor([], dtype=dtype, device=device).set_(_grad_buffer[kw_name], offset, shape)
             ret.append({
                 "name": abs_name,
                 "shape": tuple(shape),

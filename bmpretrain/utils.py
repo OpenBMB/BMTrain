@@ -42,3 +42,19 @@ def print_block(title : str, content : Optional[str] = None, file=sys.stdout):
 def print_rank(*args, rank=0, **kwargs):
     if config["rank"] == rank:
         print(*args, **kwargs)
+
+class AverageRecorder:
+    def __init__(self, alpha = 0.9, start_value = 0):
+        self._value = start_value
+        self.alpha = alpha
+        self._steps = 0
+    
+    def record(self, v):
+        self._value = self._value * self.alpha + v * (1 - self.alpha)
+        self._steps += 1
+    
+    @property
+    def value(self):
+        if self._steps <= 0:
+            return self._value
+        return self._value / (1 - pow(self.alpha, self._steps))

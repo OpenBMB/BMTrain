@@ -132,7 +132,7 @@ class CheckpointBlockContext:
                 self._param_buffer[kw] = storage_type(val["total"])
                 self._param_tensor[kw] = torch.tensor([], dtype=self._param_buffer[kw].dtype, device=self._param_buffer[kw].device).set_(self._param_buffer[kw])
 
-                if requires_grad:
+                if requires_grad and val["requires_grad"]:
                     self._grad_buffer[kw] = storage_type(val["total"])
                     self._grad_tensor[kw] = torch.tensor([], dtype=self._grad_buffer[kw].dtype, device=self._grad_buffer[kw].device).set_(self._grad_buffer[kw]).zero_()
 
@@ -151,19 +151,19 @@ class CheckpointBlockContext:
         # set wait stream for each storage
         for kw in self._param_tensor.keys():
             self._param_tensor[kw].record_stream(current_stream)
-            if requires_grad:
+            if requires_grad and kw in self._grad_tensor:
                 self._grad_tensor[kw].record_stream(current_stream)
 
         # update parameters in block
         for param in self.block._param_info:
-            storage_type = param["storage_type"]
-            dtype = self._param_buffer[storage_type].dtype
-            device = self._param_buffer[storage_type].device
+            kw_name = param["kw_name"]
+            dtype = self._param_buffer[kw_name].dtype
+            device = self._param_buffer[kw_name].device
             offset = param["offset"]
             shape = param["shape"]
-            param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self._param_buffer[storage_type], offset, shape)
-            if requires_grad:
-                param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self._grad_buffer[storage_type], offset, shape)
+            param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self._param_buffer[kw_name], offset, shape)
+            if requires_grad and kw_name in self._grad_buffer:
+                param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self._grad_buffer[kw_name], offset, shape)
     
     
     def __enter__(self):
@@ -196,12 +196,13 @@ class CheckpointBlockContext:
                     local_param = self.block._storage_params[kw]
 
                     # scatter gradient
-                    nccl.reduceScatter(
-                        self._grad_buffer[kw],
-                        local_param.grad.storage(),
-                        "sum",
-                        config["comm"]
-                    )
+                    if val["requires_grad"]:
+                        nccl.reduceScatter(
+                            self._grad_buffer[kw],
+                            local_param.grad.storage(),
+                            "sum",
+                            config["comm"]
+                        )
                 nccl.groupEnd()
 
             # set wait stream for each storage
@@ -246,6 +247,14 @@ def storage_type_cuda(storage_type):
         raise ValueError("Unknown storage type: {}".format(storage_type))
     return STORAGE_MAP[storage_type]
 
+def _get_param_kw(param : DistributedParameter):
+    type_name = str(param.dtype).split(".")[-1]
+    grad_name = "_grad" if param.requires_grad else "_nograd"
+    group_name = ""
+    if param.group is not None:
+        group_name = "_g_" + param.group
+    return type_name + grad_name + group_name
+
 class CheckpointBlock(torch.nn.Module):
     """
     CheckpointBlock is a leaf module that `inner_module` is invisible outside of CheckpointBlock.
@@ -271,18 +280,23 @@ class CheckpointBlock(torch.nn.Module):
 
         # calc total number of parameters
         for name, param in ordered_parameters:
+            assert isinstance(param, DistributedParameter), "All parameters in checkpoint block must be DistributedParameter."
+
             storage_type = storage_type_cuda(param.storage_type())
-            if storage_type not in self._storage_info:
-                self._storage_info[storage_type] = {
-                    "total": 0
+            kw_name = _get_param_kw(param)
+
+            if kw_name not in self._storage_info:
+                self._storage_info[kw_name] = {
+                    "total": 0,
+                    "storage_type": storage_type,
+                    "requires_grad": param.requires_grad,
+                    "group": param.group
                 }
 
-            param_shape = param.size()
-            if isinstance(param, DistributedParameter):
-                param_shape = param._original_shape
+            param_shape = param._original_shape
 
-            self._storage_info[storage_type]["total"] = round_up(
-                self._storage_info[storage_type]["total"] + param_shape.numel(), 
+            self._storage_info[kw_name]["total"] = round_up(
+                self._storage_info[kw_name]["total"] + param_shape.numel(), 
                 512 // param.element_size()
                 # 512 bytes aligned
             )
@@ -296,8 +310,12 @@ class CheckpointBlock(torch.nn.Module):
             val["end"] = (config['rank'] + 1) * partition_size
             offsets[kw] = 0
 
-            storage_param_buffer = kw(partition_size)
-            storage_grads_buffer = kw(partition_size)
+
+            storage_type = val["storage_type"]
+
+            storage_param_buffer = storage_type(partition_size)
+            if val["requires_grad"]:
+                storage_grads_buffer = storage_type(partition_size)
 
             dtype = storage_param_buffer.dtype
             device = storage_param_buffer.device
@@ -306,24 +324,23 @@ class CheckpointBlock(torch.nn.Module):
             storage_param = torch.nn.Parameter(
                 torch.tensor([], dtype=dtype, device=device).set_(storage_param_buffer)
             )
-            storage_param.grad = torch.tensor([], dtype=dtype, device=device).set_(storage_grads_buffer).zero_()
+            if val["requires_grad"]:
+                storage_param.grad = torch.tensor([], dtype=dtype, device=device).set_(storage_grads_buffer).zero_()
 
             # register parameter
-            self.register_parameter("param_" + str(storage_param.dtype).split(".")[-1], storage_param)
+            self.register_parameter(kw, storage_param)
 
             self._storage_params[kw] = storage_param
 
         # initialize parameters in module
         for name, param in ordered_parameters:
-            storage_type = storage_type_cuda(param.storage_type())
-            param_shape = param.size()
-            if isinstance(param, DistributedParameter):
-                param_shape = param._original_shape
+            param_shape = param._original_shape
+            kw_name = _get_param_kw(param)
 
-            param_st = offsets[storage_type]
-            offsets[storage_type] += param_shape.numel()
-            param_end = offsets[storage_type]
-            offsets[storage_type] = round_up(offsets[storage_type], 512 // param.element_size())
+            param_st = offsets[kw_name]
+            offsets[kw_name] += param_shape.numel()
+            param_end = offsets[kw_name]
+            offsets[kw_name] = round_up(offsets[kw_name], 512 // param.element_size())
 
             self._param_info.append({
                 "parameter": param,
@@ -331,7 +348,7 @@ class CheckpointBlock(torch.nn.Module):
                 "offset": param_st,
                 "size": param_shape.numel(),
                 "shape": param_shape,
-                "storage_type": storage_type,
+                "kw_name": kw_name,
             })
 
             if isinstance(param, DistributedParameter) and param._init_method is not None:
@@ -339,20 +356,14 @@ class CheckpointBlock(torch.nn.Module):
                 pass
             else:
                 # copy values to buffer for normal parameter
-                storage_st = self._storage_info[storage_type]["begin"]
-                storage_end = self._storage_info[storage_type]["end"]
+                storage_st = self._storage_info[kw_name]["begin"]
+                storage_end = self._storage_info[kw_name]["end"]
                 
                 # make parameter contiguous in storage
-                
-                if isinstance(param, DistributedParameter):
-                    with torch.no_grad():
-                        contiguous_param = OpAllGather.apply(param)
+                with torch.no_grad():
+                    contiguous_param = OpAllGather.apply(param)
 
                 if not (param_st >= storage_end or param_end <= storage_st):
-                    # need copy parameter
-                    if not isinstance(param, DistributedParameter):
-                        contiguous_param = param.contiguous()
-                    
                     # copy offset in parameter storage
                     offset_st = max(storage_st - param_st, 0)
                     offset_end = min(storage_end - param_st, contiguous_param.numel())
@@ -363,7 +374,7 @@ class CheckpointBlock(torch.nn.Module):
                     to_offset_end = offset_end + param_st - storage_st
                     
                     # copy to buffer
-                    self._storage_params[storage_type].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
+                    self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
                     del contiguous_param
             
             # clear parameter data, but keep the dtype and device
@@ -409,11 +420,11 @@ class CheckpointBlock(torch.nn.Module):
                     continue
                 param_st = it["offset"]
                 param_end = it["offset"] + it["size"]
-                storage_type = it["storage_type"]
+                kw_name = it["kw_name"]
 
                 # not in this partition
-                storage_st = self._storage_info[storage_type]["begin"]
-                storage_end = self._storage_info[storage_type]["end"]
+                storage_st = self._storage_info[kw_name]["begin"]
+                storage_end = self._storage_info[kw_name]["end"]
                 if param_st >= storage_end:
                     continue
                 if param_end <= storage_st:
@@ -431,7 +442,7 @@ class CheckpointBlock(torch.nn.Module):
                 to_offset_end = offset_end + param_st - storage_st
                 
                 # copy to buffer
-                self._storage_params[storage_type].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
+                self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
                 del contiguous_param
             elif strict:
                 missing_keys.append(key)
@@ -442,6 +453,14 @@ class CheckpointBlock(torch.nn.Module):
                 if key.startswith(prefix) and key not in all_keys:
                     unexpected_keys.append(key)
     
+    def grouped_parameters(self):
+        ret = {}
+        for kw, val in self._storage_info.items():
+            if val["group"] not in ret:
+                ret[val["group"]] = []
+            ret[val["group"]].append(self._storage_params[kw])
+        for kw, val in ret.items():
+            yield kw, val
 
     def init_parameters(self):
         """
@@ -457,11 +476,11 @@ class CheckpointBlock(torch.nn.Module):
                 
                 param_st = it["offset"]
                 param_end = it["offset"] + it["size"]
-                storage_type = it["storage_type"]
+                kw_name = it["kw_name"]
 
                 # not in this partition
-                storage_st = self._storage_info[storage_type]["begin"]
-                storage_end = self._storage_info[storage_type]["end"]
+                storage_st = self._storage_info[kw_name]["begin"]
+                storage_end = self._storage_info[kw_name]["end"]
                 if param_st >= storage_end:
                     continue
                 if param_end <= storage_st:
@@ -478,7 +497,7 @@ class CheckpointBlock(torch.nn.Module):
                 to_offset_end = offset_end + param_st - storage_st
                 
                 # copy to buffer
-                self._storage_params[storage_type].storage()[to_offset_st: to_offset_end].copy_(tmp_tensor.storage()[offset_st: offset_end])
+                self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(tmp_tensor.storage()[offset_st: offset_end])
                 del tmp_tensor
         
 class OpTransformerBlockList(torch.autograd.Function):

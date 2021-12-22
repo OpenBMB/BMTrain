@@ -35,4 +35,23 @@ def init_parameters(model : torch.nn.Module):
             module.init_parameters()
         else:
             init_distributed_parameter( iterate_parameters(module) )
-            
+
+def grouped_parameters(model : torch.nn.Module):
+    ret = {}
+    for module in model.modules():
+        if isinstance(module, CheckpointBlock):
+            for kw, params in module.grouped_parameters():
+                if kw not in ret:
+                    ret[kw] = []
+                ret[kw].extend(params)
+        else:
+            for param in module._parameters.values():
+                group = None
+                if isinstance(param, DistributedParameter):
+                    group = param.group
+                if group not in ret:
+                    ret[group] = []
+                ret[group].append(param)
+    for kw, val in ret.items():
+        yield kw, val
+

@@ -3,7 +3,7 @@ from .init import init_distributed
 
 from .parameter import DistributedParameter, ParameterInitializer
 from .layer import DistributedModule
-from .param_init import init_parameters
+from .param_init import init_parameters, grouped_parameters
 from .utils import print_block, print_dict, print_rank
 from .synchronize import synchronize, sum_loss, wait_loader
 from .checkpointing import checkpoint
@@ -17,3 +17,4 @@ from . import benchmark
 from . import optim
 from . import inspect
 from . import lr_scheduler
+from . import loss

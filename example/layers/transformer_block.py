@@ -30,6 +30,7 @@ class TransformerEncoder(torch.nn.Module):
         Returns:
             out: (batch, hidden_size, seq_len)              fp16
         """
+        bmp.inspect.record_tensor(hidden_state, "hidden_state", group="encoder")
         x = self.layernorm_before_attention(hidden_state)
         x = self.self_attention(x, x, mask, position_bias)
         hidden_state = ct.element_add(hidden_state, x)      # hidden_state = hidden_state + x
@@ -73,6 +74,7 @@ class TransformerDecoder(torch.nn.Module):
         Returns:
             out: (batch, hidden_size, seq_q)                fp16
         """
+        bmp.inspect.record_tensor(hidden_state, "hidden_state", group="decoder")
         x = self.layernorm_before_self_attention(hidden_state)
         x = self.self_attention(x, x, mask_self_attn, self_attn_bias)
         hidden_state = ct.element_add(hidden_state, x)
