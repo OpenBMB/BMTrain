@@ -8,7 +8,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
     """
     Adam optimizer
     """
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, scale=65536):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, scale=65536, hold_steps=0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -25,6 +25,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
 
         self._scale = scale
         self._steps_since_last_scale = 0
+        self._hold_steps = hold_steps
     
     @property
     def scale(self):
@@ -112,7 +113,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 state["exp_avg"].view(-1),
                 state["exp_avg_sq"].view(-1),
                 beta1, beta2,
-                eps, lr,
+                eps,  0.0 if state["step"] <= self._hold_steps else lr,
                 self._scale,
                 weight_decay,
                 state["step"]

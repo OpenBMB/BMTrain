@@ -40,7 +40,7 @@ class AdamOptimizer(torch.optim.Optimizer):
     """
     Adam optimizer
     """
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, scale=65536):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, scale=65536, hold_steps=0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -58,6 +58,7 @@ class AdamOptimizer(torch.optim.Optimizer):
         self.load_stream = torch.cuda.Stream()
         self._scale = scale
         self._steps_since_last_scale = 0
+        self._hold_steps = hold_steps
     
     @property
     def scale(self):
@@ -146,7 +147,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                         curr_mgr.avg_sq,        # fp32: v
                         group['betas'][0], group['betas'][1],
                         group['eps'],
-                        group['lr'],
+                        0.0 if state["step"] <= self._hold_steps else group['lr'],
                         self._scale,
                         group['weight_decay'],
                         state['step']
