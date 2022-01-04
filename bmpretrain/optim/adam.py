@@ -76,8 +76,8 @@ class AdamOptimizer(torch.optim.Optimizer):
             for p in group['params']:
                 state = self.state[p]
                 if len(state) > 0:
-                    state['exp_avg'] /= delta
-                    state['exp_avg_sq'] /= delta
+                    state['exp_avg'] *= delta
+                    state['exp_avg_sq'] *= delta
         self._steps_since_last_scale = 0
 
     @torch.no_grad()

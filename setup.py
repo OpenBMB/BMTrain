@@ -16,7 +16,7 @@ def main():
     avx_flag = get_avx_flags()
     setup(
         name='bmpretrain',
-        version='0.0.12',
+        version='0.0.13',
         packages=find_packages(),
         install_requires=[
             "torch>=1.10",
