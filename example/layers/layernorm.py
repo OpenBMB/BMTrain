@@ -1,28 +1,34 @@
+from typing import Tuple
 import torch
+import torch.nn.functional as F
 import bmpretrain as bmp
-from cpm_kernels.torch.layernorm import OpLayerNormMean, OpLayerNormNoMean
 
+class Layernorm(bmp.DistributedModule):
+    __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
+    normalized_shape: Tuple[int, ...]
+    eps: float
+    elementwise_affine: bool
 
-class LayerNorm(bmp.DistributedModule):
-    def __init__(self, hidden_size : int, eps : float = 1e-5, bias=True, dtype=torch.half):
+    def __init__(self, normalized_shape, eps: float = 1e-5, elementwise_affine: bool = True,
+                dtype=None) -> None:
         super().__init__()
+        if isinstance(normalized_shape, int):
+            # mypy error: incompatible types in assignment
+            normalized_shape = (normalized_shape,)  # type: ignore[assignment]
+        self.normalized_shape = tuple(normalized_shape)  # type: ignore[arg-type]
         self.eps = eps
-        self.hidden_size = hidden_size
-        self.weight = bmp.DistributedParameter(torch.ones(hidden_size, dtype=dtype), group="layernorm")
-        self.bias = bmp.DistributedParameter(torch.zeros(hidden_size, dtype=dtype), group="layernorm") if bias else None
-    
-    def forward(self, x : torch.Tensor):
-        """
-        Args:
-            x: (batch_size, hidden_size, seq_len)       fp16
-        
-        Returns:
-            out : (batch_size, hidden_size, seq_len)    fp16
-        """
-        assert x.size(1) == self.hidden_size
-        
-        if self.bias is not None:
-            return  OpLayerNormMean.apply(x, self.eps, self.weight, self.bias)
+        self.elementwise_affine = elementwise_affine
+        if self.elementwise_affine:
+            self.weight = bmp.DistributedParameter(torch.empty(self.normalized_shape, dtype=dtype, device="cuda"), init_method=torch.nn.init.ones_)
+            self.bias = bmp.DistributedParameter(torch.empty(self.normalized_shape, dtype=dtype, device="cuda"), init_method=torch.nn.init.zeros_)
         else:
-            return OpLayerNormNoMean.apply(x, self.eps, self.weight)
-    
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return F.layer_norm(
+            input, self.normalized_shape, self.weight, self.bias, self.eps)
+
+    def extra_repr(self) -> str:
+        return '{normalized_shape}, eps={eps}, ' \
+            'elementwise_affine={elementwise_affine}'.format(**self.__dict__)

@@ -30,5 +30,6 @@ def optim_step(optim : torch.optim.Optimizer, lr_scheduler : Optional[WarmupLRSc
             optim.justify_scale(optim.scale * config["loss_scale_factor"])
     else:
         optim.step()
+        lr_scheduler.step()
 
     config['load_stream'].wait_stream(current_stream)

@@ -52,7 +52,6 @@ DTYPE_LIST = [
     torch.bool
 ]
 
-import torch.distributed as dist;dist.broadcast_object_list
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
