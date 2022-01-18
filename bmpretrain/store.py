@@ -132,7 +132,7 @@ class DistributedStateDictWrapper:
         
         if config['rank'] == 0:
             input_param : torch.Tensor = self._state_dict[key]
-            input_param = input_param.cuda()
+            input_param = input_param.cuda().contiguous()
 
             nccl.broadcast(
                 input_param.storage(),
@@ -162,13 +162,15 @@ class DistributedStateDictWrapper:
     def keys(self):
         return broadcast_object(list(self._state_dict.keys()))
 
-def load(model : torch.nn.Module, file_name : str):
+def load(model : torch.nn.Module, file_name : str, strict : bool = True):
     if config['rank'] == 0:
         state_dict = DistributedStateDictWrapper(torch.load(file_name))
     else:
         state_dict = DistributedStateDictWrapper({})
 
-    model.load_state_dict(
-        state_dict
+    ret = model.load_state_dict(
+        state_dict,
+        strict = strict
     )
     torch.cuda.synchronize()
+    return ret

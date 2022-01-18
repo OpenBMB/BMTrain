@@ -16,5 +16,17 @@ RUN pip3 install -r other_requirements.txt
 ADD . .
 RUN python3 setup.py install
 
-WORKDIR /root
+# training V2
+
+RUN groupadd ma-group -g 1000 && \
+    useradd -d /home/ma-user -m -u 1000 -g 1000 -s /bin/bash ma-user && \
+    chmod 770 /home/ma-user && \
+    chmod 770 /root && \
+    # or silver bullet of files permission
+    # chmod -R 777 /root && \
+    usermod -a -G root ma-user
+
+USER ma-user
+WORKDIR /home/ma-user
+
 ADD example example

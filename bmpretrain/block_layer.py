@@ -432,7 +432,7 @@ class CheckpointBlock(torch.nn.Module):
                     
                 # copy to buffer
                 assert input_param.numel() == it["size"]
-                contiguous_param = input_param.contiguous()
+                contiguous_param = input_param.to(it["parameter"].dtype).contiguous()
                 
                 offset_st = max(storage_st - param_st, 0)
                 offset_end = min(storage_end - param_st, contiguous_param.numel())
