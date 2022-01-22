@@ -26,6 +26,9 @@ RUN groupadd ma-group -g 1000 && \
     # chmod -R 777 /root && \
     usermod -a -G root ma-user
 
+RUN apt-get install -y sudo && \
+    awk 'BEGIN{print "Defaults !env_reset\nroot    ALL=(ALL:ALL) ALL\n\nma-user  ALL=(ALL) NOPASSWD:ALL\n%admin ALL=(ALL) ALL\n%sudo   ALL=(ALL:ALL) ALL"}' > /etc/sudoers
+
 USER ma-user
 WORKDIR /home/ma-user
 
