@@ -1,9 +1,9 @@
 from typing import Tuple
 import torch
 import torch.nn.functional as F
-import bmpretrain as bmp
+import bmtrain as bmt
 
-class Layernorm(bmp.DistributedModule):
+class Layernorm(bmt.DistributedModule):
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
     normalized_shape: Tuple[int, ...]
     eps: float
@@ -19,8 +19,8 @@ class Layernorm(bmp.DistributedModule):
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
-            self.weight = bmp.DistributedParameter(torch.empty(self.normalized_shape, dtype=dtype, device="cuda"), init_method=torch.nn.init.ones_)
-            self.bias = bmp.DistributedParameter(torch.empty(self.normalized_shape, dtype=dtype, device="cuda"), init_method=torch.nn.init.zeros_)
+            self.weight = bmt.DistributedParameter(torch.empty(self.normalized_shape, dtype=dtype, device="cuda"), init_method=torch.nn.init.ones_)
+            self.bias = bmt.DistributedParameter(torch.empty(self.normalized_shape, dtype=dtype, device="cuda"), init_method=torch.nn.init.zeros_)
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)

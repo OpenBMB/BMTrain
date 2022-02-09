@@ -1,16 +1,16 @@
 import torch
-import bmpretrain
+import bmtrain
 from tqdm import tqdm
 
-from bmpretrain.utils import print_rank
+from bmtrain.utils import print_rank
 
-class DistributedLinear(bmpretrain.DistributedModule):
+class DistributedLinear(bmtrain.DistributedModule):
     def __init__(self, dim_in, dim_out):
         super().__init__()
         self.dim_in = dim_in
         self.dim_out = dim_out
 
-        self.weight = bmpretrain.DistributedParameter(torch.empty(dim_in, dim_out, dtype=torch.float))
+        self.weight = bmtrain.DistributedParameter(torch.empty(dim_in, dim_out, dtype=torch.float))
     
     def forward(self, x : torch.Tensor):
         last_dim = x.size(-1)
@@ -19,7 +19,7 @@ class DistributedLinear(bmpretrain.DistributedModule):
         var_out = out.var(dim=-1, keepdim=True)
         return out / var_out + x
 
-class TestMLP(bmpretrain.DistributedModule):
+class TestMLP(bmtrain.DistributedModule):
     def __init__(self):
         super().__init__()
 
@@ -27,7 +27,7 @@ class TestMLP(bmpretrain.DistributedModule):
             DistributedLinear(8, 8) for _ in range(16)
         ])
     
-    @bmpretrain.checkpoint
+    @bmtrain.checkpoint
     def forward_segments(self, layer_ids, hidden_state : torch.Tensor):
         for idx in layer_ids:
             hidden_state = self.mlp[idx](hidden_state)
@@ -41,11 +41,11 @@ class TestMLP(bmpretrain.DistributedModule):
             [12, 13], [14, 15]
         ]:
             x = self.forward_segments(segments, x)
-            bmpretrain.wait_loader()
+            bmtrain.wait_loader()
         return x
 
 def main():
-    bmpretrain.init_distributed()
+    bmtrain.init_distributed()
 
     model = TestMLP()
 
@@ -56,9 +56,9 @@ def main():
     model.load_state_dict(state)    # split parameters automatically
     print_rank("Model after loading state dict\n", torch.cuda.memory_summary())
     
-    for i in range(bmpretrain.world_size()):
+    for i in range(bmtrain.world_size()):
         v = torch.randn(4, 8, dtype=torch.float, device="cuda")
-        if i == bmpretrain.rank():
+        if i == bmtrain.rank():
             raw_data = v
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -67,15 +67,15 @@ def main():
         data = raw_data.clone().requires_grad_()
         optimizer.zero_grad()
         output = model(data)
-        loss = ((output - bmpretrain.rank()) ** 2).mean()
-        print_rank("Iter %d, loss: " % iter, bmpretrain.sum_loss(loss).item())
+        loss = ((output - bmtrain.rank()) ** 2).mean()
+        print_rank("Iter %d, loss: " % iter, bmtrain.sum_loss(loss).item())
         
         loss.backward()
         optimizer.step()
-        bmpretrain.wait_optimizer() # loader stream wait for optimizer
+        bmtrain.wait_optimizer() # loader stream wait for optimizer
 
     print_rank(torch.cuda.memory_summary())
-    bmpretrain.synchronize()
+    bmtrain.synchronize()
     print_rank(torch.cuda.memory_summary(), rank=1)
 
     

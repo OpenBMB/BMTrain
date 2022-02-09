@@ -1,10 +1,10 @@
 from typing import Optional
 import torch
-import bmpretrain as bmp
+import bmtrain as bmt
 from layers import Linear
 import math
 
-class Attention(bmp.DistributedModule):
+class Attention(bmt.DistributedModule):
     def __init__(self, 
             dim_model : int, dim_head : int,
             num_heads : int, bias : bool = True,

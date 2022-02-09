@@ -8,7 +8,14 @@ python3 setup.py install
 
 ## 使用
 
-使用时需要对原有代码进行简单替换：
+### Step 1: ZeRO3
+
+使用ZeRO3优化需要对模型代码进行简单替换：
+
+* `torch.nn.Module` -> `bmtrain.DistributedModule`
+* `torch.nn.Parameter` -> `bmtrain.DistributedParameter`
+
+并在合适的模块上使用`Checkpointing`。
 
 **原始代码：**
 
@@ -19,15 +26,15 @@ class MyModule(torch.nn.Module):
         super().__init__()
         self.param = torch.nn.Parameter(torch.empty(1024))
         self.module_list = torch.nn.ModuleList([
-            torch.nn.Linear(1024, 1024),
-            torch.nn.Linear(1024, 1024),
-            torch.nn.Linear(1024, 1024)
+            SomeTransformerBlock(),
+            SomeTransformerBlock(),
+            SomeTransformerBlock()
         ])
     
     def forward(self):
         x = self.param
         for module in self.module_list:
-            x = module(x)
+            x = module(x, 1, 2, 3)
         return x
 
 ```
@@ -36,33 +43,81 @@ class MyModule(torch.nn.Module):
 
 ```python
 import torch
-import bmpretrain as bmp
-class MyModule(bmp.DistributedModule):
+import bmtrain as bmt
+class MyModule(bmt.DistributedModule):
     def __init__(self):
         super().__init__()
-        self.param = bmp.DistributedParameter(torch.empty(1024))
-        self.module_list = bmp.TransformerBlockList([
-            bmp.CheckpointBlock(MyModule()),
-            bmp.CheckpointBlock(MyModule()),
-            bmp.CheckpointBlock(MyModule())
+        self.param = bmt.DistributedParameter(torch.empty(1024))
+        self.module_list = torch.nn.ModuleList([
+            bmt.CheckpointBlock(SomeTransformerBlock()),
+            bmt.CheckpointBlock(SomeTransformerBlock()),
+            bmt.CheckpointBlock(SomeTransformerBlock())
         ])
     
     def forward(self):
         x = self.param
-        x = self.module_list(x)
+        for module in self.module_list:
+            x = module(x, 1, 2, 3)
         return x
     
 ```
 
-## 说明
+### Step 2: 通信优化
 
-在使用时需要将所有的`torch.nn.Module`替换为`bmp.DistributedModule`，将`torch.nn.Parameter`替换为`bmp.DistributedParameter`。
+为了进一步缩短通信额外开销，将通信与运算时间重叠，可以使用`TransformerBlockList`来进一步优化。
+在使用时需要对代码进行简单替换：
 
-同时，针对于**transformer**等多层堆叠的模型，可以使用`bmp.TransformerBlockList`和`bmp.CheckpointBlock`来实现`checkpointing`和进一步的加速。
+* `torch.nn.ModuleList` -> `bmtrain.TransformerBlockList`
+* `for module in self.module_list: x = module(x, ...)` -> `x = self.module_list(x, ...)`
 
-# 其他
+**原始代码：**
 
-使用`bmpretrain.inspect`模块来方便的打印模型参数分布，和中间变量分布。
+```python
+import torch
+import bmtrain as bmt
+class MyModule(bmt.DistributedModule):
+    def __init__(self):
+        super().__init__()
+        self.param = bmt.DistributedParameter(torch.empty(1024))
+        self.module_list = torch.nn.ModuleList([
+            bmt.CheckpointBlock(SomeTransformerBlock()),
+            bmt.CheckpointBlock(SomeTransformerBlock()),
+            bmt.CheckpointBlock(SomeTransformerBlock())
+        ])
+    
+    def forward(self):
+        x = self.param
+        for module in self.module_list:
+            x = module(x, 1, 2, 3)
+        return x
+    
+```
+
+**替换后代码：**
+
+```python
+import torch
+import bmtrain as bmt
+class MyModule(bmt.DistributedModule):
+    def __init__(self):
+        super().__init__()
+        self.param = bmt.DistributedParameter(torch.empty(1024))
+        self.module_list = bmt.TransformerBlockList([
+            bmt.CheckpointBlock(SomeTransformerBlock()),
+            bmt.CheckpointBlock(SomeTransformerBlock()),
+            bmt.CheckpointBlock(SomeTransformerBlock())
+        ])
+    
+    def forward(self):
+        x = self.param
+        x = self.module_list(x, 1, 2, 3)
+        return x
+    
+```
+
+# 注意
+
+请使用`bmtrain.inspect`模块来访问模型的参数和运算的中间变量以获取正确的结果。
 
 更多例子请参考 *examples* 文件夹。
 

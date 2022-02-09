@@ -142,4 +142,3 @@ class FusedCrossEntropy(torch.nn.CrossEntropyLoss):
             return ret.sum()
         elif self.reduction == "mean":
             return ret.sum() / (target != self.ignore_index).int().sum().float()
-

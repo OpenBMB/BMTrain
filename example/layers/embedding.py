@@ -2,10 +2,10 @@ import math
 from typing import Optional
 import torch
 import torch.nn.functional as F
-import bmpretrain as bmp
+import bmtrain as bmt
 
 
-class Embedding(bmp.DistributedModule):
+class Embedding(bmt.DistributedModule):
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  sparse: bool = False, _weight: Optional[torch.Tensor] = None,
@@ -25,9 +25,9 @@ class Embedding(bmp.DistributedModule):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = bmp.DistributedParameter(torch.empty(num_embeddings, embedding_dim, dtype=dtype, device="cuda"), init_method=torch.nn.init.normal_)
+            self.weight = bmt.DistributedParameter(torch.empty(num_embeddings, embedding_dim, dtype=dtype, device="cuda"), init_method=torch.nn.init.normal_)
         else:
-            self.weight = bmp.DistributedParameter(_weight)
+            self.weight = bmt.DistributedParameter(_weight)
         
         self.sparse = sparse
     

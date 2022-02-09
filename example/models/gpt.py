@@ -1,8 +1,8 @@
 import torch
-import bmpretrain as bmp
+import bmtrain as bmt
 from layers import TransformerEncoder, Layernorm, Embedding, TransformerEncoder
 
-class GPT(bmp.DistributedModule):
+class GPT(bmt.DistributedModule):
     def __init__(self,
             num_layers : int, vocab_size : int,
             dim_model : int, dim_head : int, num_heads : int, dim_ff : int,
@@ -16,8 +16,8 @@ class GPT(bmp.DistributedModule):
         self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         self.pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
         
-        self.transformers = bmp.TransformerBlockList([
-            bmp.CheckpointBlock(
+        self.transformers = bmt.TransformerBlockList([
+            bmt.CheckpointBlock(
                 TransformerEncoder(
                     dim_model, dim_head, num_heads, dim_ff, bias, dtype
                 )
@@ -42,6 +42,6 @@ class GPT(bmp.DistributedModule):
         out = self.layernorm(out)
 
         logits = self.word_emb(out, projection=True)
-        bmp.inspect.record_tensor(logits, "logits")
+        bmt.inspect.record_tensor(logits, "logits")
 
         return logits

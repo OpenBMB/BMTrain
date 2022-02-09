@@ -9,8 +9,7 @@ from . import nccl
 def init_distributed(
         seed : int = 0,
         loss_scale_factor : float = 2,
-        loss_scale_steps : int = 1024,
-        gradient_inspect : bool = False
+        loss_scale_steps : int = 1024
     ):
     torch.backends.cudnn.enabled = False
     
@@ -34,7 +33,6 @@ def init_distributed(
 
     config["loss_scale_factor"] = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
     config["loss_scale_steps"] = loss_scale_steps
-    config["gradient_inspect"] = gradient_inspect
 
     cpus_this_worker = None
     
@@ -60,9 +58,9 @@ def init_distributed(
     
     if rank == 0:
         unique_id : bytes = nccl.getUniqueId()
-        store.set("BMPRETRAIN_UNIQUE_ID", unique_id.hex() )
+        store.set("BMTRAIN_UNIQUE_ID", unique_id.hex() )
     
-    unique_id = bytes.fromhex(store.get("BMPRETRAIN_UNIQUE_ID").decode())
+    unique_id = bytes.fromhex(store.get("BMTRAIN_UNIQUE_ID").decode())
     config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
     
     print_dict("Initialization", {

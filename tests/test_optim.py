@@ -1,5 +1,5 @@
 import torch
-import bmpretrain as bmp
+import bmtrain as bmt
 
 class TestModule(torch.nn.Module):
     def __init__(self):
@@ -28,8 +28,8 @@ def main():
     model2 = model2.cuda().half()
     model3 = model3.cuda()
     
-    opt1 = bmp.optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
-    opt2 = bmp.optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-3)
+    opt1 = bmt.optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
+    opt2 = bmt.optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-3)
     opt3 = torch.optim.Adam(model3.parameters(), weight_decay=1e-3)
 
     for _ in range(100):

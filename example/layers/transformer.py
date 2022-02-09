@@ -1,9 +1,9 @@
 from typing import Optional
 import torch
-import bmpretrain as bmp
+import bmtrain as bmt
 from layers import Layernorm, Feedforward, Attention
 
-class TransformerEncoder(bmp.DistributedModule):
+class TransformerEncoder(bmt.DistributedModule):
     def __init__(self,
             dim_model : int, dim_head : int, num_heads : int, dim_ff : int,
             bias : bool = True, dtype = None
@@ -21,7 +21,7 @@ class TransformerEncoder(bmp.DistributedModule):
             mask : torch.BoolTensor,    # (batch, seq_len, dim_model)
             position_bias : Optional[torch.Tensor] = None,   # (batch, num_head, seq_len, seq_len)
         ):
-        bmp.inspect.record_tensor(hidden, "hidden")
+        bmt.inspect.record_tensor(hidden, "hidden")
         x = self.ln_attn(hidden)
         x = self.attn(x, x, mask, position_bias)
         hidden = hidden + x

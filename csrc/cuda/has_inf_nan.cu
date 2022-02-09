@@ -32,7 +32,7 @@ __inline__ __device__ float blockReduceAny(int8_t x) {
 
 
 // grid <1>,        thread<min(round_up(n, 32), 1024)>
-__global__ void bmp_has_nan_inf(
+__global__ void bmt_has_nan_inf(
     int32_t n,
     const half* inp,    // (n,) 
     uint8_t* out
@@ -64,5 +64,5 @@ void has_nan_inf_launcher(
     dim3 block_size = dim3(threads, 1, 1);
     dim3 grid_size = dim3(1, 1, 1);
     
-    bmp_has_nan_inf<<<grid_size, block_size, 0, stream.stream()>>>(n, g_ptr, out.data_ptr<uint8_t>());
+    bmt_has_nan_inf<<<grid_size, block_size, 0, stream.stream()>>>(n, g_ptr, out.data_ptr<uint8_t>());
 }

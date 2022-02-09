@@ -3,9 +3,9 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtensio
 import os
 
 def get_avx_flags():
-    if os.environ.get("BMP_AVX256", "").lower() in ["1", "true", "on"]:
+    if os.environ.get("BMT_AVX256", "").lower() in ["1", "true", "on"]:
         return ["-mavx", "-mfma", "-mf16c"]
-    elif os.environ.get("BMP_AVX512", "").lower() in ["1", "true", "on"]:
+    elif os.environ.get("BMT_AVX512", "").lower() in ["1", "true", "on"]:
         return ["-mavx512f"]
     else:
         return ["-march=native"]
@@ -15,8 +15,8 @@ def main():
 
     avx_flag = get_avx_flags()
     setup(
-        name='bmpretrain',
-        version='0.0.14',
+        name='bmtrain',
+        version='0.0.15',
         packages=find_packages(),
         install_requires=[
             "torch>=1.10",
@@ -24,15 +24,15 @@ def main():
             "typing-extensions>=4.0.0"
         ],
         ext_modules=[
-            CUDAExtension('bmpretrain.nccl._C', [
+            CUDAExtension('bmtrain.nccl._C', [
                 'csrc/nccl.cpp',
             ], include_dirs=["csrc/nccl/build/include"], extra_compile_args={}),
-            CUDAExtension('bmpretrain.optim._cuda', [
+            CUDAExtension('bmtrain.optim._cuda', [
                 'csrc/adam_cuda.cpp',
                 'csrc/cuda/adam.cu',
                 'csrc/cuda/has_inf_nan.cu'
             ], extra_compile_args={}),
-            CppExtension("bmpretrain.optim._cpu", [
+            CppExtension("bmtrain.optim._cpu", [
                 "csrc/adam_cpu.cpp",
             ], extra_compile_args=[
                 '-fopenmp', 

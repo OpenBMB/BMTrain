@@ -2,39 +2,6 @@ import torch
 from ..global_var import config
 from . import _cuda as C
 from .. import nccl
-class AdamTransferManager:
-    def __init__(self, avg_sq_host, param_host, device, stream):
-        self._avg_sq_host = avg_sq_host
-        self._param_host = param_host
-
-        self.device = device
-        self.stream = stream
-
-        self.avg_sq = None
-        self.param_fp32 = None
-    
-    def enter(self):
-        curr_stream = torch.cuda.current_stream()
-        with torch.cuda.stream(self.stream):
-            curr_avg_sq = torch.empty( self._avg_sq_host.size(), dtype=torch.float32, device=self.device )
-            curr_avg_sq.copy_( self._avg_sq_host, non_blocking=True )
-            curr_param = torch.empty( self._param_host.size(), dtype=torch.float32, device=self.device )
-            curr_param.copy_( self._param_host, non_blocking=True )
-        
-        # It's okay not to use record_stream() here
-
-        self.avg_sq = curr_avg_sq
-        self.param_fp32 = curr_param
-        curr_stream.wait_stream(self.stream)
-    
-    def exit(self):
-        curr_stream = torch.cuda.current_stream()
-        self.stream.wait_stream(curr_stream)
-        with torch.cuda.stream(self.stream):
-            self._avg_sq_host.copy_(self.avg_sq, non_blocking=True)
-            self._param_host.copy_(self.param_fp32, non_blocking=True)
-        self.avg_sq = None
-        self.param_fp32 = None
 
 class AdamOptimizer(torch.optim.Optimizer):
     """
@@ -110,7 +77,6 @@ class AdamOptimizer(torch.optim.Optimizer):
         self._steps_since_last_scale += 1
 
         # update parameters
-        last_mgr = None
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is not None:
@@ -124,27 +90,20 @@ class AdamOptimizer(torch.optim.Optimizer):
                         # Exponential moving average of gradient values
                         state['exp_avg'] = torch.zeros(p.size(), dtype=torch.half, device=p.device) # on device
                         # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, pin_memory=True)   # on host
+                        state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device)   # on device
 
-                        state['param_fp32'] = torch.empty(p.size(), dtype=torch.float32, pin_memory=True)   # on host
+                        state['param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device=p.device)   # on device
                         state['param_fp32'].copy_(p)
-
-                    curr_mgr = AdamTransferManager( state['exp_avg_sq'], state['param_fp32'], p.device, self.load_stream )
-
-                    curr_mgr.enter()
-                    if last_mgr is not None:
-                        last_mgr.exit()
-                    last_mgr = curr_mgr
 
                     # update the steps for each param group update
                     state['step'] += 1
                     
                     C.f_adam(
-                        curr_mgr.param_fp32,    # fp32
+                        state["param_fp32"],    # fp32
                         p,                      # fp16
                         p.grad,                 # fp16
                         state['exp_avg'],       # fp16: m
-                        curr_mgr.avg_sq,        # fp32: v
+                        state["exp_avg_sq"],    # fp32: v
                         group['betas'][0], group['betas'][1],
                         group['eps'],
                         0.0 if state["step"] <= self._hold_steps else group['lr'],
@@ -152,8 +111,6 @@ class AdamOptimizer(torch.optim.Optimizer):
                         group['weight_decay'],
                         state['step']
                     )
-        if last_mgr is not None:
-            last_mgr.exit()
         
         return loss
     
