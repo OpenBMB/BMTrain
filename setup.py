@@ -11,12 +11,13 @@ def get_avx_flags():
         return ["-march=native"]
 
 def main():
-    print(find_packages())
-
     avx_flag = get_avx_flags()
     setup(
         name='bmtrain',
         version='0.0.15',
+        author="Guoyang Zeng",
+        author_email="qbjooo@qq.com",
+        description="A toolkit for training big models",
         packages=find_packages(),
         install_requires=[
             "torch>=1.10",
