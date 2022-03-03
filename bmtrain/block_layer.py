@@ -1,5 +1,4 @@
-from ctypes import Union
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Union
 
 from .global_var import config
 import torch
