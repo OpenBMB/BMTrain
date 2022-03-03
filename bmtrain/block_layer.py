@@ -1,3 +1,4 @@
+from ctypes import Union
 from typing import Dict, Iterable
 
 from .global_var import config
@@ -622,6 +623,9 @@ class TransformerBlockList(torch.nn.Module):
 
     def __len__(self) -> int:
         return len(self._modules)
+    
+    def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
+        return self._modules[str(index)]
 
     def forward(self, hidden_state, *args):
         return OpTransformerBlockList.apply(self, hidden_state, *args)
