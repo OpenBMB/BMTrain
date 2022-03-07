@@ -503,8 +503,6 @@ class CheckpointBlock(torch.nn.Module):
 class OpTransformerBlockList(torch.autograd.Function):
     @staticmethod
     def forward(ctx, self : 'TransformerBlockList', hidden_state, *args):
-        ctx.cuda_rng_state = torch.cuda.get_rng_state()
-
         tensors = []
         others = []
         for arg in args:
@@ -520,9 +518,11 @@ class OpTransformerBlockList(torch.autograd.Function):
         
         layer_inputs = []
         layer_inspector = []
+        cuda_rng_state = []
         with torch.no_grad():
             for i in range(len(self)):
                 layer_inputs.append(hidden_state)
+                cuda_rng_state.append( torch.cuda.get_rng_state() )
                 block_ctx = CheckpointBlockContext(self._modules[str(i)])
                 # gather parameter on load stream
                 block_ctx.enter()
@@ -535,6 +535,8 @@ class OpTransformerBlockList(torch.autograd.Function):
                 block_ctx.exit()
         
         ctx.layer_inspector = layer_inspector
+        ctx.cuda_rng_state = cuda_rng_state
+
         
         ctx.save_for_backward(*layer_inputs, *tensors)
         return hidden_state
@@ -548,28 +550,27 @@ class OpTransformerBlockList(torch.autograd.Function):
                 " argument.")
 
         all_inputs = []
-        input_reqires_grad = []
+        input_requires_grad = []
         
         layer_inputs = ctx.saved_tensors[:len(ctx.self)]
         save_args = ctx.saved_tensors[len(ctx.self):]
         for tensor, other in zip(save_args, ctx.nontensor_inputs):
             if tensor is None:
                 all_inputs.append(other)
-                input_reqires_grad.append(False)
+                input_requires_grad.append(False)
             else:
                 # detach for tensor inputs
-                input_reqires_grad.append( tensor.requires_grad )
+                input_requires_grad.append( tensor.requires_grad )
                 nw_tensor = tensor.detach()
                 nw_tensor.requires_grad = tensor.requires_grad
                 all_inputs.append(nw_tensor)
         
         with torch.random.fork_rng(devices=[torch.cuda.current_device()], enabled=True):
-            torch.cuda.set_rng_state(ctx.cuda_rng_state)
-
             with torch.enable_grad():
                 # overlap load and scatter here
                 prev_ctx = None
                 for i in list(range(len(ctx.self)))[::-1]:
+                    torch.cuda.set_rng_state(ctx.cuda_rng_state[i])
                     ipt = layer_inputs[i].detach().requires_grad_()
                     block_ctx = CheckpointBlockContext(ctx.self._modules[str(i)])
                     block_ctx.enter()
@@ -600,7 +601,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                     config["load_stream"].record_event(config["load_event"])
 
         grads = []
-        for inp, requires_grad in zip(all_inputs, input_reqires_grad):
+        for inp, requires_grad in zip(all_inputs, input_requires_grad):
             if requires_grad:
                 grads.append(inp.grad)
             else:
