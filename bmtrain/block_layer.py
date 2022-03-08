@@ -502,7 +502,7 @@ class CheckpointBlock(torch.nn.Module):
         
 class OpTransformerBlockList(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, self : 'TransformerBlockList', hidden_state, *args):
+    def forward(ctx, self : 'TransformerBlockList', save_list, hidden_state, *args):
         tensors = []
         others = []
         for arg in args:
@@ -515,13 +515,16 @@ class OpTransformerBlockList(torch.autograd.Function):
     
         ctx.nontensor_inputs = others
         ctx.self = self
-        
+        ctx.save_list = save_list
+        ctx.num_save_needed = save_list[-1][1]+1
+
         layer_inputs = []
         layer_inspector = []
         cuda_rng_state = []
         with torch.no_grad():
             for i in range(len(self)):
-                layer_inputs.append(hidden_state)
+                if save_list[i][0] == i:
+                    layer_inputs.append(hidden_state)
                 cuda_rng_state.append( torch.cuda.get_rng_state() )
                 block_ctx = CheckpointBlockContext(self._modules[str(i)])
                 # gather parameter on load stream
@@ -541,8 +544,20 @@ class OpTransformerBlockList(torch.autograd.Function):
         ctx.save_for_backward(*layer_inputs, *tensors)
         return hidden_state
 
+
     @staticmethod
     def backward(ctx, grad_hidden_state : torch.Tensor):
+        def exit_prev(prev_ctx, prev_grad):
+            if prev_ctx is not None:
+                if prev_grad:
+                    with torch.enable_grad():
+                        prev_ctx.exit()
+                        config["load_stream"].record_event(config["load_event"])
+                else:
+                    with torch.no_grad():
+                        prev_ctx.exit()
+                        config["load_stream"].record_event(config["load_event"])
+                
         if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError(
                 "Checkpointing is not compatible with .grad() or when an `inputs` parameter"
@@ -552,8 +567,8 @@ class OpTransformerBlockList(torch.autograd.Function):
         all_inputs = []
         input_requires_grad = []
         
-        layer_inputs = ctx.saved_tensors[:len(ctx.self)]
-        save_args = ctx.saved_tensors[len(ctx.self):]
+        layer_inputs = ctx.saved_tensors[:ctx.num_save_needed]
+        save_args = ctx.saved_tensors[ctx.num_save_needed:]
         for tensor, other in zip(save_args, ctx.nontensor_inputs):
             if tensor is None:
                 all_inputs.append(other)
@@ -569,15 +584,29 @@ class OpTransformerBlockList(torch.autograd.Function):
             with torch.enable_grad():
                 # overlap load and scatter here
                 prev_ctx = None
-                for i in list(range(len(ctx.self)))[::-1]:
+                prev_grad = False
+                for i in reversed(range(len(ctx.self))):
+                    if ctx.save_list[i][0] != i:
+                        with torch.no_grad():
+                            st = ctx.save_list[i][0]
+                            ipt = layer_inputs[ctx.save_list[i][1]]
+                            for j in range(st, i):
+                                torch.cuda.set_rng_state(ctx.cuda_rng_state[j])
+                                block_ctx = CheckpointBlockContext(ctx.self._modules[str(j)])
+                                block_ctx.enter()
+                                exit_prev(prev_ctx, prev_grad)
+                                output = ctx.self._modules[str(j)]._module._call_impl(ipt, *all_inputs)
+                                prev_ctx = block_ctx
+                                prev_grad = False
+                                layer_inputs[ctx.save_list[j+1][1]].copy_(output)
+                                ctx.save_list[j+1][0] = j+1
                     torch.cuda.set_rng_state(ctx.cuda_rng_state[i])
-                    ipt = layer_inputs[i].detach().requires_grad_()
+                    ipt = layer_inputs[ctx.save_list[i][1]].detach().requires_grad_()
                     block_ctx = CheckpointBlockContext(ctx.self._modules[str(i)])
                     block_ctx.enter()
-                    if prev_ctx is not None:
-                        prev_ctx.exit()
-                        config["load_stream"].record_event(config["load_event"])
+                    exit_prev(prev_ctx, prev_grad)
                     prev_ctx = block_ctx
+                    prev_grad = True
 
                     with ScopedTensorInspectorContext() as inspector:
                         output = ctx.self._modules[str(i)]._module._call_impl(ipt, *all_inputs)
@@ -596,9 +625,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                     )
                     grad_hidden_state = ipt.grad
                 
-                if prev_ctx is not None:
-                    prev_ctx.exit()
-                    config["load_stream"].record_event(config["load_event"])
+                exit_prev(prev_ctx, prev_grad)
 
         grads = []
         for inp, requires_grad in zip(all_inputs, input_requires_grad):
@@ -606,12 +633,12 @@ class OpTransformerBlockList(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, grad_hidden_state) + tuple(grads)
+        return (None, None, grad_hidden_state) + tuple(grads)
     
 class TransformerBlockList(torch.nn.Module):
     _modules: Dict[str, CheckpointBlock]
 
-    def __init__(self, modules: Iterable[CheckpointBlock]) -> None:
+    def __init__(self, modules: Iterable[CheckpointBlock], sqrt=False) -> None:
         super().__init__()
         
         self._modules = {}
@@ -621,8 +648,31 @@ class TransformerBlockList(torch.nn.Module):
             self._modules[str(i)] = module
             self.add_module(str(i), module)
 
+        if sqrt:
+            length = len(self)
+            num_save_needed = 0
+            num_freed = 0
+            save_list = [None]*length
+            for i in range(length-1, -1, -1):
+                if num_freed == 0 or i == 0:
+                    num_save_needed += 1
+                    save_list[i] = [1, -num_save_needed]
+                    num_freed = num_save_needed
+                else:
+                    num_freed -= 1
+                    save_list[i] = [0, -(num_save_needed - num_freed)]
+            for i in range(length-1, -1, -1):
+                save_list[i][1] += num_save_needed
+            for i in range(0, length):
+                save_list[i][0] = i if save_list[i][0]==1 else save_list[i-1][0]
+
+            self.save_list = save_list
+        else:
+            self.save_list = [(i, i) for i in range(len(self))]
+            
     def __len__(self) -> int:
         return len(self._modules)
 
     def forward(self, hidden_state, *args):
-        return OpTransformerBlockList.apply(self, hidden_state, *args)
+        # return OpTransformerBlockList.apply(self, hidden_state, *args)
+        return OpTransformerBlockList.apply(self, self.save_list, hidden_state, *args)
