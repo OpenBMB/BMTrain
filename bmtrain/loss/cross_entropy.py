@@ -127,14 +127,14 @@ class FusedCrossEntropy(torch.nn.CrossEntropyLoss):
     """
     
     def __init__(self, weight: Optional[torch.Tensor] = None, size_average=None, ignore_index: int = -100,
-                 reduce=None, reduction: str = 'mean', label_smoothing: float = 0.0) -> None:
-        super().__init__(weight, size_average, ignore_index, reduce, reduction, label_smoothing)
+                 reduce=None, reduction: str = 'mean') -> None:
+        super().__init__(weight, size_average, ignore_index, reduce, reduction)
 
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         ret = F.cross_entropy(input, target, weight=self.weight,
                                ignore_index=self.ignore_index, reduction="none",
-                               label_smoothing=self.label_smoothing)
+                               )
         ret = ret.float()
         if self.reduction == "none":
             return ret

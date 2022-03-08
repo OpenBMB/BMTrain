@@ -20,7 +20,6 @@ def main():
         description="A toolkit for training big models",
         packages=find_packages(),
         install_requires=[
-            "torch>=1.10",
             "numpy",
             "typing-extensions>=4.0.0"
         ],
