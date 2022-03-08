@@ -1,6 +1,6 @@
 import torch
 from typing import Callable, TypeVar
-from typing_extensions import ParamSpec
+# from typing_extensions import ParamSpec
 from functools import wraps
 from . import debug
 
@@ -120,9 +120,10 @@ class CheckpointFunction(torch.autograd.Function):
         return (None, None) + tuple(grads)
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
-def checkpoint(func : Callable[P, R]) -> Callable[P, R]:
+# P = ParamSpec("P")
+# R = TypeVar("R")
+# def checkpoint(func : Callable[P, R]) -> Callable[P, R]:
+def checkpoint(func):
     @wraps(func)
     def wrapper(*args):
         return CheckpointFunction.apply(func, True, *args)
