@@ -132,7 +132,10 @@ class DistributedStateDictWrapper:
         
         if config['rank'] == 0:
             input_param : torch.Tensor = self._state_dict[key]
-            input_param = input_param.cuda().contiguous()
+            if input_param.is_cuda:
+                input_param = input_param.clone().contiguous()
+            else:
+                input_param = input_param.cuda().contiguous()
 
             nccl.broadcast(
                 input_param.storage(),

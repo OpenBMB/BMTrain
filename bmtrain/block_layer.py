@@ -1,4 +1,4 @@
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Union
 
 from .global_var import config
 import torch
@@ -7,13 +7,14 @@ from .synchronize import wait_loader
 from .parameter import DistributedParameter, OpAllGather
 from .checkpointing import ScopedTensorInspectorContext
 from . import debug
+import copy
 
 def round_up(x, d):
     return (x + d - 1) // d * d
 
 class OpCheckpointBlock(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, block : 'CheckpointBlock', preserve_rng_state, *args):
+    def forward(ctx, placeholder, block : 'CheckpointBlock', preserve_rng_state, *args):
         ctx.block = block
         ctx.preserve_rng_state = preserve_rng_state
         
@@ -97,7 +98,7 @@ class OpCheckpointBlock(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None) + tuple(grads)
+        return (None, None, None) + tuple(grads)
 
 class CheckpointBlockContext:
     def __init__(self, block : 'CheckpointBlock') -> None:
@@ -126,13 +127,14 @@ class CheckpointBlockContext:
                 assert self.block._storage_params[kw].is_cuda
                 assert kw not in self._grad_buffer
                 assert kw not in self._param_buffer
+                local_param = self.block._storage_params[kw]
 
-                storage_type = self.block._storage_params[kw].storage_type()
+                storage_type = local_param.storage_type()
 
                 self._param_buffer[kw] = storage_type(val["total"])
                 self._param_tensor[kw] = torch.tensor([], dtype=self._param_buffer[kw].dtype, device=self._param_buffer[kw].device).set_(self._param_buffer[kw])
 
-                if requires_grad and val["requires_grad"]:
+                if requires_grad and local_param.requires_grad:
                     self._grad_buffer[kw] = storage_type(val["total"])
                     self._grad_tensor[kw] = torch.tensor([], dtype=self._grad_buffer[kw].dtype, device=self._grad_buffer[kw].device).set_(self._grad_buffer[kw]).zero_()
 
@@ -185,7 +187,12 @@ class CheckpointBlockContext:
                 local_param = self.block._storage_params[kw]
 
                 # accumulate previous gradient
-                self._grad_tensor[kw][val["begin"]:val["end"]] += local_param.grad
+                if local_param.requires_grad:
+                    if local_param.grad is None:
+                        grad_storage = val["storage_type"](val["partition_size"])   # initialize gradient if not exist
+                        local_param.grad = torch.tensor([], dtype=grad_storage.dtype, device=grad_storage.device).set_(grad_storage).zero_()
+                    else:
+                        self._grad_tensor[kw][val["begin"]:val["end"]] += local_param.grad
             
             current_stream = torch.cuda.current_stream()
             config["load_stream"].wait_stream(current_stream)   # wait for backward
@@ -196,7 +203,7 @@ class CheckpointBlockContext:
                     local_param = self.block._storage_params[kw]
 
                     # scatter gradient
-                    if val["requires_grad"]:
+                    if local_param.requires_grad:
                         nccl.reduceScatter(
                             self._grad_buffer[kw],
                             local_param.grad.storage(),
@@ -314,8 +321,6 @@ class CheckpointBlock(torch.nn.Module):
             storage_type = val["storage_type"]
 
             storage_param_buffer = storage_type(partition_size)
-            if val["requires_grad"]:
-                storage_grads_buffer = storage_type(partition_size)
 
             dtype = storage_param_buffer.dtype
             device = storage_param_buffer.device
@@ -325,7 +330,9 @@ class CheckpointBlock(torch.nn.Module):
                 torch.tensor([], dtype=dtype, device=device).set_(storage_param_buffer)
             )
             if val["requires_grad"]:
-                storage_param.grad = torch.tensor([], dtype=dtype, device=device).set_(storage_grads_buffer).zero_()
+                storage_param.requires_grad_(True)
+            else:
+                storage_param.requires_grad_(False)
 
             # register parameter
             self.register_parameter(kw, storage_param)
@@ -386,7 +393,8 @@ class CheckpointBlock(torch.nn.Module):
         
     def __call__(self, *args):
         # gather here
-        return OpCheckpointBlock.apply(self, True, *args)
+        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+        return OpCheckpointBlock.apply(placeholder, self, True, *args)
     
     def __setattr__(self, name, value):
         object.__setattr__(self, name, value)
@@ -502,7 +510,7 @@ class CheckpointBlock(torch.nn.Module):
         
 class OpTransformerBlockList(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, self : 'TransformerBlockList', save_list, hidden_state, *args):
+    def forward(ctx, placeholder, self : 'TransformerBlockList', save_list, hidden_state, *args):
         tensors = []
         others = []
         for arg in args:
@@ -515,7 +523,7 @@ class OpTransformerBlockList(torch.autograd.Function):
     
         ctx.nontensor_inputs = others
         ctx.self = self
-        ctx.save_list = save_list
+        ctx.save_list = copy.deepcopy(save_list)
         ctx.num_save_needed = save_list[-1][1]+1
 
         layer_inputs = []
@@ -633,7 +641,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None, grad_hidden_state) + tuple(grads)
+        return (None, None, None, grad_hidden_state) + tuple(grads)
     
 class TransformerBlockList(torch.nn.Module):
     _modules: Dict[str, CheckpointBlock]
@@ -672,7 +680,10 @@ class TransformerBlockList(torch.nn.Module):
             
     def __len__(self) -> int:
         return len(self._modules)
+    
+    def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
+        return self._modules[str(index)]
 
     def forward(self, hidden_state, *args):
-        # return OpTransformerBlockList.apply(self, hidden_state, *args)
-        return OpTransformerBlockList.apply(self, self.save_list, hidden_state, *args)
+        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+        return OpTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)

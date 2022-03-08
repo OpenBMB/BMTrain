@@ -1,6 +1,5 @@
 import torch
 from typing import Callable, TypeVar
-# from typing_extensions import ParamSpec
 from functools import wraps
 from . import debug
 
@@ -32,7 +31,7 @@ class ScopedTensorInspectorContext:
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, func, preserve_rng_state, *args):
+    def forward(ctx, placeholder, func, preserve_rng_state, *args):
         ctx.func = func
         ctx.preserve_rng_state = preserve_rng_state
         
@@ -117,14 +116,13 @@ class CheckpointFunction(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None) + tuple(grads)
+        return (None, None, None) + tuple(grads)
 
 
-# P = ParamSpec("P")
-# R = TypeVar("R")
-# def checkpoint(func : Callable[P, R]) -> Callable[P, R]:
-def checkpoint(func):
+R = TypeVar("R")
+def checkpoint(func : Callable[..., R]) -> Callable[..., R]:
     @wraps(func)
     def wrapper(*args):
-        return CheckpointFunction.apply(func, True, *args)
+        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+        return CheckpointFunction.apply(placeholder, func, True, *args)
     return wrapper
