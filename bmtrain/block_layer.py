@@ -126,13 +126,14 @@ class CheckpointBlockContext:
                 assert self.block._storage_params[kw].is_cuda
                 assert kw not in self._grad_buffer
                 assert kw not in self._param_buffer
+                local_param = self.block._storage_params[kw]
 
-                storage_type = self.block._storage_params[kw].storage_type()
+                storage_type = local_param.storage_type()
 
                 self._param_buffer[kw] = storage_type(val["total"])
                 self._param_tensor[kw] = torch.tensor([], dtype=self._param_buffer[kw].dtype, device=self._param_buffer[kw].device).set_(self._param_buffer[kw])
 
-                if requires_grad and val["requires_grad"]:
+                if requires_grad and local_param.requires_grad:
                     self._grad_buffer[kw] = storage_type(val["total"])
                     self._grad_tensor[kw] = torch.tensor([], dtype=self._grad_buffer[kw].dtype, device=self._grad_buffer[kw].device).set_(self._grad_buffer[kw]).zero_()
 
@@ -185,7 +186,8 @@ class CheckpointBlockContext:
                 local_param = self.block._storage_params[kw]
 
                 # accumulate previous gradient
-                self._grad_tensor[kw][val["begin"]:val["end"]] += local_param.grad
+                if local_param.requires_grad:
+                    self._grad_tensor[kw][val["begin"]:val["end"]] += local_param.grad
             
             current_stream = torch.cuda.current_stream()
             config["load_stream"].wait_stream(current_stream)   # wait for backward
@@ -196,7 +198,7 @@ class CheckpointBlockContext:
                     local_param = self.block._storage_params[kw]
 
                     # scatter gradient
-                    if val["requires_grad"]:
+                    if local_param.requires_grad:
                         nccl.reduceScatter(
                             self._grad_buffer[kw],
                             local_param.grad.storage(),
@@ -326,6 +328,7 @@ class CheckpointBlock(torch.nn.Module):
             )
             if val["requires_grad"]:
                 storage_param.grad = torch.tensor([], dtype=dtype, device=device).set_(storage_grads_buffer).zero_()
+                storage_param.requires_grad_(True)
 
             # register parameter
             self.register_parameter(kw, storage_param)
