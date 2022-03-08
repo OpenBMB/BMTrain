@@ -187,7 +187,11 @@ class CheckpointBlockContext:
 
                 # accumulate previous gradient
                 if local_param.requires_grad:
-                    self._grad_tensor[kw][val["begin"]:val["end"]] += local_param.grad
+                    if local_param.grad is None:
+                        grad_storage = val["storage_type"](val["partition_size"])   # initialize gradient if not exist
+                        local_param.grad = torch.tensor([], dtype=grad_storage.dtype, device=grad_storage.device).set_(grad_storage).zero_()
+                    else:
+                        self._grad_tensor[kw][val["begin"]:val["end"]] += local_param.grad
             
             current_stream = torch.cuda.current_stream()
             config["load_stream"].wait_stream(current_stream)   # wait for backward
@@ -316,8 +320,6 @@ class CheckpointBlock(torch.nn.Module):
             storage_type = val["storage_type"]
 
             storage_param_buffer = storage_type(partition_size)
-            if val["requires_grad"]:
-                storage_grads_buffer = storage_type(partition_size)
 
             dtype = storage_param_buffer.dtype
             device = storage_param_buffer.device
@@ -327,8 +329,9 @@ class CheckpointBlock(torch.nn.Module):
                 torch.tensor([], dtype=dtype, device=device).set_(storage_param_buffer)
             )
             if val["requires_grad"]:
-                storage_param.grad = torch.tensor([], dtype=dtype, device=device).set_(storage_grads_buffer).zero_()
                 storage_param.requires_grad_(True)
+            else:
+                storage_param.requires_grad_(False)
 
             # register parameter
             self.register_parameter(kw, storage_param)
