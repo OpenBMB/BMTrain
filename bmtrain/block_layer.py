@@ -13,7 +13,7 @@ def round_up(x, d):
 
 class OpCheckpointBlock(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, block : 'CheckpointBlock', preserve_rng_state, *args):
+    def forward(ctx, placeholder, block : 'CheckpointBlock', preserve_rng_state, *args):
         ctx.block = block
         ctx.preserve_rng_state = preserve_rng_state
         
@@ -97,7 +97,7 @@ class OpCheckpointBlock(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None) + tuple(grads)
+        return (None, None, None) + tuple(grads)
 
 class CheckpointBlockContext:
     def __init__(self, block : 'CheckpointBlock') -> None:
@@ -126,13 +126,14 @@ class CheckpointBlockContext:
                 assert self.block._storage_params[kw].is_cuda
                 assert kw not in self._grad_buffer
                 assert kw not in self._param_buffer
+                local_param = self.block._storage_params[kw]
 
-                storage_type = self.block._storage_params[kw].storage_type()
+                storage_type = local_param.storage_type()
 
                 self._param_buffer[kw] = storage_type(val["total"])
                 self._param_tensor[kw] = torch.tensor([], dtype=self._param_buffer[kw].dtype, device=self._param_buffer[kw].device).set_(self._param_buffer[kw])
 
-                if requires_grad and val["requires_grad"]:
+                if requires_grad and local_param.requires_grad:
                     self._grad_buffer[kw] = storage_type(val["total"])
                     self._grad_tensor[kw] = torch.tensor([], dtype=self._grad_buffer[kw].dtype, device=self._grad_buffer[kw].device).set_(self._grad_buffer[kw]).zero_()
 
@@ -185,7 +186,12 @@ class CheckpointBlockContext:
                 local_param = self.block._storage_params[kw]
 
                 # accumulate previous gradient
-                self._grad_tensor[kw][val["begin"]:val["end"]] += local_param.grad
+                if local_param.requires_grad:
+                    if local_param.grad is None:
+                        grad_storage = val["storage_type"](val["partition_size"])   # initialize gradient if not exist
+                        local_param.grad = torch.tensor([], dtype=grad_storage.dtype, device=grad_storage.device).set_(grad_storage).zero_()
+                    else:
+                        self._grad_tensor[kw][val["begin"]:val["end"]] += local_param.grad
             
             current_stream = torch.cuda.current_stream()
             config["load_stream"].wait_stream(current_stream)   # wait for backward
@@ -196,7 +202,7 @@ class CheckpointBlockContext:
                     local_param = self.block._storage_params[kw]
 
                     # scatter gradient
-                    if val["requires_grad"]:
+                    if local_param.requires_grad:
                         nccl.reduceScatter(
                             self._grad_buffer[kw],
                             local_param.grad.storage(),
@@ -314,8 +320,6 @@ class CheckpointBlock(torch.nn.Module):
             storage_type = val["storage_type"]
 
             storage_param_buffer = storage_type(partition_size)
-            if val["requires_grad"]:
-                storage_grads_buffer = storage_type(partition_size)
 
             dtype = storage_param_buffer.dtype
             device = storage_param_buffer.device
@@ -325,7 +329,9 @@ class CheckpointBlock(torch.nn.Module):
                 torch.tensor([], dtype=dtype, device=device).set_(storage_param_buffer)
             )
             if val["requires_grad"]:
-                storage_param.grad = torch.tensor([], dtype=dtype, device=device).set_(storage_grads_buffer).zero_()
+                storage_param.requires_grad_(True)
+            else:
+                storage_param.requires_grad_(False)
 
             # register parameter
             self.register_parameter(kw, storage_param)
@@ -386,7 +392,8 @@ class CheckpointBlock(torch.nn.Module):
         
     def __call__(self, *args):
         # gather here
-        return OpCheckpointBlock.apply(self, True, *args)
+        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+        return OpCheckpointBlock.apply(placeholder, self, True, *args)
     
     def __setattr__(self, name, value):
         object.__setattr__(self, name, value)
@@ -601,9 +608,7 @@ class CheckpointBlock(torch.nn.Module):
         
 class OpTransformerBlockList(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, self : 'TransformerBlockList', hidden_state, *args):
-        ctx.cuda_rng_state = torch.cuda.get_rng_state()
-
+    def forward(ctx, placeholder, self : 'TransformerBlockList', hidden_state, *args):
         tensors = []
         others = []
         for arg in args:
@@ -619,9 +624,11 @@ class OpTransformerBlockList(torch.autograd.Function):
         
         layer_inputs = []
         layer_inspector = []
+        cuda_rng_state = []
         with torch.no_grad():
             for i in range(len(self)):
                 layer_inputs.append(hidden_state)
+                cuda_rng_state.append( torch.cuda.get_rng_state() )
                 block_ctx = CheckpointBlockContext(self._modules[str(i)])
                 # gather parameter on load stream
                 block_ctx.enter()
@@ -634,6 +641,8 @@ class OpTransformerBlockList(torch.autograd.Function):
                 block_ctx.exit()
         
         ctx.layer_inspector = layer_inspector
+        ctx.cuda_rng_state = cuda_rng_state
+
         
         ctx.save_for_backward(*layer_inputs, *tensors)
         return hidden_state
@@ -647,28 +656,27 @@ class OpTransformerBlockList(torch.autograd.Function):
                 " argument.")
 
         all_inputs = []
-        input_reqires_grad = []
+        input_requires_grad = []
         
         layer_inputs = ctx.saved_tensors[:len(ctx.self)]
         save_args = ctx.saved_tensors[len(ctx.self):]
         for tensor, other in zip(save_args, ctx.nontensor_inputs):
             if tensor is None:
                 all_inputs.append(other)
-                input_reqires_grad.append(False)
+                input_requires_grad.append(False)
             else:
                 # detach for tensor inputs
-                input_reqires_grad.append( tensor.requires_grad )
+                input_requires_grad.append( tensor.requires_grad )
                 nw_tensor = tensor.detach()
                 nw_tensor.requires_grad = tensor.requires_grad
                 all_inputs.append(nw_tensor)
         
         with torch.random.fork_rng(devices=[torch.cuda.current_device()], enabled=True):
-            torch.cuda.set_rng_state(ctx.cuda_rng_state)
-
             with torch.enable_grad():
                 # overlap load and scatter here
                 prev_ctx = None
                 for i in list(range(len(ctx.self)))[::-1]:
+                    torch.cuda.set_rng_state(ctx.cuda_rng_state[i])
                     ipt = layer_inputs[i].detach().requires_grad_()
                     block_ctx = CheckpointBlockContext(ctx.self._modules[str(i)])
                     block_ctx.enter()
@@ -699,12 +707,12 @@ class OpTransformerBlockList(torch.autograd.Function):
                     config["load_stream"].record_event(config["load_event"])
 
         grads = []
-        for inp, requires_grad in zip(all_inputs, input_reqires_grad):
+        for inp, requires_grad in zip(all_inputs, input_requires_grad):
             if requires_grad:
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, grad_hidden_state) + tuple(grads)
+        return (None, None, grad_hidden_state) + tuple(grads)
     
 class TransformerBlockList(torch.nn.Module):
     _modules: Dict[str, CheckpointBlock]
@@ -726,4 +734,5 @@ class TransformerBlockList(torch.nn.Module):
         return self._modules[str(index)]
 
     def forward(self, hidden_state, *args):
-        return OpTransformerBlockList.apply(self, hidden_state, *args)
+        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+        return OpTransformerBlockList.apply(placeholder, self, hidden_state, *args)
