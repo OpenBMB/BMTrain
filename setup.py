@@ -14,7 +14,7 @@ def main():
     avx_flag = get_avx_flags()
     setup(
         name='bmtrain',
-        version='0.0.16',
+        version='0.1.0',
         author="Guoyang Zeng",
         author_email="qbjooo@qq.com",
         description="A toolkit for training big models",
