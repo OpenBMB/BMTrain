@@ -47,11 +47,12 @@ def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix :
             _param_buffer[kw],
             config["comm"]
         )
-        nccl.allGather(
-            model._storage_params[kw].grad.storage(),
-            _grad_buffer[kw],
-            config["comm"]
-        )
+        if model._storage_params[kw].grad is not None:
+            nccl.allGather(
+                model._storage_params[kw].grad.storage(),
+                _grad_buffer[kw],
+                config["comm"]
+            )
     nccl.groupEnd()
     ret = []
     for param in model._param_info:

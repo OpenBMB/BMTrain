@@ -13,7 +13,7 @@ def round_up(x, d):
 
 class OpCheckpointBlock(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, block : 'CheckpointBlock', preserve_rng_state, *args):
+    def forward(ctx, placeholder, block : 'CheckpointBlock', preserve_rng_state, *args):
         ctx.block = block
         ctx.preserve_rng_state = preserve_rng_state
         
@@ -97,7 +97,7 @@ class OpCheckpointBlock(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None) + tuple(grads)
+        return (None, None, None) + tuple(grads)
 
 class CheckpointBlockContext:
     def __init__(self, block : 'CheckpointBlock') -> None:
@@ -392,7 +392,8 @@ class CheckpointBlock(torch.nn.Module):
         
     def __call__(self, *args):
         # gather here
-        return OpCheckpointBlock.apply(self, True, *args)
+        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+        return OpCheckpointBlock.apply(placeholder, self, True, *args)
     
     def __setattr__(self, name, value):
         object.__setattr__(self, name, value)
@@ -508,7 +509,7 @@ class CheckpointBlock(torch.nn.Module):
         
 class OpTransformerBlockList(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, self : 'TransformerBlockList', hidden_state, *args):
+    def forward(ctx, placeholder, self : 'TransformerBlockList', hidden_state, *args):
         tensors = []
         others = []
         for arg in args:
@@ -612,7 +613,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, grad_hidden_state) + tuple(grads)
+        return (None, None, grad_hidden_state) + tuple(grads)
     
 class TransformerBlockList(torch.nn.Module):
     _modules: Dict[str, CheckpointBlock]
@@ -634,4 +635,5 @@ class TransformerBlockList(torch.nn.Module):
         return self._modules[str(index)]
 
     def forward(self, hidden_state, *args):
-        return OpTransformerBlockList.apply(self, hidden_state, *args)
+        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+        return OpTransformerBlockList.apply(placeholder, self, hidden_state, *args)
