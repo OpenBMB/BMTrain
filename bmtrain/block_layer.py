@@ -597,13 +597,12 @@ class OpTransformerBlockList(torch.autograd.Function):
                     if ctx.save_list[i][0] != i:
                         with torch.no_grad():
                             st = ctx.save_list[i][0]
-                            ipt = layer_inputs[ctx.save_list[i][1]]
                             for j in range(st, i):
                                 torch.cuda.set_rng_state(ctx.cuda_rng_state[j])
                                 block_ctx = CheckpointBlockContext(ctx.self._modules[str(j)])
                                 block_ctx.enter()
                                 exit_prev(prev_ctx, prev_grad)
-                                output = ctx.self._modules[str(j)]._module._call_impl(ipt, *all_inputs)
+                                output = ctx.self._modules[str(j)]._module._call_impl(layer_inputs[ctx.save_list[j][1]], *all_inputs)
                                 prev_ctx = block_ctx
                                 prev_grad = False
                                 layer_inputs[ctx.save_list[j+1][1]].copy_(output)
