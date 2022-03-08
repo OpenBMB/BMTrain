@@ -1,6 +1,5 @@
 import torch
 from typing import Callable, TypeVar
-from typing_extensions import ParamSpec
 from functools import wraps
 from . import debug
 
@@ -120,9 +119,8 @@ class CheckpointFunction(torch.autograd.Function):
         return (None, None, None) + tuple(grads)
 
 
-P = ParamSpec("P")
 R = TypeVar("R")
-def checkpoint(func : Callable[P, R]) -> Callable[P, R]:
+def checkpoint(func : Callable[..., R]) -> Callable[..., R]:
     @wraps(func)
     def wrapper(*args):
         placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
