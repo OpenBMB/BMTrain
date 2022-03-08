@@ -38,7 +38,8 @@ def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix :
         storage_type = model._storage_params[kw].storage_type()
 
         _param_buffer[kw] = storage_type(val["total"])
-        _grad_buffer[kw] = storage_type(val["total"])
+        if model._storage_params[kw].grad is not None:
+            _grad_buffer[kw] = storage_type(val["total"])
     
     nccl.groupStart()
     for kw, val in model._storage_info.items():
@@ -53,6 +54,7 @@ def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix :
                 _grad_buffer[kw],
                 config["comm"]
             )
+
     nccl.groupEnd()
     ret = []
     for param in model._param_info:
@@ -64,17 +66,29 @@ def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix :
             offset = param["offset"]
             shape = param["shape"]
             p = torch.tensor([], dtype=dtype, device=device).set_(_param_buffer[kw_name], offset, shape)
-            g = torch.tensor([], dtype=dtype, device=device).set_(_grad_buffer[kw_name], offset, shape)
-            ret.append({
-                "name": abs_name,
-                "shape": tuple(shape),
-                "std": p.std().cpu().item(),
-                "mean": p.mean().cpu().item(),
-                "grad_std": g.std().cpu().item(),
-                "grad_mean": g.mean().cpu().item(),
-                "max": p.max().cpu().item(),
-                "min": p.min().cpu().item(),
-            })
+            if kw_name in _grad_buffer:
+                g = torch.tensor([], dtype=dtype, device=device).set_(_grad_buffer[kw_name], offset, shape)
+                ret.append({
+                    "name": abs_name,
+                    "shape": tuple(shape),
+                    "std": p.std().cpu().item(),
+                    "mean": p.mean().cpu().item(),
+                    "grad_std": g.std().cpu().item(),
+                    "grad_mean": g.mean().cpu().item(),
+                    "max": p.max().cpu().item(),
+                    "min": p.min().cpu().item(),
+                })
+            else:
+                ret.append({
+                    "name": abs_name,
+                    "shape": tuple(shape),
+                    "std": p.std().cpu().item(),
+                    "mean": p.mean().cpu().item(),
+                    "grad_std": None,
+                    "grad_mean": None,
+                    "max": p.max().cpu().item(),
+                    "min": p.min().cpu().item(),
+                })
     return ret
 
 @torch.no_grad()
