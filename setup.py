@@ -15,6 +15,11 @@ avx_flag = get_avx_flags()
 
 if not torch.cuda.is_available():
     os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0+PTX")
+else:
+    if torch.version.cuda.startswith("10"):
+        os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0+PTX")
+    else:
+        os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0 8.6+PTX")
 
 setup(
     name='bmtrain',
