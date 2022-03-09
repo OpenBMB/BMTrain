@@ -4,13 +4,11 @@
 
 ```
 pip install sphinx
-pip install sphinx_rtd_theme
 pip install sphinx_copybutton
-pip install sphinx_toolbox
 pip install myst_parser
 pip install recommonmark
 pip install sphinx-markdown-tables
-xpip install sphinx_rtd_theme
+pip install sphinx_rtd_theme
 pip install sphinx_copybutton
 pip install sphinx_toolbox
 ```
