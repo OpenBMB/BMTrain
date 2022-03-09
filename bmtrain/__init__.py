@@ -9,6 +9,7 @@ from .synchronize import synchronize, sum_loss, wait_loader
 from .checkpointing import checkpoint
 from .block_layer import CheckpointBlock, TransformerBlockList
 from .backward import optim_step
+from .wrapper import BMTrainModelWrapper
 
 from . import debug
 from .store import save, load
