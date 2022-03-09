@@ -5,7 +5,7 @@
 
 欢迎使用bmtrain！ 
 
-bmtrain (big model training) 是一个用于大规模预训练语言模型（pretrained language models, PLM）训练阶段的低资源工具包。
+BMTrain (Big Model training) 是一个用于大规模预训练语言模型（Pretrained Language Models, PLM）训练阶段的低资源工具包。
 
 =======================================
 
