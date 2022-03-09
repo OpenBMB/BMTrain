@@ -18,4 +18,4 @@ pip install sphinx_toolbox
 cd bmtrain-docs
 make html
 ```
-最后，用浏览器打开`build/html`, 即可本地查看文档。 
+最后，用浏览器打开`build/html/index.html`, 即可本地查看文档。 
