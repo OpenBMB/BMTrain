@@ -30,11 +30,6 @@ void F_adam(
     AT_ASSERTM(g_fp16.dtype() == torch::kHalf, "g_fp16 must be a half tensor");
     AT_ASSERTM(m_fp16.dtype() == torch::kHalf, "m_fp16 must be a half tensor");
     AT_ASSERTM(v_fp32.dtype() == torch::kFloat, "v_fp32 must be a float tensor");
-    AT_ASSERTM(param_fp32.is_cuda(), "param_fp32 must be a CUDA tensor");
-    AT_ASSERTM(param_fp16.is_cuda(), "param_fp16 must be a CUDA tensor");
-    AT_ASSERTM(g_fp16.is_cuda(), "g_fp16 must be a CUDA tensor");
-    AT_ASSERTM(m_fp16.is_cuda(), "m_fp16 must be a CUDA tensor");
-    AT_ASSERTM(v_fp32.is_cuda(), "v_fp32 must be a CUDA tensor");
     AT_ASSERTM(param_fp32.numel() == param_fp16.numel(), "param_fp32 and param_fp16 must have the same number of elements");
     AT_ASSERTM(param_fp32.numel() == g_fp16.numel(), "param_fp32 and g_fp16 must have the same number of elements");
     AT_ASSERTM(param_fp32.numel() == m_fp16.numel(), "param_fp32 and m_fp16 must have the same number of elements");
@@ -51,8 +46,6 @@ void F_has_inf_nan(const torch::Tensor &g_fp16, torch::Tensor &out) {
     CHECK_INPUT(out);
     AT_ASSERTM(g_fp16.dtype() == torch::kHalf, "g_fp16 must be a half tensor");
     AT_ASSERTM(out.dtype() == torch::kUInt8, "out must be a uint8 tensor");
-    AT_ASSERTM(g_fp16.is_cuda(), "g_fp16 must be a CUDA tensor");
-    AT_ASSERTM(out.is_cuda(), "out must be a CUDA tensor");
 
     has_nan_inf_launcher(g_fp16, out);
 }

@@ -4,7 +4,6 @@ from .synchronize import synchronize
 from .utils import print_rank
 
 def see_memory(message, detail=False):
-    synchronize()
     print_rank(message)
     if detail:
         print_rank("Model mem\n", torch.cuda.memory_summary())

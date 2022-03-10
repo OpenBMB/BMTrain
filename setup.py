@@ -28,6 +28,7 @@ def main():
             CUDAExtension('bmtrain.nccl._C', [
                 'csrc/nccl.cpp',
             ], include_dirs=["csrc/nccl/build/include"], extra_compile_args={}),
+
             CUDAExtension('bmtrain.optim._cuda', [
                 'csrc/adam_cuda.cpp',
                 'csrc/cuda/adam.cu',
@@ -38,7 +39,12 @@ def main():
             ], extra_compile_args=[
                 '-fopenmp', 
                 *avx_flag
-            ], extra_link_args=['-lgomp'])
+            ], extra_link_args=['-lgomp']),
+
+            CUDAExtension('bmtrain.loss._cuda', [
+                'csrc/cross_entropy_loss.cpp',
+                'csrc/cuda/cross_entropy.cu',
+            ], extra_compile_args={}),
         ],
         cmdclass={
             'build_ext': BuildExtension
