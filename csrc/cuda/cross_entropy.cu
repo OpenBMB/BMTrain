@@ -62,11 +62,7 @@ __global__ void cross_entropy_backward(
     else {
         half v = __float2half(grad_output[blockIdx.x]);
         for (int i = threadIdx.x; i < n; i += blockDim.x) {
-            if (i != t) {
-                grad_input[base_idx + i] = __hmul(softmax[base_idx + i], v);
-            } else {
-                grad_input[base_idx + i] = __hsub(__hmul(softmax[base_idx + i], v), v);
-            }
+            grad_input[base_idx + i] = i==t ? __hsub(__hmul(softmax[base_idx + i], v), v) : __hmul(softmax[base_idx + i], v);
         }
     }
 }
@@ -129,11 +125,7 @@ __global__ void cross_entropy_backward_inplace(
         half v = __float2half(grad_output[blockIdx.x]);
         __syncthreads();
         for (int i = threadIdx.x; i < n; i += blockDim.x) {
-            if (i != t) {
-                x[base_idx + i] = __hmul(x[base_idx + i], v);
-            } else {
-                x[base_idx + i] = __hsub(__hmul(x[base_idx + i], v), v);
-            }
+            x[base_idx + i] = i==t ? __hsub(__hmul(x[base_idx + i], v), v) : __hmul(x[base_idx + i], v);
         }
     }
 }
