@@ -11,6 +11,30 @@ def init_distributed(
         loss_scale_factor : float = 2,
         loss_scale_steps : int = 1024
     ):
+    """Initialize distributed training.
+    This function will initialize the distributed training, set the random seed and global configurations.
+    It must be called before any other distributed functions.
+
+    Args:
+        seed (int): The random seed.
+        loss_scale_factor (float): The loss scale factor.
+        loss_scale_steps (int): The loss scale steps.
+
+    **init_distributed** reads the following environment variables: 
+    
+    * `WORLD_SIZE`: The total number gpus in the distributed training.
+    * `RANK`: The global rank of the current gpu. From 0 to `WORLD_SIZE - 1`.
+    * `MASTER_ADDR`: The address of the master node.
+    * `MASTER_PORT`: The port of the master node.
+    * `LOCAL_RANK`: The local rank of the current gpu.
+    
+    Normally, all the environments variables above are setted by the pytorch distributed launcher.
+
+    **Note**: Do not use any functions in torch.distributed package including `torch.distributed.init_process_group` .
+
+    **Note**: If your training script is stuck here , it means some of your distributed workers are not connected to the master node.
+
+    """
     torch.backends.cudnn.enabled = False
     
     local_rank = int(os.environ["LOCAL_RANK"])

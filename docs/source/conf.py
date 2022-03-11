@@ -21,9 +21,9 @@ from recommonmark.transform import AutoStructify
 
 # -- Project information -----------------------------------------------------
 
-project = 'bmtrain-doc'
-copyright = '2022, bmtrain-doc'
-author = 'bmtrain-doc'
+project = 'BMTrain'
+copyright = '2022, OpenBMB'
+author = 'BMTrain Team'
 
 # -- General configuration ---------------------------------------------------
 
@@ -32,10 +32,10 @@ author = 'bmtrain-doc'
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
-     'sphinx.ext.napoleon',
-     'sphinx.ext.mathjax',
-     'recommonmark',
-     'sphinx_markdown_tables',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.mathjax',
+    'recommonmark',
+    'sphinx_markdown_tables',
 ]
 
 source_suffix = ['.rst', '.md']

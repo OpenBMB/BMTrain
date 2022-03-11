@@ -11,9 +11,19 @@ BMTrain (Big Model training) 是一个用于大规模预训练语言模型（Pre
 
 .. toctree::
    :maxdepth: 2
-   :caption: 目录:
+   :caption: User Guide:
 
-   notes/bmtrain-v1.md 
+   notes/installation-zh.md 
+   notes/quickstart-zh.md
+   notes/tech-zh.md 
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference:
+
+   api/bmtrain.rst
+   api/nccl.rst
+   api/inspect.rst
 
 API
 ==================
