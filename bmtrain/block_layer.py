@@ -271,6 +271,10 @@ class CheckpointBlock(torch.nn.Module):
 
     For other methods, it looks like a black box with several parameter.
 
+    This is desinged to reduce the number of calls to the NCCL APIs by grouping parameters inside the inner_module.
+
+    If you want to get the parameters inside the inner_module, you can use the state_dict method.
+
     """
     def __init__(self, inner_module : torch.nn.Module):
         super().__init__()
@@ -616,6 +620,24 @@ class OpTransformerBlockList(torch.autograd.Function):
         return (None, None, grad_hidden_state) + tuple(grads)
     
 class TransformerBlockList(torch.nn.Module):
+    r"""
+    TransformerBlockList is a list of CheckpointBlocks.
+
+    This is designed to reduce the communication overhead by overlapping the computation and reduce_scatter operation during backward pass.
+
+    It is similar to `torch.nn.ModuleList` but with the difference when calling .forward() and .backward().
+
+    Example:
+        >>> module_list = [ ... ]
+        >>> normal_module_list = torch.nn.ModuleList(module_list)
+        >>> transformer_module_list = TransformerBlockList(module_list)
+        >>> # Calling normal module list
+        >>> for layer in normal_module_list:
+        >>>     hidden_state = layer.forward(hidden_state, ...)
+        >>> # Calling transformer module list
+        >>> hidden_state = transformer_module_list(hidden_state, ...)
+
+    """
     _modules: Dict[str, CheckpointBlock]
 
     def __init__(self, modules: Iterable[CheckpointBlock]) -> None:

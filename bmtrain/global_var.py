@@ -21,7 +21,13 @@ class ConfigMap(TypedDict):
 config = ConfigMap()
 
 def rank():
+    """
+    Returns the global rank of the current process. (0 ~ world_size-1)
+    """
     return config['rank']
 
 def world_size():
+    """
+    Returns the total number of workers across all nodes.
+    """
     return config['world_size']
