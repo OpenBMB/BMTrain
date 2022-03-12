@@ -507,6 +507,20 @@ class CheckpointBlock(torch.nn.Module):
                 self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(tmp_tensor.storage()[offset_st: offset_end])
                 del tmp_tensor
         
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
+        r"""Helper method for yielding various names + members of modules."""
+        print("here in _named_members")
+        memo = set()
+        modules = torch.nn.Module.named_modules(self, prefix=prefix) if recurse else [(prefix, self)]
+        for module_prefix, module in modules:
+            members = get_members_fn(module)
+            for k, v in members:
+                if v is None or v in memo:
+                    continue
+                memo.add(v)
+                name = module_prefix + ('.' if module_prefix else '') + k
+                yield name, v
+
     def named_modules(self, memo = None, prefix: str = '', remove_duplicate: bool = True):
         r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
@@ -538,7 +552,7 @@ class CheckpointBlock(torch.nn.Module):
             1 -> ('0', Linear(in_features=2, out_features=2, bias=True))
 
         """
-        print("here in named_modules")
+        # print("here in named_modules hahaha")
 
         if memo is None:
             memo = set()
