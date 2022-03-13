@@ -1,5 +1,3 @@
 tqdm
-tensorboard
-PyYAML
-cpm_kernels>=1.0.9
+cpm_kernels>=1.0.11
 jieba

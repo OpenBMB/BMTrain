@@ -7,6 +7,11 @@ import math
 
 
 class InspectTensor:
+    """This object is returned by `InspectTensorManager`.
+
+    You can get the tensors recorded by `record_tensor`.
+
+    """
     def __init__(self):
         self._summary = []
     
@@ -69,6 +74,22 @@ class InspectTensor:
             group_idx[group][name] += 1
     
     def get_summary(self):
+        """Get the summary of the tensors recorded by `record_tensor`.
+
+        Returns:
+            A list of dicts. Each dict contains the following keys:
+                - name: The name of the tensor.
+                - min: The minimum value of the tensor.
+                - max: The maximum value of the tensor.
+                - mean: The mean value of the tensor.
+                - std: The standard deviation of the tensor.
+                - shape: The shape of the tensor.
+                - grad_mean: The mean value of the gradient of the tensor.
+                - grad_std: The standard deviation of the gradient of the tensor.
+
+        **Note:** This method must be called outside of the `with` block.
+
+        """
         nw_summary = []
         for item in self._summary:
             if item["requires_grad"] and item["tensor"].grad is not None:
@@ -144,6 +165,17 @@ class InspectTensor:
         return ret
     
     def get_tensor(self, name : str, group : Optional[str] = None, index : Optional[int] = None) -> torch.Tensor:
+        """Get the tensor recorded by `record_tensor` by name, group and index.
+
+        Args:
+            name (str): The name of the tensor.
+            group (Optional[str]): The group of the tensor.
+            index (Optional[int]): The index of the tensor.
+        
+        Returns:
+            The tensor if found, otherwise None.
+        
+        """
         group_name_prefix = f"{group}." if group is not None else ""
 
         all_names = []
@@ -182,9 +214,38 @@ class InspectTensorManager:
     
 
 def inspect_tensor() -> InspectTensorManager:
+    """**inspect_tensor** returns a context manager that can be used to get the intermediate results of the model computations and their gradients.
+
+    Example:
+        >>> with bmt.inspect.inspect_tensor() as inspector:
+        >>>     loss = model(inputs)
+        >>>     loss.backward()
+        >>> summary = inspector.get_summary()
+        >>> text_summary = bmt.inspect.format_summary(summary)
+        >>> bmt.print_rank(text_summary)
+        name   shape     max     min     std     mean    grad_std  grad_mean
+        ...
+
+    **Note:** loss.backward() must be called inside the context manager, otherwise the gradients will not be recorded.
+    **Note:** Calling get_summary() has significant overhead.
+
+    """
+
     return InspectTensorManager()
 
 def record_tensor(x : torch.Tensor, name : str, group = None, requires_grad = True):
+    """Record the tensor for inspection.
+
+    Args:
+        x (torch.Tensor): The tensor to be recorded.
+        name (str): The name of the tensor.
+        group (str): The group name of the tensor.
+        requires_grad (bool): Whether records the gradients of the tensor.
+    
+    **Note:** This function is only available in inspect_tensor context.
+    **Note:** Recording too many tensors may cause memory issues.
+    
+    """
     if isinstance(x, torch.nn.Parameter):
         raise RuntimeError("Cannot inspect Parameter")
     
@@ -199,7 +260,7 @@ def record_tensor(x : torch.Tensor, name : str, group = None, requires_grad = Tr
     debug.append("_inspect_hidden_states", {
         "name": name,
         "group": group,
-        "requires_grad": True,
+        "requires_grad": requires_grad and x.requires_grad,
         "min": None,
         "max": None,
         "mean": None,

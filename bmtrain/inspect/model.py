@@ -93,6 +93,25 @@ def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix :
 
 @torch.no_grad()
 def inspect_model(model : torch.nn.Module, param_name : str, prefix : str = ''):
+    """Inspect the model and return the summary of the parameters.
+
+    Args:
+        model (torch.nn.Module): The model to be inspected.
+        param_name (str): The name of the parameter to be inspected. The wildcard '*' can be used to match multiple parameters.
+        prefix (str): The prefix of the parameter name.
+        
+    Returns:
+        list: The summary of the parameters.
+    
+    Example:
+        >>> result_linear = bmt.inspect.inspect_model(model, "*.linear*")
+        >>> result_layernorm = bmt.inspect.inspect_model(model, "*.layernorm*")
+        >>> text_summray = bmt.inspect.format_summary(result_linear + result_layernorm)
+        >>> bmt.print_rank(text_summary)
+        name   shape     max     min     std     mean    grad_std  grad_mean
+        ...
+
+    """
     if isinstance(model, CheckpointBlock):
         return inspect_checkpoint_block(model, param_name, prefix)
     else:

@@ -3,6 +3,9 @@ from . import nccl
 from .global_var import config
 
 def synchronize():
+    """
+    Synchronize all the workers across all nodes. (both CPU and GPU are synchronized)
+    """
     with torch.cuda.stream(config['barrier_stream']):
         barrier = torch.cuda.FloatTensor([1])
         nccl.allReduce(barrier.storage(), barrier.storage(), 'sum', config['comm'])
@@ -15,6 +18,11 @@ def wait_loader():
 
 
 def sum_loss(loss : torch.Tensor):
+    """
+    Sum the loss across all workers.
+
+    This is a helper function to reduce the loss across all workers.
+    """
     ret = torch.empty_like(loss)
     nccl.allReduce(
         loss.storage(),

@@ -40,6 +40,15 @@ def print_block(title : str, content : Optional[str] = None, file=sys.stdout):
         print(content, file=file)
     
 def print_rank(*args, rank=0, **kwargs):
+    """
+    Prints the message only on the `rank` of the process.
+
+    Args:
+        *args: The arguments to be printed.
+        rank (int): The rank id of the process to print.
+        **kwargs: The keyword arguments to be printed.
+
+    """
     if config["rank"] == rank:
         print(*args, **kwargs)
 
