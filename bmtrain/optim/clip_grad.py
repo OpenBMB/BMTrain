@@ -1,8 +1,28 @@
-from . import nccl
-from .global_var import config
+from .. import nccl
+from ..global_var import config
 import torch
 
 def clip_grad_norm(param_groups, max_norm, scale, norm_type=2, eps=1e-6):
+    """Clips gradient norm of an iterable of parameters.
+
+    The norm is computed over all gradients together, as if they were concatenated into a single vector. Gradients are modified in-place.
+
+    Args:
+        parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a single Tensor that will have gradients normalized.
+        max_norm (float or int): max norm of the gradients.
+        norm_type (float or int): type of the used p-norm. Can be 'inf' for infinity norm.
+        eps (float): epsilon used to avoid zero division.
+
+    Returns:
+        Total norm of the parameters (viewed as a single vector).
+
+    Examples:
+        >>> optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters(), scale=128)
+        >>> # ...
+        >>> # backward_step()
+        >>> bmt.optim.clip_grad_norm(optimizer.param_groups, max_norm=1.0, scale=optimizer.scale, norm_type=2)
+
+    """
     scale = scale / config['world_size']
     parameters = [p for group in param_groups for p in group['params'] if p.grad is not None]
 
