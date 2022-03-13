@@ -3,6 +3,7 @@ from .global_var import config
 import torch
 
 def clip_grad_norm(param_groups, max_norm, scale, norm_type=2, eps=1e-6):
+    scale = scale / config['world_size']
     parameters = [p for group in param_groups for p in group['params'] if p.grad is not None]
 
     if norm_type == 'inf':
