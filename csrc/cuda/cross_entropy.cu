@@ -6,29 +6,29 @@
 namespace {
 // blocks <m>,      threads<1024>
 __global__ void cross_entropy_forward(
-    int32_t n,
+    int64_t n,
     const half *input,      // (m, n)
     const int32_t *target,  // (m)
     half *softmax,          // (m, n)
     float *output,          // (m)
     int32_t ignore_index
 ) {
-    int32_t base_idx = blockIdx.x * n;
+    int64_t base_idx = blockIdx.x * n;
 
     float local_max = -INFINITY;
-    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
         local_max = fmaxf(__half2float(input[base_idx + i]), local_max);
     }
 
     local_max = fmaxf(block_allreduce_max(local_max), -1e6);
     
     float local_sum = 0;
-    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
         local_sum += expf(__half2float(input[base_idx + i]) - local_max);
     }
     local_sum = block_allreduce_sum(local_sum) + 1e-10; // avoid nan
     
-    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
         softmax[base_idx + i] = __float2half( expf(__half2float(input[base_idx + i]) - local_max) / local_sum );
     }
 
@@ -43,25 +43,25 @@ __global__ void cross_entropy_forward(
 
 // blocks <m>,      threads<1024>
 __global__ void cross_entropy_backward(
-    int32_t n,
+    int64_t n,
     const float *grad_output,   // (m)
     const int32_t *target,      // (m)
     const half *softmax,        // (m, n)
     half *grad_input,           // (m, n)
     int32_t ignore_index
 ) {
-    int32_t base_idx = blockIdx.x * n;
+    int64_t base_idx = blockIdx.x * n;
 
     int32_t t = target[blockIdx.x];
     if (t == ignore_index) {
         half v = __float2half(0.);
-        for (int i = threadIdx.x; i < n; i += blockDim.x) {
+        for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
             grad_input[base_idx + i] = v;
         }
     }
     else {
         half v = __float2half(grad_output[blockIdx.x]);
-        for (int i = threadIdx.x; i < n; i += blockDim.x) {
+        for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
             grad_input[base_idx + i] = i==t ? __hsub(__hmul(softmax[base_idx + i], v), v) : __hmul(softmax[base_idx + i], v);
         }
     }
@@ -69,22 +69,22 @@ __global__ void cross_entropy_backward(
 
 // blocks <m>,      threads<1024>
 __global__ void cross_entropy_forward_inplace(
-    int32_t n,
+    int64_t n,
     half *x,                // (m, n)
     const int32_t *target,  // (m)
     float *output,          // (m)
     int32_t ignore_index
 ) {
-    int32_t base_idx = blockIdx.x * n;
+    int64_t base_idx = blockIdx.x * n;
 
     float local_max = -INFINITY;
-    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
         local_max = fmaxf(__half2float(x[base_idx + i]), local_max);
     }
     local_max = fmaxf(block_allreduce_max(local_max), -1e6);
     
     float local_sum = 0;
-    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
         local_sum += expf(__half2float(x[base_idx + i]) - local_max);
     }
     local_sum = block_allreduce_sum(local_sum) + 1e-10; // avoid nan
@@ -99,32 +99,32 @@ __global__ void cross_entropy_forward_inplace(
 
     __syncthreads();
     
-    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
         x[base_idx + i] = __float2half( expf(__half2float(x[base_idx + i]) - local_max) / local_sum );
     }
 }
 
 // blocks <m>,      threads<1024>
 __global__ void cross_entropy_backward_inplace(
-    int32_t n,
+    int64_t n,
     const float *grad_output,   // (m)
     const int32_t *target,      // (m)
     half *x,                    // (m, n)
     int32_t ignore_index
 ) {
-    int32_t base_idx = blockIdx.x * n;
+    int64_t base_idx = blockIdx.x * n;
 
     int32_t t = target[blockIdx.x];
     if (t == ignore_index) {
         half v = __float2half(0.);
-        for (int i = threadIdx.x; i < n; i += blockDim.x) {
+        for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
             x[base_idx + i] = v;
         }
     }
     else {
         half v = __float2half(grad_output[blockIdx.x]);
         __syncthreads();
-        for (int i = threadIdx.x; i < n; i += blockDim.x) {
+        for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
             x[base_idx + i] = i==t ? __hsub(__hmul(x[base_idx + i], v), v) : __hmul(x[base_idx + i], v);
         }
     }
