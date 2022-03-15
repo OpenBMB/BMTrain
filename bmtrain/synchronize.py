@@ -31,3 +31,14 @@ def sum_loss(loss : torch.Tensor):
         config['comm']
     )
     return ret
+
+def gather_result(result: torch.Tensor):
+    if not result.is_cuda:
+        result = result.cuda()
+    ret = torch.empty((result.shape[0]*config['world_size'], *list(result.shape[1:])), device=result.device, dtype=result.dtype)
+    nccl.allGather(
+        result.storage(),
+        ret.storage(),
+        config['comm']
+    )
+    return ret
