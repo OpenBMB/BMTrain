@@ -18,7 +18,7 @@ if not torch.cuda.is_available():
 
 setup(
     name='bmtrain',
-    version='0.1.0',
+    version='0.1.1',
     author="Guoyang Zeng",
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",
