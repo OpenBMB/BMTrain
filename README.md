@@ -1,6 +1,6 @@
 <div align="center">
 
-**🚄 BMTrain**
+<h1>🚄 BMTrain</h1>
 
 ------
 
