@@ -24,7 +24,7 @@ from recommonmark.transform import AutoStructify
 project = 'BMTrain'
 copyright = '2022, OpenBMB'
 author = 'BMTrain Team'
-autodoc_mock_imports = ["numpy", "torch", "tensorboard"]
+autodoc_mock_imports = ["numpy", "tensorboard"]
 # -- General configuration ---------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be
