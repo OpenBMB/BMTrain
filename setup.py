@@ -11,6 +11,7 @@ def get_avx_flags():
     else:
         return ["-march=native"]
 
+
 avx_flag = get_avx_flags()
 
 if not torch.cuda.is_available():
@@ -51,3 +52,4 @@ setup(
     cmdclass={
         'build_ext': BuildExtension
     })
+

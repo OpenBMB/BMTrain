@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, Union
+from typing import Dict, Iterable, Iterator, Tuple, Union
 
 from .global_var import config
 import torch
@@ -7,6 +7,7 @@ from .synchronize import wait_loader
 from .parameter import DistributedParameter, OpAllGather
 from .checkpointing import ScopedTensorInspectorContext
 from . import debug
+from  torch.nn.modules.module import _addindent
 import copy
 
 def round_up(x, d):
@@ -511,6 +512,119 @@ class CheckpointBlock(torch.nn.Module):
                 # copy to buffer
                 self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(tmp_tensor.storage()[offset_st: offset_end])
                 del tmp_tensor
+        
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
+        r"""Helper method for yielding various names + members of modules."""
+        print("here in _named_members")
+        memo = set()
+        modules = torch.nn.Module.named_modules(self, prefix=prefix) if recurse else [(prefix, self)]
+        for module_prefix, module in modules:
+            members = get_members_fn(module)
+            for k, v in members:
+                if v is None or v in memo:
+                    continue
+                memo.add(v)
+                name = module_prefix + ('.' if module_prefix else '') + k
+                yield name, v
+
+    def named_modules(self, memo = None, prefix: str = '', remove_duplicate: bool = True):
+        r"""Returns an iterator over all modules in the network, yielding
+        both the name of the module as well as the module itself.
+
+        Args:
+            memo: a memo to store the set of modules already added to the result
+            prefix: a prefix that will be added to the name of the module
+            remove_duplicate: whether to remove the duplicated module instances in the result
+            or not
+
+        Yields:
+            (string, Module): Tuple of name and module
+
+        Note:
+            Duplicate modules are returned only once. In the following
+            example, ``l`` will be returned only once.
+
+        Example::
+
+            >>> l = nn.Linear(2, 2)
+            >>> net = nn.Sequential(l, l)
+            >>> for idx, m in enumerate(net.named_modules()):
+                    print(idx, '->', m)
+
+            0 -> ('', Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
+            ))
+            1 -> ('0', Linear(in_features=2, out_features=2, bias=True))
+
+        """
+        # print("here in named_modules hahaha")
+
+        if memo is None:
+            memo = set()
+        if self not in memo:
+            if remove_duplicate:
+                memo.add(self)
+            yield prefix, self
+            for name, module in self._module._modules.items():
+                if module is None:
+                    continue
+                submodule_prefix = prefix + ('.' if prefix else '') + name
+                for m in module.named_modules(memo, submodule_prefix, remove_duplicate):
+                    yield m
+    
+    def named_children(self):
+        r"""Returns an iterator over immediate children modules, yielding both
+        the name of the module as well as the module itself.
+
+        Yields:
+            (string, Module): Tuple containing a name and child module
+
+        Example::
+
+            >>> for name, module in model.named_children():
+            >>>     if name in ['conv4', 'conv5']:
+            >>>         print(module)
+
+        """
+        memo = set()
+        for name, module in self._module._modules.items():
+            if module is not None and module not in memo:
+                memo.add(module)
+                yield name, module
+
+    def __repr__(self):
+        # We treat the extra repr like the sub-module, one item per line
+        extra_lines = []
+        extra_repr = self.extra_repr()
+        # empty string will be split into list ['']
+        if extra_repr:
+            extra_lines = extra_repr.split('\n')
+        child_lines = []
+        for key, module in self._module._modules.items():
+            mod_str = repr(module)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        lines = extra_lines + child_lines
+
+        main_str = self._get_name() + '('
+        if lines:
+            # simple one-liner info, which most builtin Modules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+
+        main_str += ')'
+        return main_str
+    
+    def __getattr__(self, attribute):
+        try:
+            return super().__getattr__(attribute)
+        except:
+            return getattr(self._module, attribute)
+    
+
         
 class OpTransformerBlockList(torch.autograd.Function):
     @staticmethod

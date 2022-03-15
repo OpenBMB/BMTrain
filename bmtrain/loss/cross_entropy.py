@@ -200,7 +200,7 @@ class FusedCrossEntropy(torch.nn.Module):
             w = (target != self.ignore_index).int()
 
         ret = w * ret
-
+        
         if self.reduction == "none":
             return ret
         elif self.reduction == "sum":
