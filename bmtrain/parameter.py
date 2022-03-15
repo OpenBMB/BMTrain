@@ -1,6 +1,6 @@
 from typing import Callable, Iterable, Optional
 import torch
-from .utils import round_up, print_rank
+from .utils import round_up
 from .global_var import config
 from . import nccl
 

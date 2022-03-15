@@ -1,3 +1,4 @@
+import torch
 import sys
 from typing import Any, Dict, Iterable, Optional
 from .global_var import config
@@ -51,6 +52,33 @@ def print_rank(*args, rank=0, **kwargs):
     """
     if config["rank"] == rank:
         print(*args, **kwargs)
+
+def see_memory(message, detail=False):
+    """
+    Outputs a message followed by GPU memory status summary on rank 0.
+    At the end of the function, the starting point in tracking maximum GPU memory will be reset.
+
+    Args:
+        message (str): The message to be printed. It can be used to distinguish between other outputs.
+        detail (bool): Whether to print memory status in a detailed way or in a concise way. Default to false.
+
+    Example:
+        >>> bmt.see_memory("before forward")
+        >>> # forward_step()
+        >>> bmt.see_memory("after forward")
+    
+    """
+    print_rank(message)
+    if detail:
+        print_rank(torch.cuda.memory_summary())
+    else:
+        print_rank(f"""
+        =======================================================================================
+        memory_allocated {round(torch.cuda.memory_allocated() / (1024 * 1024 * 1024),2 )} GB
+        max_memory_allocated {round(torch.cuda.max_memory_allocated() / (1024 * 1024 * 1024),2)} GB
+        =======================================================================================
+        """)
+    torch.cuda.reset_peak_memory_stats()
 
 class AverageRecorder:
     def __init__(self, alpha = 0.9, start_value = 0):
