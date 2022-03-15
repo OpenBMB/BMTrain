@@ -4,14 +4,18 @@ from .layer import DistributedModule, DistributedParameter
 
 def make_distributed(model : torch.nn.Module):
     for kw in list(model._parameters.keys()):
-        model._parameters[kw] = DistributedParameter(model._parameters[kw], requires_grad=model._parameters[kw].requires_grad)
+        if model._parameters[kw] is not None:
+            if not isinstance(model._parameters[kw], DistributedParameter):
+                model._parameters[kw] = DistributedParameter(model._parameters[kw], requires_grad=model._parameters[kw].requires_grad)
     
     for kw in list(model._buffers.keys()):
-        model._buffers[kw] = model._buffers[kw].cuda()
+        if model._buffers[kw] is not None:
+            model._buffers[kw] = model._buffers[kw].cuda()
     
     for kw in list(model._modules.keys()):
         if isinstance(model, torch.nn.ModuleList):
-            model._modules[kw] = CheckpointBlock(model_wrapper_dispatch(model._modules[kw]))
+            if not isinstance(model._modules[kw], CheckpointBlock):
+                model._modules[kw] = CheckpointBlock(model_wrapper_dispatch(model._modules[kw]))
         else:
             model._modules[kw] = model_wrapper_dispatch(model._modules[kw])
 
@@ -29,4 +33,8 @@ def model_wrapper_dispatch(model : torch.nn.Module):
         return make_distributed(model)
 
 def BMTrainModelWrapper(model : torch.nn.Module) -> torch.nn.Module:
+    """
+    Automatically wrap a model in a BMTrain model.
+    Replaces all parameters with DistributedParameter, all modules with DistributedModule, and modules in ModuleList with CheckpointBlock.
+    """
     return model_wrapper_dispatch(model)
