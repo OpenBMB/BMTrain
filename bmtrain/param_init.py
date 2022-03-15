@@ -29,6 +29,10 @@ def iterate_parameters(model : torch.nn.Module):
         yield val
 
 def init_parameters(model : torch.nn.Module):
+    """
+    Initialize the parameters of the model by calling the init_method of the distributed parameters.
+    """
+
     modules = model.named_modules()
     for module_prefix, module in modules:
         if isinstance(module, CheckpointBlock):
@@ -37,6 +41,11 @@ def init_parameters(model : torch.nn.Module):
             init_distributed_parameter( iterate_parameters(module) )
 
 def grouped_parameters(model : torch.nn.Module) -> Generator[Tuple[str, List[torch.nn.Parameter]], None, None]:
+    """
+    Iterate over the parameters of the model grouped by the group name.
+    This is similar to `torch.nn.Module.named_parameters()` .
+    """
+
     ret : List[torch.nn.Parameter] = {}
     for module in model.modules():
         if isinstance(module, CheckpointBlock):

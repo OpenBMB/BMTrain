@@ -1,25 +1,23 @@
 from typing import Callable, Iterable, Optional
 import torch
-from .utils import round_up, print_rank
+from .utils import round_up
 from .global_var import config
 from . import nccl
 
 class DistributedParameter(torch.nn.Parameter):
-    r"""A kind of Tensor that is to be considered a module parameter.
+    r"""
+    DistributedParameter is a subclass of torch.nn.Parameter.
 
-    Parameters are :class:`~torch.Tensor` subclasses, that have a
-    very special property when used with :class:`Module` s - when they're
-    assigned as Module attributes they are automatically added to the list of
-    its parameters, and will appear e.g. in :meth:`~Module.parameters` iterator.
-    Assigning a Tensor doesn't have such effect. This is because one might
-    want to cache some temporary state, like last hidden state of the RNN, in
-    the model. If there was no such class as :class:`Parameter`, these
-    temporaries would get registered too.
+    It scatters the tensor to all the nodes and gathers them when needed.
 
     Args:
         data (Tensor): parameter tensor.
-        requires_grad (bool, optional): if the parameter requires gradient. See
-            :ref:`locally-disable-grad-doc` for more details. Default: `True`
+        requires_grad (bool, optional): if the parameter requires gradient.
+        init_method (Callable[['DistributedParameter'], None], optional): the method to initialize the parameter.
+        group (str, optional): the group name of the parameter.
+
+    **Note**: DistributedParameter must be on the CUDA device. It will transfer the data to device automatically when `__init__` called.
+
     """
     
     _original_shape : torch.Size
@@ -62,9 +60,17 @@ class DistributedParameter(torch.nn.Parameter):
     
     @property
     def group(self):
+        """The group name of the distributed parameter."""
+
         return self._group
 
     def gather(self) -> torch.Tensor:
+        """Gather the data from all the distributed nodes.
+
+        Return:
+            torch.Tensor: The gathered data.
+        
+        """
         with torch.cuda.stream(config['load_stream']):
             output_tensor = OpAllGather.apply(self)
         current_stream = torch.cuda.current_stream()
@@ -121,6 +127,12 @@ class OpAllGather(torch.autograd.Function):
         return grad_tensor
 
 class ParameterInitializer:
+    """
+    ParameterInitializer is a helper class that is used to initialize the distributed parameters.
+
+    Similar to functools.partial .
+
+    """
     def __init__(self, func : Callable, *args, **kwargs) -> None:
         self.func = func
         self._args = args

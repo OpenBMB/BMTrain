@@ -1,8 +1,69 @@
 from typing import Optional
 import torch
-import torch.nn.functional as F
+from . import _cuda as C
 
-class FusedCrossEntropy(torch.nn.CrossEntropyLoss):
+class OpFusedCrossEntropy(torch.autograd.Function):
+    """
+    CrossEntropy dim = 1
+    """
+    @staticmethod
+    def forward(ctx, x : torch.Tensor, target : torch.Tensor, ignore_index: int):
+        assert x.ndim == 2
+        softmax = torch.empty(x.size(), device=x.device, dtype=x.dtype)
+        out = torch.empty(x.size(0), device=x.device, dtype=torch.float)
+        C.f_cross_entropy_forward(
+            x.size(0), x.size(1),
+            x, target,
+            softmax, out,
+            ignore_index,
+        )
+        ctx.ignore_index = ignore_index
+        ctx.save_for_backward(softmax, target)
+        return out # float tensor
+        
+    @staticmethod
+    def backward(ctx, grad_output : torch.Tensor):
+        grad_output = grad_output.contiguous()
+        softmax, target = ctx.saved_tensors
+        C.f_cross_entropy_backward_inplace(
+            softmax.size(0), softmax.size(1),
+            grad_output, target,
+            softmax,
+            ctx.ignore_index,
+        )
+        return (softmax, None, None)
+
+class OpFusedCrossEntropyInplace(torch.autograd.Function):
+    """
+    CrossEntropy dim = 1
+    """
+    @staticmethod
+    def forward(ctx, x : torch.Tensor, target : torch.Tensor, ignore_index: int):
+        assert x.ndim == 2
+        out = torch.empty(x.size(0), device=x.device, dtype=torch.float)
+        C.f_cross_entropy_forward_inplace(
+            x.size(0), x.size(1),
+            x, target,
+            out,
+            ignore_index,
+        ) # x is inplace modify to softmax result
+        ctx.ignore_index = ignore_index
+        ctx.save_for_backward(x, target)
+        return out # float tensor
+        
+    @staticmethod
+    def backward(ctx, grad_output : torch.Tensor):
+        grad_output = grad_output.contiguous()
+        softmax, target = ctx.saved_tensors
+        C.f_cross_entropy_backward_inplace(
+            softmax.size(0), softmax.size(1),
+            grad_output, target,
+            softmax,
+            ctx.ignore_index,
+        ) # softmax is inplace modify to grad_input
+        return (softmax, None, None)
+
+class FusedCrossEntropy(torch.nn.Module):
     r"""This criterion computes the cross entropy loss between input and target.
 
     It is useful when training a classification problem with `C` classes.
@@ -11,10 +72,7 @@ class FusedCrossEntropy(torch.nn.CrossEntropyLoss):
     This is particularly useful when you have an unbalanced training set.
 
     The `input` is expected to contain raw, unnormalized scores for each class.
-    `input` has to be a Tensor of size either :math:`(minibatch, C)` or
-    :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
-    `K`-dimensional case. The latter is useful for higher dimension inputs, such
-    as computing cross entropy loss per-pixel for 2D images.
+    `input` has to be a Tensor of size :math:`(minibatch, C)`.
 
     The `target` that this criterion expects should contain either:
 
@@ -29,8 +87,7 @@ class FusedCrossEntropy(torch.nn.CrossEntropyLoss):
           \cdot \mathbb{1}\{y_n \not= \text{ignore\_index}\}
 
       where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
-      :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension as well as
-      :math:`d_1, ..., d_k` for the `K`-dimensional case. If
+      :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension. If
       :attr:`reduction` is not ``'none'`` (default ``'mean'``), then
 
       .. math::
@@ -53,8 +110,7 @@ class FusedCrossEntropy(torch.nn.CrossEntropyLoss):
           l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\exp(\sum_{i=1}^C x_{n,i})} y_{n,c}
 
       where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
-      :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension as well as
-      :math:`d_1, ..., d_k` for the `K`-dimensional case. If
+      :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension. If
       :attr:`reduction` is not ``'none'`` (default ``'mean'``), then
 
       .. math::
@@ -99,46 +155,55 @@ class FusedCrossEntropy(torch.nn.CrossEntropyLoss):
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`, or
-          :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
-          in the case of `K`-dimensional loss.
+        - Input: :math:`(N, C)` where `C = number of classes`.
         - Target: If containing class indices, shape :math:`(N)` where each value is
-          :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
+          :math:`0 \leq \text{targets}[i] \leq C-1`. If containing class probabilities,
           same shape as the input.
-        - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)` or
-          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of K-dimensional loss.
+        - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)`.
           Otherwise, scalar.
 
     Examples::
 
         >>> # Example of target with class indices
-        >>> loss = nn.CrossEntropyLoss()
-        >>> input = torch.randn(3, 5, requires_grad=True)
-        >>> target = torch.empty(3, dtype=torch.long).random_(5)
-        >>> output = loss(input, target)
-        >>> output.backward()
-        >>>
-        >>> # Example of target with class probabilities
-        >>> input = torch.randn(3, 5, requires_grad=True)
-        >>> target = torch.randn(3, 5).softmax(dim=1)
-        >>> output = loss(input, target)
-        >>> output.backward()
+        >>> loss_func = bmt.loss.FusedCrossEntropy()
+        >>> input = torch.randn(32, 100).half()
+        >>> target = torch.randint(0, 100, (32,)).long()
+        >>> loss = loss_func(input, target)
+        >>> loss.backward()
     """
-    
-    def __init__(self, weight: Optional[torch.Tensor] = None, size_average=None, ignore_index: int = -100,
-                 reduce=None, reduction: str = 'mean') -> None:
-        super().__init__(weight, size_average, ignore_index, reduce, reduction)
-
+    def __init__(self,
+                 weight: Optional[torch.Tensor] = None,
+                 ignore_index: int = -100,
+                 reduction: str = 'mean',
+                 label_smoothing: float = 0.0, # TODO not supported yet
+                 inplace: bool = False,
+                ) -> None:
+        super().__init__()
+        self.weight = weight
+        self.ignore_index = ignore_index
+        self.reduction = reduction
+        self.label_smoothing = label_smoothing
+        self.inplace = inplace
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        ret = F.cross_entropy(input, target, weight=self.weight,
-                               ignore_index=self.ignore_index, reduction="none",
-                               )
-        ret = ret.float()
+        if self.inplace:
+            ret = OpFusedCrossEntropyInplace.apply(input, target.int(), self.ignore_index) # return float tensor
+        else:
+            ret = OpFusedCrossEntropy.apply(input, target.int(), self.ignore_index) # return float tensor
+
+        if self.weight is not None:
+            if self.weight.dim() != 1 or self.weight.size(0) != input.size(1):
+                raise ValueError("weight should be a 1D tensor of size C");
+            w = self.weight[torch.where(target==self.ignore_index, 0, target)].float()
+            w[target==self.ignore_index] = 0
+        else:
+            w = (target != self.ignore_index).int()
+
+        ret = w * ret
+        
         if self.reduction == "none":
             return ret
         elif self.reduction == "sum":
             return ret.sum()
         elif self.reduction == "mean":
-            return ret.sum() / (target != self.ignore_index).int().sum().float()
+            return ret.sum() / w.sum().float()
