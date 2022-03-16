@@ -166,7 +166,10 @@ class CheckpointBlockContext:
             shape = param["shape"]
             param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self._param_buffer[kw_name], offset, shape)
             if requires_grad and kw_name in self._grad_buffer:
+                param["parameter"].requires_grad_(True)
                 param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self._grad_buffer[kw_name], offset, shape)
+            else:
+                param["parameter"].requires_grad_(False)
     
     
     def __enter__(self):
