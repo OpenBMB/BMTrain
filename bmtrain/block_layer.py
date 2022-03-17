@@ -595,6 +595,45 @@ class CheckpointBlock(torch.nn.Module):
             if module is not None and module not in memo:
                 memo.add(module)
                 yield name, module
+    
+    def train(self, mode: bool = True):
+        r"""Sets the module in training mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        Args:
+            mode (bool): whether to set training mode (``True``) or evaluation
+                         mode (``False``). Default: ``True``.
+
+        Returns:
+            Module: self
+        """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
+        self.training = mode
+        self._module.train()
+        return self
+
+    def eval(self):
+        r"""Sets the module in evaluation mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
+
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.eval()` and several similar mechanisms that may be confused with it.
+
+        Returns:
+            Module: self
+        """
+        return self.train(False)
 
     def __repr__(self):
         # We treat the extra repr like the sub-module, one item per line
