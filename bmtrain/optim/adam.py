@@ -1,5 +1,6 @@
 import torch
 from ..global_var import config
+import torch.optim._functional as F
 from . import _cuda as C
 from .. import nccl
 
@@ -65,7 +66,7 @@ class AdamOptimizer(torch.optim.Optimizer):
         has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
         for group in self.param_groups:
             for p in group['params']:
-                if p.grad is not None:
+                if p.grad is not None and p.dtype == torch.half:
                     C.f_has_inf_nan(p.grad, has_inf_or_nan)
         
         if "comm" in config:
@@ -82,35 +83,54 @@ class AdamOptimizer(torch.optim.Optimizer):
                 if p.grad is not None and p.requires_grad:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-
+                    if p.dtype not in [torch.float16, torch.float32]:
+                        raise RuntimeError('Adam only supports fp32 or fp16 gradients')
+                        
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
                         state['step'] = 0
                         # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.zeros(p.size(), dtype=torch.half, device=p.device) # on device
+                        state['exp_avg'] = torch.zeros(p.size(), dtype=p.dtype, device=p.device) # on device
                         # Exponential moving average of squared gradient values
                         state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device)   # on device
 
-                        state['param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device=p.device)   # on device
-                        state['param_fp32'].copy_(p)
+                        if p.dtype == torch.half:
+                            state['param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device=p.device)   # on device
+                            state['param_fp32'].copy_(p)
 
                     # update the steps for each param group update
                     state['step'] += 1
                     
-                    C.f_adam(
-                        state["param_fp32"],    # fp32
-                        p,                      # fp16
-                        p.grad,                 # fp16
-                        state['exp_avg'],       # fp16: m
-                        state["exp_avg_sq"],    # fp32: v
-                        group['betas'][0], group['betas'][1],
-                        group['eps'],
-                        0.0 if state["step"] <= self._hold_steps else group['lr'],
-                        self._scale,
-                        group['weight_decay'],
-                        state['step']
-                    )
+                    if p.dtype == torch.half:
+                        C.f_adam(
+                            state["param_fp32"],    # fp32
+                            p,                      # fp16
+                            p.grad,                 # fp16
+                            state['exp_avg'],       # fp16: m
+                            state["exp_avg_sq"],    # fp32: v
+                            group['betas'][0], group['betas'][1],
+                            group['eps'],
+                            0.0 if state["step"] <= self._hold_steps else group['lr'],
+                            self._scale,
+                            group['weight_decay'],
+                            state['step']
+                        )
+                    else:
+                        F.adam(
+                            [p],
+                            [p.grad / self._scale],
+                            [state['exp_avg']],
+                            [state["exp_avg_sq"]],
+                            [],
+                            [state["step"]],
+                            amsgrad=False,
+                            beta1=group['betas'][0],
+                            beta2=group['betas'][1],
+                            lr=0.0 if state["step"] <= self._hold_steps else group['lr'],
+                            weight_decay=group['weight_decay'],
+                            eps=group['eps']
+                        )
         
         return loss
     

@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, Union
+from typing import Dict, Iterable, Iterator, Tuple, Union
 
 from .global_var import config
 import torch
@@ -7,6 +7,8 @@ from .synchronize import wait_loader
 from .parameter import DistributedParameter, OpAllGather
 from .checkpointing import ScopedTensorInspectorContext
 from . import debug
+from  torch.nn.modules.module import _addindent
+import copy
 
 def round_up(x, d):
     return (x + d - 1) // d * d
@@ -164,7 +166,10 @@ class CheckpointBlockContext:
             shape = param["shape"]
             param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self._param_buffer[kw_name], offset, shape)
             if requires_grad and kw_name in self._grad_buffer:
+                param["parameter"].requires_grad_(True)
                 param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self._grad_buffer[kw_name], offset, shape)
+            else:
+                param["parameter"].requires_grad_(False)
     
     
     def __enter__(self):
@@ -270,6 +275,10 @@ class CheckpointBlock(torch.nn.Module):
     - state_dict
 
     For other methods, it looks like a black box with several parameter.
+
+    This is desinged to reduce the number of calls to the NCCL APIs by grouping parameters inside the inner_module.
+
+    If you want to get the parameters inside the inner_module, you can use the state_dict method.
 
     """
     def __init__(self, inner_module : torch.nn.Module):
@@ -507,9 +516,122 @@ class CheckpointBlock(torch.nn.Module):
                 self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(tmp_tensor.storage()[offset_st: offset_end])
                 del tmp_tensor
         
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
+        r"""Helper method for yielding various names + members of modules."""
+        print("here in _named_members")
+        memo = set()
+        modules = torch.nn.Module.named_modules(self, prefix=prefix) if recurse else [(prefix, self)]
+        for module_prefix, module in modules:
+            members = get_members_fn(module)
+            for k, v in members:
+                if v is None or v in memo:
+                    continue
+                memo.add(v)
+                name = module_prefix + ('.' if module_prefix else '') + k
+                yield name, v
+
+    def named_modules(self, memo = None, prefix: str = '', remove_duplicate: bool = True):
+        r"""Returns an iterator over all modules in the network, yielding
+        both the name of the module as well as the module itself.
+
+        Args:
+            memo: a memo to store the set of modules already added to the result
+            prefix: a prefix that will be added to the name of the module
+            remove_duplicate: whether to remove the duplicated module instances in the result
+            or not
+
+        Yields:
+            (string, Module): Tuple of name and module
+
+        Note:
+            Duplicate modules are returned only once. In the following
+            example, ``l`` will be returned only once.
+
+        Example::
+
+            >>> l = nn.Linear(2, 2)
+            >>> net = nn.Sequential(l, l)
+            >>> for idx, m in enumerate(net.named_modules()):
+                    print(idx, '->', m)
+
+            0 -> ('', Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
+            ))
+            1 -> ('0', Linear(in_features=2, out_features=2, bias=True))
+
+        """
+        # print("here in named_modules hahaha")
+
+        if memo is None:
+            memo = set()
+        if self not in memo:
+            if remove_duplicate:
+                memo.add(self)
+            yield prefix, self
+            for name, module in self._module._modules.items():
+                if module is None:
+                    continue
+                submodule_prefix = prefix + ('.' if prefix else '') + name
+                for m in module.named_modules(memo, submodule_prefix, remove_duplicate):
+                    yield m
+    
+    def named_children(self):
+        r"""Returns an iterator over immediate children modules, yielding both
+        the name of the module as well as the module itself.
+
+        Yields:
+            (string, Module): Tuple containing a name and child module
+
+        Example::
+
+            >>> for name, module in model.named_children():
+            >>>     if name in ['conv4', 'conv5']:
+            >>>         print(module)
+
+        """
+        memo = set()
+        for name, module in self._module._modules.items():
+            if module is not None and module not in memo:
+                memo.add(module)
+                yield name, module
+
+    def __repr__(self):
+        # We treat the extra repr like the sub-module, one item per line
+        extra_lines = []
+        extra_repr = self.extra_repr()
+        # empty string will be split into list ['']
+        if extra_repr:
+            extra_lines = extra_repr.split('\n')
+        child_lines = []
+        for key, module in self._module._modules.items():
+            mod_str = repr(module)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        lines = extra_lines + child_lines
+
+        main_str = self._get_name() + '('
+        if lines:
+            # simple one-liner info, which most builtin Modules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+
+        main_str += ')'
+        return main_str
+    
+    def __getattr__(self, attribute):
+        try:
+            return super().__getattr__(attribute)
+        except:
+            return getattr(self._module, attribute)
+    
+
+        
 class OpTransformerBlockList(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, placeholder, self : 'TransformerBlockList', hidden_state, *args):
+    def forward(ctx, placeholder, self : 'TransformerBlockList', save_list, hidden_state, *args):
         tensors = []
         others = []
         for arg in args:
@@ -522,13 +644,16 @@ class OpTransformerBlockList(torch.autograd.Function):
     
         ctx.nontensor_inputs = others
         ctx.self = self
-        
+        ctx.save_list = copy.deepcopy(save_list)
+        ctx.num_save_needed = save_list[-1][1]+1
+
         layer_inputs = []
         layer_inspector = []
         cuda_rng_state = []
         with torch.no_grad():
             for i in range(len(self)):
-                layer_inputs.append(hidden_state)
+                if save_list[i][0] == i:
+                    layer_inputs.append(hidden_state)
                 cuda_rng_state.append( torch.cuda.get_rng_state() )
                 block_ctx = CheckpointBlockContext(self._modules[str(i)])
                 # gather parameter on load stream
@@ -548,8 +673,20 @@ class OpTransformerBlockList(torch.autograd.Function):
         ctx.save_for_backward(*layer_inputs, *tensors)
         return hidden_state
 
+
     @staticmethod
     def backward(ctx, grad_hidden_state : torch.Tensor):
+        def exit_prev(prev_ctx, prev_grad):
+            if prev_ctx is not None:
+                if prev_grad:
+                    with torch.enable_grad():
+                        prev_ctx.exit()
+                        config["load_stream"].record_event(config["load_event"])
+                else:
+                    with torch.no_grad():
+                        prev_ctx.exit()
+                        config["load_stream"].record_event(config["load_event"])
+                
         if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError(
                 "Checkpointing is not compatible with .grad() or when an `inputs` parameter"
@@ -559,8 +696,8 @@ class OpTransformerBlockList(torch.autograd.Function):
         all_inputs = []
         input_requires_grad = []
         
-        layer_inputs = ctx.saved_tensors[:len(ctx.self)]
-        save_args = ctx.saved_tensors[len(ctx.self):]
+        layer_inputs = ctx.saved_tensors[:ctx.num_save_needed]
+        save_args = ctx.saved_tensors[ctx.num_save_needed:]
         for tensor, other in zip(save_args, ctx.nontensor_inputs):
             if tensor is None:
                 all_inputs.append(other)
@@ -576,15 +713,28 @@ class OpTransformerBlockList(torch.autograd.Function):
             with torch.enable_grad():
                 # overlap load and scatter here
                 prev_ctx = None
-                for i in list(range(len(ctx.self)))[::-1]:
+                prev_grad = False
+                for i in reversed(range(len(ctx.self))):
+                    if ctx.save_list[i][0] != i:
+                        with torch.no_grad():
+                            st = ctx.save_list[i][0]
+                            for j in range(st, i):
+                                torch.cuda.set_rng_state(ctx.cuda_rng_state[j])
+                                block_ctx = CheckpointBlockContext(ctx.self._modules[str(j)])
+                                block_ctx.enter()
+                                exit_prev(prev_ctx, prev_grad)
+                                output = ctx.self._modules[str(j)]._module._call_impl(layer_inputs[ctx.save_list[j][1]], *all_inputs)
+                                prev_ctx = block_ctx
+                                prev_grad = False
+                                layer_inputs[ctx.save_list[j+1][1]].copy_(output)
+                                ctx.save_list[j+1][0] = j+1
                     torch.cuda.set_rng_state(ctx.cuda_rng_state[i])
-                    ipt = layer_inputs[i].detach().requires_grad_()
+                    ipt = layer_inputs[ctx.save_list[i][1]].detach().requires_grad_()
                     block_ctx = CheckpointBlockContext(ctx.self._modules[str(i)])
                     block_ctx.enter()
-                    if prev_ctx is not None:
-                        prev_ctx.exit()
-                        config["load_stream"].record_event(config["load_event"])
+                    exit_prev(prev_ctx, prev_grad)
                     prev_ctx = block_ctx
+                    prev_grad = True
 
                     with ScopedTensorInspectorContext() as inspector:
                         output = ctx.self._modules[str(i)]._module._call_impl(ipt, *all_inputs)
@@ -603,9 +753,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                     )
                     grad_hidden_state = ipt.grad
                 
-                if prev_ctx is not None:
-                    prev_ctx.exit()
-                    config["load_stream"].record_event(config["load_event"])
+                exit_prev(prev_ctx, prev_grad)
 
         grads = []
         for inp, requires_grad in zip(all_inputs, input_requires_grad):
@@ -613,12 +761,30 @@ class OpTransformerBlockList(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None, grad_hidden_state) + tuple(grads)
+        return (None, None, None, grad_hidden_state) + tuple(grads)
     
 class TransformerBlockList(torch.nn.Module):
+    r"""
+    TransformerBlockList is a list of CheckpointBlocks.
+
+    This is designed to reduce the communication overhead by overlapping the computation and reduce_scatter operation during backward pass.
+
+    It is similar to `torch.nn.ModuleList` but with the difference when calling .forward() and .backward().
+
+    Example:
+        >>> module_list = [ ... ]
+        >>> normal_module_list = torch.nn.ModuleList(module_list)
+        >>> transformer_module_list = TransformerBlockList(module_list)
+        >>> # Calling normal module list
+        >>> for layer in normal_module_list:
+        >>>     hidden_state = layer.forward(hidden_state, ...)
+        >>> # Calling transformer module list
+        >>> hidden_state = transformer_module_list(hidden_state, ...)
+
+    """
     _modules: Dict[str, CheckpointBlock]
 
-    def __init__(self, modules: Iterable[CheckpointBlock]) -> None:
+    def __init__(self, modules: Iterable[CheckpointBlock], sqrt=False) -> None:
         super().__init__()
         
         self._modules = {}
@@ -628,6 +794,28 @@ class TransformerBlockList(torch.nn.Module):
             self._modules[str(i)] = module
             self.add_module(str(i), module)
 
+        if sqrt:
+            length = len(self)
+            num_save_needed = 0
+            num_freed = 0
+            save_list = [None]*length
+            for i in range(length-1, -1, -1):
+                if num_freed == 0 or i == 0:
+                    num_save_needed += 1
+                    save_list[i] = [1, -num_save_needed]
+                    num_freed = num_save_needed
+                else:
+                    num_freed -= 1
+                    save_list[i] = [0, -(num_save_needed - num_freed)]
+            for i in range(length-1, -1, -1):
+                save_list[i][1] += num_save_needed
+            for i in range(0, length):
+                save_list[i][0] = i if save_list[i][0]==1 else save_list[i-1][0]
+
+            self.save_list = save_list
+        else:
+            self.save_list = [(i, i) for i in range(len(self))]
+            
     def __len__(self) -> int:
         return len(self._modules)
     
@@ -636,4 +824,4 @@ class TransformerBlockList(torch.nn.Module):
 
     def forward(self, hidden_state, *args):
         placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-        return OpTransformerBlockList.apply(placeholder, self, hidden_state, *args)
+        return OpTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)

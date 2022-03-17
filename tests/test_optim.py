@@ -12,6 +12,7 @@ class TestModule(torch.nn.Module):
         self.param = torch.nn.Parameter(torch.empty(1237))
 
 def main():
+    # FIXME: this test script is not working
     model1 = TestModule()
     model2 = TestModule()
     model3 = TestModule()

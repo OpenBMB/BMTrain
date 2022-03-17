@@ -23,6 +23,15 @@ def item_formater(x) -> str:
         return str(x)
 
 def format_summary(summary : List[Dict[str, Any]]) -> str:
+    """Format summary to string.
+
+    Args:
+        summary (List[Dict[str, Any]]): The summary to format.
+
+    Returns:
+        str: The formatted summary.
+
+    """
     ret = []
 
     max_name_len = max([len("name")] + [len(item["name"]) for item in summary]) + 4

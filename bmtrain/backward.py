@@ -9,6 +9,15 @@ def optim_step(optim : torch.optim.Optimizer, lr_scheduler : Optional[WarmupLRSc
     """
     Backward with loss scale.
     Synchronize streams before optimizer steps.
+
+    This is a helper function to call optimizer.step() and lr_scheduler.step() and synchronize streams.
+
+    Args:
+        optim (torch.optim.Optimizer): A pytorch optimizer, e.g. torch.optim.Adam, torch.optim.SGD or bmtrain.optim.AdamOffloadOptimizer
+        lr_scheduler (Optional[WarmupLRSchduler]): A warmup lr scheduler, e.g. bmt.lr_scheduler.Noam
+    
+    This function can also handle gradient overflow by reducing the loss scale when it occurs.
+
     """
     
     has_scale = hasattr(optim, 'scale')
@@ -30,6 +39,7 @@ def optim_step(optim : torch.optim.Optimizer, lr_scheduler : Optional[WarmupLRSc
             optim.justify_scale(optim.scale * config["loss_scale_factor"])
     else:
         optim.step()
-        lr_scheduler.step()
+        if lr_scheduler is not None:
+            lr_scheduler.step()
 
     config['load_stream'].wait_stream(current_stream)

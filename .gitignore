@@ -147,3 +147,4 @@ bminference/version.py
 
 log
 *.qdrep
+.vscode
