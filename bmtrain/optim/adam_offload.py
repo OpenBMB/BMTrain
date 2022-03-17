@@ -3,6 +3,7 @@ from ..global_var import config
 from . import _cpu as C
 from . import _cuda as G
 from .. import nccl
+import torch.optim._functional as F
 
 class AdamOffloadOptimizer(torch.optim.Optimizer):
     """
@@ -58,7 +59,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
         has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
         for group in self.param_groups:
             for p in group['params']:
-                if p.grad is not None:
+                if p.grad is not None and p.dtype == torch.half:
                     G.f_has_inf_nan(p.grad, has_inf_or_nan)
         
         if "comm" in config:
@@ -75,7 +76,9 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 if p.grad is not None and p.requires_grad:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-
+                    if p.dtype not in [torch.float16, torch.float32]:
+                        raise RuntimeError('Adam only supports fp32 or fp16 gradients')
+                        
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
@@ -85,18 +88,30 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                         # Exponential moving average of squared gradient values
                         state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, device="cpu")      # on host
 
-                        state['_param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device="cpu")     # on host
-                        state['_param_fp32'].copy_(p)
+                        if p.dtype == torch.half:
+                            state['_param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device="cpu")     # on host
+                            state['_param_fp32'].copy_(p)
 
-                        # placeholder
-                        state["_param_fp16"] = torch.empty(p.size(), dtype=torch.float16, pin_memory=True)  # on host
-                        state["_grad_fp16"] = torch.empty(p.size(), dtype=torch.float16, pin_memory=True)   # on host
+                            # placeholder
+                            state["_param_fp16"] = torch.empty(p.size(), dtype=torch.float16, pin_memory=True)  # on host
+                            state["_grad_fp16"] = torch.empty(p.size(), dtype=torch.float16, pin_memory=True)   # on host
+                        else:
+                            state['_param_fp32'] = torch.empty(p.size(), dtype=torch.float32, pin_memory=True)     # on host
+                            state['_param_fp32'].copy_(p)
+
+                            # placeholder
+                            state["_grad_fp32"] = torch.empty(p.size(), dtype=torch.float32, pin_memory=True)   # on host
+                        
                         state["_load_event"] = torch.cuda.Event()
+
                     update_params.append((p, state, group['betas'][0], group['betas'][1], group['eps'], group['lr'], group['weight_decay']))
 
         # transfer parameters to host asynchronously
         for param, state, _, _, _, _, _ in update_params:
-            state["_grad_fp16"].copy_(param.grad, non_blocking=True)
+            if param.dtype == torch.half:
+                state["_grad_fp16"].copy_(param.grad, non_blocking=True)
+            else:
+                state["_grad_fp32"].copy_(param.grad, non_blocking=True)
             torch.cuda.current_stream().record_event(state["_load_event"])
         
         for param, state, beta1, beta2, eps, lr, weight_decay in update_params:
@@ -106,22 +121,39 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
             state["step"] += 1
             
             # update parameters
-            C.f_adam_cpu(
-                state["_param_fp32"].view(-1),
-                state["_param_fp16"].view(-1),
-                state["_grad_fp16"].view(-1),
-                state["exp_avg"].view(-1),
-                state["exp_avg_sq"].view(-1),
-                beta1, beta2,
-                eps,  0.0 if state["step"] <= self._hold_steps else lr,
-                self._scale,
-                weight_decay,
-                state["step"]
-            )
-            
-
-            # transfer parameters back to device asynchronously
-            param.copy_(state["_param_fp16"], non_blocking=True)
+            if param.dtype == torch.half:
+                C.f_adam_cpu(
+                    state["_param_fp32"].view(-1),
+                    state["_param_fp16"].view(-1),
+                    state["_grad_fp16"].view(-1),
+                    state["exp_avg"].view(-1),
+                    state["exp_avg_sq"].view(-1),
+                    beta1, beta2,
+                    eps,  0.0 if state["step"] <= self._hold_steps else lr,
+                    self._scale,
+                    weight_decay,
+                    state["step"]
+                )
+                # transfer parameters back to device asynchronously
+                param.copy_(state["_param_fp16"], non_blocking=True)
+            else:
+                state["_grad_fp32"].mul_(1.0 / self._scale)
+                F.adam(
+                    [state["_param_fp32"]],
+                    [state["_grad_fp32"]],
+                    [state["exp_avg"]],
+                    [state["exp_avg_sq"]],
+                    [],
+                    [state["step"]],
+                    amsgrad=False,
+                    beta1=beta1,
+                    beta2=beta2,
+                    lr=0.0 if state["step"] <= self._hold_steps else lr,
+                    weight_decay=weight_decay,
+                    eps=eps
+                )
+                # transfer parameters back to device asynchronously
+                param.copy_(state["_param_fp32"], non_blocking=True)
         
         self._steps_since_last_scale += 1
 
