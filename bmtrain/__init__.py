@@ -19,3 +19,4 @@ from . import optim
 from . import inspect
 from . import lr_scheduler
 from . import loss
+from . import dist
