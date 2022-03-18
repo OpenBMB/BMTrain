@@ -136,7 +136,7 @@ $ python3 -m torch.distributed.launch --master_addr ${MASTER_ADDR} --master_port
 $ torchrun --nnodes=${NNODES} --nproc_per_node=${GPU_PER_NODE} --rdzv_id=1 --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} train.py
 ```
 
-更多信息请参考pytorch官方文档：![Launch utility](https://pytorch.org/docs/stable/distributed.html#launch-utility)
+更多信息请参考pytorch官方文档：[Launch utility](https://pytorch.org/docs/stable/distributed.html#launch-utility)
 
 ## 其它说明
 

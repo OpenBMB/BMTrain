@@ -2,10 +2,10 @@ from typing import Optional
 import torch
 from .global_var import config
 from .utils import print_rank
-from .lr_scheduler.warmup import WarmupLRSchduler
+from .lr_scheduler.warmup import WarmupLRScheduler
 
 
-def optim_step(optim : torch.optim.Optimizer, lr_scheduler : Optional[WarmupLRSchduler] = None):
+def optim_step(optim : torch.optim.Optimizer, lr_scheduler : Optional[WarmupLRScheduler] = None):
     """
     Backward with loss scale.
     Synchronize streams before optimizer steps.
@@ -14,7 +14,7 @@ def optim_step(optim : torch.optim.Optimizer, lr_scheduler : Optional[WarmupLRSc
 
     Args:
         optim (torch.optim.Optimizer): A pytorch optimizer, e.g. torch.optim.Adam, torch.optim.SGD or bmtrain.optim.AdamOffloadOptimizer
-        lr_scheduler (Optional[WarmupLRSchduler]): A warmup lr scheduler, e.g. bmt.lr_scheduler.Noam
+        lr_scheduler (Optional[WarmupLRScheduler]): A warmup lr scheduler, e.g. bmt.lr_scheduler.Noam
     
     This function can also handle gradient overflow by reducing the loss scale when it occurs.
 

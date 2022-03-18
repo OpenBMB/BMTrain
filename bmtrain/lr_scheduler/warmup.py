@@ -1,6 +1,6 @@
 import torch
 
-class WarmupLRSchduler:
+class WarmupLRScheduler:
     def __init__(self, optimizer : torch.optim.Optimizer, start_lr, warmup_iter, end_iter, num_iter=0) -> None:
         self.start_lr = start_lr
         self.warmup_iter = warmup_iter
