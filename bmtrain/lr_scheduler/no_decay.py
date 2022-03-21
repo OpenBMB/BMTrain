@@ -1,8 +1,8 @@
 
 
-from .warmup import WarmupLRSchduler
+from .warmup import WarmupLRScheduler
 
-class NoDecay(WarmupLRSchduler):
+class NoDecay(WarmupLRScheduler):
     
     def get_lr_warmpup(self, num_iter) -> float:
         return self.start_lr * num_iter / self.warmup_iter
