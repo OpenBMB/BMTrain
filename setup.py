@@ -48,6 +48,10 @@ setup(
             'csrc/cross_entropy_loss.cpp',
             'csrc/cuda/cross_entropy.cu',
         ], extra_compile_args={}),
+        CUDAExtension('bmtrain.nn.softmax_cuda', [
+            'csrc/softmax.cpp',
+            'csrc/cuda/fused_softmax.cu',
+        ], extra_compile_args={}),
     ],
     cmdclass={
         'build_ext': BuildExtension
