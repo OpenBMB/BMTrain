@@ -25,12 +25,14 @@ class OpFusedSoftmax(torch.autograd.Function):
         softmax, = ctx.saved_tensors
         shape = softmax.shape
         softmax = softmax.view(-1, shape[-1])
-        C.f_fused_softmax_backward_inplace(
+        grad_input = torch.empty(softmax.size(), device=softmax.device, dtype=softmax.dtype)
+        C.f_fused_softmax_backward(
             softmax.size(0), softmax.size(1),
             grad_output,
             softmax,
+            grad_input,
         )
-        return (softmax.view(shape),)
+        return (grad_input.view(shape),)
 
 class FusedSoftmax(torch.nn.Module):
     """Softmax on last dimension
@@ -51,5 +53,4 @@ class FusedSoftmax(torch.nn.Module):
         super().__init__()
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        output = OpFusedSoftmax.apply(input)
-        return output
+        return OpFusedSoftmax.apply(input)

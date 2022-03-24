@@ -52,6 +52,10 @@ setup(
             'csrc/softmax.cpp',
             'csrc/cuda/fused_softmax.cu',
         ], extra_compile_args={}),
+        CUDAExtension('bmtrain.nn.mask_cuda', [
+            'csrc/mask.cpp',
+            'csrc/cuda/mask.cu',
+        ], extra_compile_args={}),
     ],
     cmdclass={
         'build_ext': BuildExtension
