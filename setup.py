@@ -32,7 +32,6 @@ setup(
     install_requires=[
         "torch>=1.10",
         "numpy",
-        "tensorboard"
     ],
     ext_modules=[
         CUDAExtension('bmtrain.nccl._C', [

@@ -1,4 +1,3 @@
-from typing import Literal
 import torch
 from ..global_var import config
 from ..nccl import allGather as ncclAllGather
@@ -30,7 +29,7 @@ def all_gather(x : torch.Tensor):
 
 class OpAllReduce(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input : torch.Tensor, op: Literal['sum', 'prod', 'max', 'min', 'avg']):
+    def forward(ctx, input : torch.Tensor, op : str):
         if not input.contiguous():
             input = input.contiguous()
         output = torch.empty( input.size(), dtype=input.dtype, device=input.device)
@@ -64,7 +63,7 @@ class OpAllReduce(torch.autograd.Function):
         else:
             return grad_output * ctx.saved_tensors[0], None
 
-def all_reduce(x : torch.Tensor, op: Literal['sum', 'prod', 'max', 'min', 'avg']):
+def all_reduce(x : torch.Tensor, op : str = "sum"):
     assert x.is_cuda
     return OpAllReduce.apply(x, op)
 
