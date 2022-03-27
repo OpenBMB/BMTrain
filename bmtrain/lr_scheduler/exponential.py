@@ -3,7 +3,7 @@ from .warmup import WarmupLRScheduler
 
 class Exponential(WarmupLRScheduler):
     def __init__(self, optimizer, start_lr, warmup_iter, end_iter, num_iter, gamma=0.95) -> None:
-        super().__init__(self, optimizer, start_lr, warmup_iter, end_iter, num_iter)
+        super().__init__(optimizer, start_lr, warmup_iter, end_iter, num_iter)
         self.gamma = gamma
 
     def get_lr_warmup(self, num_iter) -> float:
