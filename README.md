@@ -332,6 +332,7 @@ Model structure:
 | ZeRO2(mp=8) | 21.33 | -     | -     | -     |
 
 **ZeROa(mp=b)** means DeepSpeed + Megatron ZeRO stage a and model parallelism = b.
+
 **-** in the table means out of memory.
 
 ## Supported Models
