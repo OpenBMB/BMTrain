@@ -162,7 +162,7 @@ class GPT(torch.nn.Module):
 
         out = input_emb
         for layer in self.transformers:
-            out = layer(out, mask_2d, None)
+            out = layer(out, position_bias=None, mask=mask_2d)
         out = self.layernorm(out)
 
         logits = F.linear(out, self.word_emb.weight) / math.sqrt(self.dim_model)
