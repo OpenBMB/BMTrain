@@ -2,9 +2,9 @@ from .warmup import WarmupLRScheduler
 
 
 class Linear(WarmupLRScheduler):
-    """
+    r"""
         After a warmup period during which learning rate increases linearly between 0 and the start_lr,
-        The decay period performs :math:`\text{lr}=\text{start\_lr}\times \dfrac{\text{end\_iter}-\text{num\_iter}}{\text{end\_iter}-\text{warmup\_iter}}`
+        The decay period performs :math:`\text{lr}=\text{start_lr}\times \dfrac{\text{end_iter}-\text{num_iter}}{\text{end_iter}-\text{warmup_iter}}`
     """
 
     def get_lr_warmup(self, num_iter) -> float:

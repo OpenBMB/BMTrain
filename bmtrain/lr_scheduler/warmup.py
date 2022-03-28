@@ -1,7 +1,7 @@
 import torch
 
 class WarmupLRScheduler:
-    """Base class for learning rate schedulers with warmup.
+    r"""Base class for learning rate schedulers with warmup.
 
     Args:
         optimizer (torch.optim.Optimizer): optimizer used for training

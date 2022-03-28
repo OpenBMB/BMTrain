@@ -20,3 +20,15 @@ LR Schedulers
     :members:
     :show-inheritance:
 
+.. autoclass:: bmtrain.lr_scheduler.Linear
+    :members:
+    :show-inheritance:
+
+.. autoclass:: bmtrain.lr_scheduler.Exponential
+    :members:
+    :show-inheritance:
+
+.. autoclass:: bmtrain.lr_scheduler.Cosine
+    :members:
+    :show-inheritance:
+

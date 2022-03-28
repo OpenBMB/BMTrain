@@ -2,9 +2,9 @@ import math
 from .warmup import WarmupLRScheduler
 
 class Noam(WarmupLRScheduler):
-    """
-        After a warmup period during which performs :math:`\text{lr}=\text{start\_lr}\times \dfrac{\text{num\_iter}}{\text{warmup\_iter}^{3/2}}`,
-        The decay period performs :math:`\text{lr}=\text{start\_lr}\times \dfrac{\text{1}}{\sqrt{\text{num\_iter}}}`
+    r"""
+        After a warmup period during which performs :math:`\text{lr}=\text{start_lr}\times \dfrac{\text{num_iter}}{\text{warmup_iter}^{3/2}}`,
+        The decay period performs :math:`\text{lr}=\text{start_lr}\times \dfrac{\text{1}}{\sqrt{\text{num_iter}}}`
     """
 
     def get_lr_warmup(self, num_iter) -> float:
