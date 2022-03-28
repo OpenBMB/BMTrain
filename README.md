@@ -182,7 +182,7 @@ class MyModule(bmt.DistributedModule):
     
 ```
 
-### Step 4: Launching Distributed Training
+### Step 4: Launch Distributed Training
 
 BMTrain uses the same launch command as the distributed module of pytorch.
 
