@@ -12,8 +12,9 @@ RUN apt install iputils-ping opensm libopensm-dev libibverbs1 libibverbs-dev -y 
 ENV TORCH_CUDA_ARCH_LIST=6.1;7.0;7.5
 ENV BMP_AVX512=1
 ADD other_requirements.txt other_requirements.txt
-RUN pip3 install -r other_requirements.txt
-RUN pip3 install bmtrain
+RUN pip3 install --upgrade pip && pip3 install -r other_requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+ADD . .
+RUN python3 setup.py install
 
 WORKDIR /root
 ADD example example

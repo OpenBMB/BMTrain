@@ -29,6 +29,7 @@ def main():
 
     # data
     # generate dummy data for each rank
+    torch.manual_seed(1234)
 
     batch_size = 2
     seq_len = 512

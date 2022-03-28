@@ -144,3 +144,4 @@ cython_debug/
 
 **/log
 **/*.qdrep
+!bmtrain/dist

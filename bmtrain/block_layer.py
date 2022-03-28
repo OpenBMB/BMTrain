@@ -15,7 +15,7 @@ def round_up(x, d):
 
 class OpCheckpointBlock(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, placeholder, block : 'CheckpointBlock', preserve_rng_state, *args):
+    def forward(ctx, placeholder, block : 'CheckpointBlock', preserve_rng_state, len_args, *args):
         ctx.block = block
         ctx.preserve_rng_state = preserve_rng_state
         
@@ -32,10 +32,15 @@ class OpCheckpointBlock(torch.autograd.Function):
                 others.append(arg)
 
         ctx.nontensor_inputs = others
+        ctx.len_args = len_args
         ctx.save_for_backward(*tensors)
 
         with torch.no_grad(), ScopedTensorInspectorContext() as inspector, CheckpointBlockContext(block):
-            outputs = ctx.block._module._call_impl(*args)
+            inp_args = args[:len_args]
+            inp_kwargs = {}
+            for k, v in zip(args[len_args::2], args[len_args + 1::2]):
+                inp_kwargs[k] = v
+            outputs = ctx.block._module._call_impl(*inp_args, **inp_kwargs)
         for it in inspector.hidden_states:
             debug.append("_inspect_hidden_states", it)
         ctx.inspect_list = inspector.hidden_states
@@ -51,6 +56,7 @@ class OpCheckpointBlock(torch.autograd.Function):
 
         all_inputs = []
         input_reqires_grad = []
+        len_args = ctx.len_args
         for tensor, other in zip(ctx.saved_tensors, ctx.nontensor_inputs):
             if tensor is None:
                 all_inputs.append(other)
@@ -66,7 +72,11 @@ class OpCheckpointBlock(torch.autograd.Function):
             if ctx.preserve_rng_state:
                 torch.cuda.set_rng_state(ctx.cuda_rng_state)
             with torch.enable_grad(), ScopedTensorInspectorContext() as inspector, CheckpointBlockContext(ctx.block):
-                outputs = ctx.block._module._call_impl(*all_inputs)
+                inp_args = all_inputs[:len_args]
+                inp_kwargs = {}
+                for k, v in zip(all_inputs[len_args::2], all_inputs[len_args + 1::2]):
+                    inp_kwargs[k] = v
+                outputs = ctx.block._module._call_impl(*inp_args, **inp_kwargs)
                 if not isinstance(outputs, tuple):
                     outputs = (outputs,)
     
@@ -99,7 +109,7 @@ class OpCheckpointBlock(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None, None) + tuple(grads)
+        return (None, None, None, None) + tuple(grads)
 
 class CheckpointBlockContext:
     def __init__(self, block : 'CheckpointBlock') -> None:
@@ -399,10 +409,14 @@ class CheckpointBlock(torch.nn.Module):
         for kw in offsets.keys():
             assert offsets[kw] == self._storage_info[kw]["total"]
         
-    def __call__(self, *args):
+    def __call__(self, *args, **kwargs):
         # gather here
         placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-        return OpCheckpointBlock.apply(placeholder, self, True, *args)
+        all_inputs = list(args)
+        for kw, val in kwargs.items():
+            all_inputs.append(kw)
+            all_inputs.append(val)
+        return OpCheckpointBlock.apply(placeholder, self, True, len(args), *all_inputs)
     
     def __setattr__(self, name, value):
         object.__setattr__(self, name, value)
@@ -595,6 +609,45 @@ class CheckpointBlock(torch.nn.Module):
             if module is not None and module not in memo:
                 memo.add(module)
                 yield name, module
+    
+    def train(self, mode: bool = True):
+        r"""Sets the module in training mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        Args:
+            mode (bool): whether to set training mode (``True``) or evaluation
+                         mode (``False``). Default: ``True``.
+
+        Returns:
+            Module: self
+        """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
+        self.training = mode
+        self._module.train()
+        return self
+
+    def eval(self):
+        r"""Sets the module in evaluation mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
+
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.eval()` and several similar mechanisms that may be confused with it.
+
+        Returns:
+            Module: self
+        """
+        return self.train(False)
 
     def __repr__(self):
         # We treat the extra repr like the sub-module, one item per line
