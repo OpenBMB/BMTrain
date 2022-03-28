@@ -2,7 +2,7 @@
 
 <h1>🚄 BMTrain</h1>
 
-**Efficient Training for Big Models **
+**Efficient Training for Big Models**
 
 <p align="center">
   <a href="#overview">Overview</a> • <a href="#documentation">Documentation</a> • <a href="#install">Installation</a> • <a href="#usage">Usage</a> • <a href="#performance">Performance</a>
