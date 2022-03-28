@@ -40,13 +40,13 @@ BMTrain is an efficient large model training toolkit that can be used to train l
 <div id="documentation"></div>
 
 ## Documentation
-Our [documentation](https://bminf.readthedocs.io/en/latest/) provides more information about the package.
+Our [documentation](https://bmtrain.readthedocs.io/en/latest/index.html) provides more information about the package.
 
 <div id="install"></div>
 
 ## Installation
 
-- From pip （recommend） : ``pip install bminf``
+- From pip （recommend） : ``pip install bmtrain``
 
 - From source code: download the package and run ``python setup.py install``
 
