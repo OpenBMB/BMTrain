@@ -30,15 +30,17 @@ __inline__ __device__ float blockReduceAny(int8_t x) {
     return x;
 }
 
-
-// grid <1>,        thread<min(round_up(n, 32), 1024)>
-__global__ void bmt_has_nan_inf(
+// grid <min(ceil(n/1024), 1024)>,        thread<1024>
+__global__ void bmt_has_nan_inf_1(
     int32_t n,
-    const half* inp,    // (n,) 
-    uint8_t* out
+    const half* inp,        // (n,) 
+    uint8_t* mid            // (1024,)
 ) {
+    int32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+    int32_t span = blockDim.x * gridDim.x;
+
     int8_t r = 0;
-    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    for (int i = gid; i < n; i += span) {
         half v = inp[i];
         if (__hisinf(v) || isnan_(v)) {
             r = 1;
@@ -46,23 +48,40 @@ __global__ void bmt_has_nan_inf(
         }
     }
     r = blockReduceAny(r);
-    if (threadIdx.x == 0 && r > 0) {
+    if (threadIdx.x == 0) {
+        mid[blockIdx.x] = r;
+    }
+}
+
+// grid <1>,        thread<1024>
+__global__ void bmt_has_nan_inf_2(
+    const uint8_t* mid,    // (1024,) 
+    uint8_t* out
+) {
+    int tid = threadIdx.x;
+    int8_t r = blockReduceAny(mid[tid]);
+    if (tid == 0 && r > 0) {
         out[0] = 1;
     }
 }
+
 }
 
 void has_nan_inf_launcher(
     const torch::Tensor &g_fp16,
+    torch::Tensor mid,
     torch::Tensor out
 ) {
     int n = g_fp16.numel();
     auto g_ptr = reinterpret_cast<half*>(g_fp16.data_ptr<at::Half>());
+    auto mid_ptr = mid.data_ptr<uint8_t>();
     auto stream = at::cuda::getCurrentCUDAStream();
 
     int32_t threads = 1024;
     dim3 block_size = dim3(threads, 1, 1);
-    dim3 grid_size = dim3(1, 1, 1);
+    dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
+    dim3 clamp_grid_size = dim3(min((n + threads - 1) / threads, 1024), 1, 1);
     
-    bmt_has_nan_inf<<<grid_size, block_size, 0, stream.stream()>>>(n, g_ptr, out.data_ptr<uint8_t>());
+    bmt_has_nan_inf_1<<<clamp_grid_size, block_size, 0, stream.stream()>>>(n, g_ptr, mid_ptr);
+    bmt_has_nan_inf_2<<<1, block_size, 0, stream.stream()>>>(mid_ptr, out.data_ptr<uint8_t>());
 }
