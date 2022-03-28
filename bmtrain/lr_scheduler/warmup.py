@@ -1,6 +1,16 @@
 import torch
 
 class WarmupLRScheduler:
+    """Base class for learning rate schedulers with warmup.
+
+    Args:
+        optimizer (torch.optim.Optimizer): optimizer used for training
+        start_lr (float): starting learning rate
+        warmup_iter (int): number of iterations to linearly increase learning rate
+        end_iter (int): number of iterations to stop training
+        num_iter (int): current iteration number
+    """
+    
     def __init__(self, optimizer : torch.optim.Optimizer, start_lr, warmup_iter, end_iter, num_iter=0) -> None:
         self.start_lr = start_lr
         self.warmup_iter = warmup_iter

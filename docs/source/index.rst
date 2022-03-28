@@ -24,6 +24,7 @@ BMTrain (Big Model training) 是一个用于大规模预训练语言模型（Pre
    api/bmtrain.rst
    api/nccl.rst
    api/inspect.rst
+   api/lr_scheduler.rst
 
 API
 ==================
