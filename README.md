@@ -59,7 +59,7 @@ We recommend compiling BMTrain directly in the training environment to avoid pot
 
 ### Step 1: Initialize BMTrain
 
-Before you can use BMTrain, you need to initialize it at the beginning of your code. Just like using the distributed module of pytorch requires the use of **init_process_group** at the beginning of the code, using BMTrain requires the use of **init_distributed** at the beginning of the code.
+Before you can use BMTrain, you need to initialize it at the beginning of your code. Just like using the distributed module of PyTorch requires the use of **init_process_group** at the beginning of the code, using BMTrain requires the use of **init_distributed** at the beginning of the code.
 
 ```python
 import bmtrain as bmt
@@ -69,7 +69,7 @@ bmt.init_distributed(
 )
 ```
 
-**NOTE:** Do not use pytorch's own distributed module and its associated communication functions when using BMTrain.
+**NOTE:** Do not use PyTorch's distributed module and its associated communication functions when using BMTrain.
 
 ### Step 2: Enable ZeRO-3 Optimization
 
@@ -184,9 +184,9 @@ class MyModule(bmt.DistributedModule):
 
 ### Step 4: Launch Distributed Training
 
-BMTrain uses the same launch command as the distributed module of pytorch.
+BMTrain uses the same launch command as the distributed module of PyTorch.
 
-You can choose one of them depending on your version of Pytorch.
+You can choose one of them depending on your version of PyTorch.
 
 * `${MASTER_ADDR}` means the IP address of the master node.
 * `${MASTER_PORT}` means the port of the master node.
@@ -266,7 +266,7 @@ optimizer = bmtrain.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=
 lr_scheduler = bmtrain.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 ```
 
-BMTrain supports *all* the pytorch native optimizers and loss functions, and you can also use the fused optimizer provided by BMTrain for mixed-precision training.
+BMTrain supports *all* the PyTorch native optimizers and loss functions, and you can also use the fused optimizer provided by BMTrain for mixed-precision training.
 
 In addition, BMTrain also provides the common LRScheduler in the `bmtrain.lr_scheduler` module.
 
@@ -339,7 +339,19 @@ Model structure:
 
 We have migrated most of the common models in NLP to the BMTrain. You can find the list of supported models in the repo [ModelCenter](https://github.com/OpenBMB/ModelCenter).
 
+## Community
+We welcome everyone to contribute codes following our [contributing guidelines](https://github.com/OpenBMB/BMInf/blob/master/CONTRIBUTING.md).
+
+You can also find us on other platforms:
+- QQ Group: 735930538
+- Website: http://www.openbmb.org
+- Weibo: http://weibo.cn/OpenBMB
+- Twitter: https://twitter.com/OpenBMB
+
+## License
+The package is released under the [Apache 2.0](https://github.com/OpenBMB/BMInf/blob/master/LICENSE) License.
+
 ## Other Notes
 
-`BMTrain` makes underlying changes to pytorch, so if your program outputs unexpected results, you can submit information about it in an issue.
+`BMTrain` makes underlying changes to PyTorch, so if your program outputs unexpected results, you can submit information about it in an issue.
 
