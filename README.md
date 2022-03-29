@@ -5,7 +5,7 @@
 **Efficient Training for Big Models**
 
 <p align="center">
-  <a href="#overview">Overview</a> • <a href="#documentation">Documentation</a> • <a href="#install">Installation</a> • <a href="#usage">Usage</a> • <a href="#performance">Performance</a>
+  <a href="#overview">Overview</a> • <a href="#documentation">Documentation</a> • <a href="#install">Installation</a> • <a href="#usage">Usage</a> • <a href="#performance">Performance</a> • <a href="./README-ZH.md" target="_blank">简体中文</a>
 <br>
 </p>
 
@@ -28,7 +28,7 @@
 </div>
 
 ## What's New
-- 2022/03/16 [0.1.1](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.1) BMTrain has publicly released the first stable version, which fixes many of bugs that were in the beta version.
+- 2022/03/16 [0.1.1](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.1) BMTrain has publicly released the first stable version, which fixes many bugs that were in the beta version.
 - 2022/02/11 [0.0.15](https://github.com/OpenBMB/BMTrain/releases/tag/0.0.15) BMTrain has publicly released the first beta version.
 
 <div id="overview"></div>
@@ -323,7 +323,7 @@ Model structure:
 
 | batch size  | 8     | 16    | 24    | 32    |
 |-------------|-------|-------|:------|:------|
-| bmtrain     | 24.15 | 26.94 | 29.42 | 28.28 |
+| BMTrain     | 24.15 | 26.94 | 29.42 | 28.28 |
 | ZeRO3(mp=1) | 14.88 | 21.69 | 24.38 | -     |
 | ZeRO3(mp=4) | 15.51 | -     | -     | -     |
 | ZeRO3(mp=8) | 15.51 | -     | -     | -     |
@@ -340,7 +340,7 @@ Model structure:
 We have migrated most of the common models in NLP to the BMTrain. You can find the list of supported models in the repo [ModelCenter](https://github.com/OpenBMB/ModelCenter).
 
 ## Community
-We welcome everyone to contribute codes following our [contributing guidelines](https://github.com/OpenBMB/BMInf/blob/master/CONTRIBUTING.md).
+We welcome everyone to contribute codes following our [contributing guidelines](https://github.com/OpenBMB/BMTrain/blob/master/CONTRIBUTING.md).
 
 You can also find us on other platforms:
 - QQ Group: 735930538
@@ -349,7 +349,7 @@ You can also find us on other platforms:
 - Twitter: https://twitter.com/OpenBMB
 
 ## License
-The package is released under the [Apache 2.0](https://github.com/OpenBMB/BMInf/blob/master/LICENSE) License.
+The package is released under the [Apache 2.0](https://github.com/OpenBMB/BMTrain/blob/master/LICENSE) License.
 
 ## Other Notes
 

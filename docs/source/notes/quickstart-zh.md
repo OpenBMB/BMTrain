@@ -12,7 +12,7 @@ bmt.init_distributed(
 )
 ```
 
-**注意：** 使用`bmtrain`时请不要使用`pytorch`自带的`distributed`模块，包括`torch.distributed.init_process_group`以及相关通信函数。
+**注意：** 使用`bmtrain`时请不要使用`PyTorch`自带的`distributed`模块，包括`torch.distributed.init_process_group`以及相关通信函数。
 
 ## Step 2: 使用 ZeRO3 优化
 
@@ -123,7 +123,7 @@ class MyModule(bmt.DistributedModule):
 
 ## Step 4: 运行分布式训练代码
 
-BMTrain支持pytorch原生的分布式训练启动器，不需要额外的参数：
+BMTrain支持PyTorch原生的分布式训练启动器，不需要额外的参数：
 
 ### torch.distributed.launch
 ```shell
@@ -136,11 +136,11 @@ $ python3 -m torch.distributed.launch --master_addr ${MASTER_ADDR} --master_port
 $ torchrun --nnodes=${NNODES} --nproc_per_node=${GPU_PER_NODE} --rdzv_id=1 --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} train.py
 ```
 
-更多信息请参考pytorch官方文档：[Launch utility](https://pytorch.org/docs/stable/distributed.html#launch-utility)
+更多信息请参考PyTorch官方文档：[Launch utility](https://pytorch.org/docs/stable/distributed.html#launch-utility)
 
 ## 其它说明
 
-`BMTrain`工具包对pytorch进行了底层修改，如果你的程序输出了意料之外的结果，可以在issue中提交相关信息。
+`BMTrain`工具包对PyTorch进行了底层修改，如果你的程序输出了意料之外的结果，可以在issue中提交相关信息。
 
 更多例子请参考 *examples* 文件夹。
 
