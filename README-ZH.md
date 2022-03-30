@@ -28,7 +28,7 @@
 </div>
 
 ## 最新动态
-- 2022/03/16 [0.1.1](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.1) BMTrain 公开发布了第一个稳定版本，修复了beta版本中的一些问题.
+- 2022/03/16 [0.1.1](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.1) BMTrain 公开发布了第一个稳定版本，修复了 beta 版本中的一些问题.
 - 2022/02/11 [0.0.15](https://github.com/OpenBMB/BMTrain/releases/tag/0.0.15) BMTrain 公开发布了第一个 beta 版本。
 
 <div id="总览"></div>
@@ -40,7 +40,7 @@ BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿
 <div id="文档"></div>
 
 ## 文档
-我们的[文档](https://bmtrain.readthedocs.io/en/latest/index.html) 提供了关于工具包的更多信息。
+我们的[文档](https://bmtrain.readthedocs.io/en/latest/index.html)提供了关于工具包的更多信息。
 
 <div id="安装"></div>
 
@@ -60,7 +60,7 @@ BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿
 
 ### 步骤 1: 启用 BMTrain
 
-首先，你需要在代码开头初始化 BMTrain。正如在使用 PyTorch 的分布式训练模块需要在代码开头使用 **init_process_group**一样，使用 BMTrain 需要在代码开头使用 **init_distributed**。
+首先，你需要在代码开头初始化 BMTrain。正如在使用 PyTorch 的分布式训练模块需要在代码开头使用 **init_process_group** 一样，使用 BMTrain 需要在代码开头使用 **init_distributed**。
 
 ```python
 import bmtrain as bmt
@@ -79,7 +79,6 @@ bmt.init_distributed(
 * `torch.nn.Module` -> `bmtrain.DistributedModule`
 * `torch.nn.Parameter` -> `bmtrain.DistributedParameter`
 
-And wrap the transformer blocks with `bmtrain.CheckpointBlock`.
 并在 transformer 模块上使用 `bmtrain.CheckpointBlock`。
 
 下面是一个例子：
@@ -131,7 +130,7 @@ class MyModule(bmt.DistributedModule): # 修改这里
 
 ### 步骤 3: 通信优化
 
-为了进一步缩短通信额外开销，将通信与运算时间重叠，可以使用`TransformerBlockList`来进一步优化。
+为了进一步缩短通信额外开销，将通信与运算时间重叠，可以使用 `TransformerBlockList` 来进一步优化。
 
 在使用时需要对代码进行简单替换：
 
@@ -331,7 +330,7 @@ for iteration in range(1000):
 
 **ZeROa(mp=b)** 表示 DeepSpeed + Megatron ZeRO stage a 和 model parallelism = b。
 
-表格中 **-** 表示超出显存。
+表格中的 **-** 表示超出显存。
 
 ## 模型支持
 
@@ -352,4 +351,4 @@ for iteration in range(1000):
 
 ## 其他说明
 
-`BMTrain` 工具包对 PyTorch 进行了底层修改，如果你的程序输出了意料之外的结果，可以在issue中提交相关信息。
+`BMTrain` 工具包对 PyTorch 进行了底层修改，如果你的程序输出了意料之外的结果，可以在 issue 中提交相关信息。
