@@ -53,7 +53,6 @@ setup(
     description="A toolkit for training big models",
     packages=find_packages(),
     install_requires=[
-        "torch>=1.10",
         "numpy",
     ],
     ext_modules=[
