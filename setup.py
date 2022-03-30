@@ -11,16 +11,39 @@ def get_avx_flags():
     else:
         return ["-march=native"]
 
+def get_device_cc():
+    try:
+        CC_SET = set()
+        for i in range(torch.cuda.device_count()):
+            CC_SET.add(torch.cuda.get_device_capability(i))
+        
+        if len(CC_SET) == 0:
+            return None
+        
+        ret = ""
+        for it in CC_SET:
+            if len(ret) > 0:
+                ret = ret + " "
+            ret = ret + ("%d.%d" % it)
+        return ret
+    except RuntimeError:
+        return None
 
 avx_flag = get_avx_flags()
-
-if not torch.cuda.is_available():
-    os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0+PTX")
-else:
-    if torch.version.cuda.startswith("10"):
-        os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5+PTX")
+device_cc = get_device_cc()
+if device_cc is None:
+    if not torch.cuda.is_available():
+        os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0+PTX")
     else:
-        os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0 8.6+PTX")
+        if torch.version.cuda.startswith("10"):
+            os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5+PTX")
+        else:
+            if not torch.version.cuda.startswith("11.0"):
+                os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0 8.6+PTX")
+            else:
+                os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0+PTX")
+else:
+    os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", device_cc)
 
 setup(
     name='bmtrain',

@@ -399,7 +399,12 @@ class CheckpointBlock(torch.nn.Module):
                     to_offset_end = offset_end + param_st - storage_st
                     
                     # copy to buffer
-                    self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
+                    # PyTorch 1.11 changed the API of storage.__getitem__
+                    d_dtype = self._storage_params[kw_name].dtype
+                    d_device = self._storage_params[kw_name].device
+                    torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
+                    # self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
                     del contiguous_param
             
             # clear parameter data, but keep the dtype and device
@@ -472,7 +477,12 @@ class CheckpointBlock(torch.nn.Module):
                 to_offset_end = offset_end + param_st - storage_st
                 
                 # copy to buffer
-                self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
+                # PyTorch 1.11 changed the API of storage.__getitem__
+                d_dtype = self._storage_params[kw_name].dtype
+                d_device = self._storage_params[kw_name].device
+                torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))[:] = \
+                    torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
+                # self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
                 del contiguous_param
             elif strict:
                 missing_keys.append(key)
@@ -527,7 +537,12 @@ class CheckpointBlock(torch.nn.Module):
                 to_offset_end = offset_end + param_st - storage_st
                 
                 # copy to buffer
-                self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(tmp_tensor.storage()[offset_st: offset_end])
+                # PyTorch 1.11 changed the API of storage.__getitem__
+                d_dtype = self._storage_params[kw_name].dtype
+                d_device = self._storage_params[kw_name].device
+                torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))[:] = \
+                    torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, (offset_end - offset_st,))[:]
+                # self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(tmp_tensor.storage()[offset_st: offset_end])
                 del tmp_tensor
         
     def _named_members(self, get_members_fn, prefix='', recurse=True):
