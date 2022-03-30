@@ -28,8 +28,9 @@
 </div>
 
 ## 最新动态
-- 2022/03/16 [0.1.1](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.1) BMTrain 公开发布了第一个稳定版本，修复了 beta 版本中的一些问题.
-- 2022/02/11 [0.0.15](https://github.com/OpenBMB/BMTrain/releases/tag/0.0.15) BMTrain 公开发布了第一个 beta 版本。
+- 2022/03/30 **BMTrain** [0.1.2](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.2) 发布。适配了[OpenPrompt](https://github.com/thunlp/OpenPrompt)和 [OpenDelta](https://github.com/thunlp/OpenDelta)工具包。
+- 2022/03/16 **BMTrain** [0.1.1](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.1) 公开发布了第一个稳定版本，修复了 beta 版本中的一些问题。
+- 2022/02/11 **BMTrain** [0.0.15](https://github.com/OpenBMB/BMTrain/releases/tag/0.0.15) 公开发布了第一个 beta 版本。
 
 <div id="总览"></div>
 
