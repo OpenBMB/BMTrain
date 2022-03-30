@@ -74,7 +74,7 @@ bmt.init_distributed(
 
 ### 步骤 2: 使用 ZeRO-3 优化
 
-使用ZeRO3优化需要对模型代码进行简单替换：
+使用ZeRO-3优化需要对模型代码进行简单替换：
 
 * `torch.nn.Module` -> `bmtrain.DistributedModule`
 * `torch.nn.Parameter` -> `bmtrain.DistributedParameter`
