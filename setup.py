@@ -1,3 +1,4 @@
+import warnings
 from setuptools import setup, find_packages
 import torch
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
@@ -45,17 +46,10 @@ if device_cc is None:
 else:
     os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", device_cc)
 
-setup(
-    name='bmtrain',
-    version='0.1.2',
-    author="Guoyang Zeng",
-    author_email="qbjooo@qq.com",
-    description="A toolkit for training big models",
-    packages=find_packages(),
-    install_requires=[
-        "numpy",
-    ],
-    ext_modules=[
+ext_modules = []
+
+try:
+    ext_modules = [
         CUDAExtension('bmtrain.nccl._C', [
             'csrc/nccl.cpp',
         ], include_dirs=["csrc/nccl/build/include"], extra_compile_args={}),
@@ -74,7 +68,22 @@ setup(
             'csrc/cross_entropy_loss.cpp',
             'csrc/cuda/cross_entropy.cu',
         ], extra_compile_args={}),
+    ]
+except RuntimeError:
+    warnings.warn("CUDA is not available")
+    ext_modules = []
+
+setup(
+    name='bmtrain',
+    version='0.1.2',
+    author="Guoyang Zeng",
+    author_email="qbjooo@qq.com",
+    description="A toolkit for training big models",
+    packages=find_packages(),
+    install_requires=[
+        "numpy",
     ],
+    ext_modules=ext_modules,
     cmdclass={
         'build_ext': BuildExtension
     })
