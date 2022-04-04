@@ -3,9 +3,9 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-欢迎使用BMTrain！ 
+Welcome to use BMTrain!
 
-BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿参数的大模型。BMTrain 可以在分布式训练模型的同时，能够保持代码的简洁性。
+BMTrain is an efficient large model training toolkit that can be used to train large models with tens of billions of parameters. It can train models in a distributed manner while keeping the code as simple as stand-alone training.
 
 =======================================
 
@@ -13,9 +13,9 @@ BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿
    :maxdepth: 2
    :caption: User Guide:
 
-   notes/installation-zh.md 
-   notes/quickstart-zh.md
-   notes/tech-zh.md 
+   notes/installation.md 
+   notes/quickstart.md
+   notes/tech.md 
 
 .. toctree::
    :maxdepth: 2
