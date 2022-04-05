@@ -26,8 +26,8 @@ BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿
    api/inspect.rst
    api/lr_scheduler.rst
 
-API
-==================
+BMTrain的文档
+=========================
 
 * :ref:`genindex`
 * :ref:`modindex`
