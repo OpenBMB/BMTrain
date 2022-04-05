@@ -3,6 +3,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
+BMTrain 文档
+===============================
 欢迎使用BMTrain！ 
 
 BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿参数的大模型。BMTrain 可以在分布式训练模型的同时，能够保持代码的简洁性。
@@ -26,8 +28,8 @@ BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿
    api/inspect.rst
    api/lr_scheduler.rst
 
-BMTrain的文档
-=========================
+API
+==================
 
 * :ref:`genindex`
 * :ref:`modindex`
