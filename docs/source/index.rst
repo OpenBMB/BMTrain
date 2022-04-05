@@ -14,9 +14,9 @@ BMTrain 文档
    :maxdepth: 2
    :caption: Getting Started
 
-   notes/installation-zh.md 
-   notes/quickstart-zh.md
-   notes/tech-zh.md 
+   notes/installation.md 
+   notes/quickstart.md
+   notes/tech.md 
 
 .. toctree::
    :maxdepth: 2
