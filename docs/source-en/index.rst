@@ -6,9 +6,7 @@
 BMTrain's Documentation!
 =============================
 
-Welcome to BMTrain!
-
-BMTrain is an efficient large model training toolkit that can be used to train large models with tens of billions of parameters. It can train models in a distributed manner while keeping the code as simple as stand-alone training.
+**BMTrain** is an efficient large model training toolkit that can be used to train large models with tens of billions of parameters. It can train models in a distributed manner while keeping the code as simple as stand-alone training.
 
 =======================================
 
