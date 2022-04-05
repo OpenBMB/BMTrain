@@ -2,13 +2,13 @@
 
 ## 安装方法
 
-### 1. From PyPI (Recommend)
+### 1. 用 pip 安装 (推荐)
 
 ```shell
 $ pip install bmtrain
 ```
 
-### 2. From Source
+### 2. 从源代码安装
 
 ```shell
 $ git clone https://github.com/OpenBMB/BMTrain.git
@@ -25,7 +25,7 @@ $ python3 setup.py install
 * 强制使用AVX指令集: `BMT_AVX256=ON`
 * 强制使用AVX512指令集: `BMT_AVX512=ON`
 
-### CUDA Compute Capability
+### CUDA计算兼容性
 
 `TORCH_CUDA_ARCH_LIST=6.0 6.1 7.0 7.5 8.0+PTX`
 
