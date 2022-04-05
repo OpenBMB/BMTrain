@@ -11,7 +11,7 @@ BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿
 
 .. toctree::
    :maxdepth: 2
-   :caption: User Guide:
+   :caption: Getting Started
 
    notes/installation-zh.md 
    notes/quickstart-zh.md
@@ -19,7 +19,7 @@ BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿
 
 .. toctree::
    :maxdepth: 2
-   :caption: API Reference:
+   :caption: Package Reference
 
    api/bmtrain.rst
    api/nccl.rst
