@@ -1,8 +1,8 @@
 # 快速入门
 
-## Step 1: 启用 bmtrain
+## Step 1: 启用 BMTrain
 
-要使用bmtrain需要在代码中引入`bmtrain`工具包，并在代码的开头使用`bmtrain.init_distributed`
+要使用BMTrain需要在代码中引入`bmtrain`工具包，并在代码的开头使用`bmtrain.init_distributed`
 
 ```python
 import bmtrain as bmt
@@ -12,11 +12,11 @@ bmt.init_distributed(
 )
 ```
 
-**注意：** 使用`bmtrain`时请不要使用`PyTorch`自带的`distributed`模块，包括`torch.distributed.init_process_group`以及相关通信函数。
+**注意：** 使用BMTrain时请不要使用PyTorch自带的`distributed`模块，包括`torch.distributed.init_process_group`以及相关通信函数。
 
-## Step 2: 使用 ZeRO3 优化
+## Step 2: 使用 ZeRO-3 优化
 
-使用ZeRO3优化需要对模型代码进行简单替换：
+使用ZeRO-3优化需要对模型代码进行简单替换：
 
 * `torch.nn.Module` -> `bmtrain.DistributedModule`
 * `torch.nn.Parameter` -> `bmtrain.DistributedParameter`
