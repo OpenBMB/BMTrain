@@ -345,7 +345,7 @@ We welcome everyone to contribute codes following our [contributing guidelines](
 
 You can also find us on other platforms:
 - QQ Group: 735930538
-- Website: http://www.openbmb.org
+- Website: https://www.openbmb.org
 - Weibo: http://weibo.cn/OpenBMB
 - Twitter: https://twitter.com/OpenBMB
 
