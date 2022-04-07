@@ -9,12 +9,21 @@ def _gather_value(value : torch.Tensor, partition_size, origin_size):
     global_size = partition_size * config['world_size']
 
     storage = value.storage_type()(global_size)
-    
-    nccl.allGather(
-        value.storage(),
-        storage,
-        config['comm']
-    )
+
+    if value.storage().size() != partition_size:
+        tmp_buf = torch.zeros(partition_size, dtype=value.dtype, device=value.device)
+        tmp_buf[:value.numel()] = value[:]
+        nccl.allGather(
+            tmp_buf.storage(),
+            storage,
+            config['comm']
+        )
+    else:
+        nccl.allGather(
+            value.storage(),
+            storage,
+            config['comm']
+        )
 
     output_tensor = torch.tensor([], dtype=value.dtype, device="cuda")
     output_tensor.set_(storage, 0, origin_size)
