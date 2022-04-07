@@ -69,7 +69,7 @@ try:
             'csrc/cuda/cross_entropy.cu',
         ], extra_compile_args={}),
     ]
-except RuntimeError:
+except (RuntimeError, OSError):
     warnings.warn("CUDA is not available")
     ext_modules = []
 
