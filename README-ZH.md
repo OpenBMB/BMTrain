@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1>🚄 BMTrain</h1>
+<h1><img src="docs/logo.png" height="28px" /> BMTrain</h1>
 
 **大模型高效训练工具包**
 
