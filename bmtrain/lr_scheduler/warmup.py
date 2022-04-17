@@ -28,7 +28,7 @@ class WarmupLRScheduler:
     def get_lr(self):
         assert self.num_iter >= 0
         
-        if self.num_iter <= self.warmup_iter:
+        if self.num_iter < self.warmup_iter:
             return self.get_lr_warmup(self.num_iter)
         else:
             return self.get_lr_decay(self.num_iter)
