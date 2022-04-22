@@ -6,14 +6,14 @@ from ..nccl import allReduce as ncclAllReduce
 class OpAllGather(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input : torch.Tensor):
-        if not input.contiguous():
+        if not input.is_contiguous():
             input = input.contiguous()
+        if input.storage_offset() != 0 or input.storage().size() != input.numel():
+            input = input.clone()
         output = torch.empty( (config['world_size'],) + input.size(), dtype=input.dtype, device=input.device)
-
-        offs = input.storage_offset()
         
         ncclAllGather(
-            input.storage()[offs: offs + input.numel()],
+            input.storage(),
             output.storage(),
             config['comm']
         )
@@ -32,12 +32,12 @@ class OpAllReduce(torch.autograd.Function):
     def forward(ctx, input : torch.Tensor, op : str):
         if not input.contiguous():
             input = input.contiguous()
+        if input.storage_offset() != 0 or input.storage().size() != input.numel():
+            input = input.clone()
         output = torch.empty( input.size(), dtype=input.dtype, device=input.device)
-
-        offs = input.storage_offset()
         
         ncclAllReduce(
-            input.storage()[offs: offs + input.numel()],
+            input.storage(),
             output.storage(),
             op,
             config['comm']
