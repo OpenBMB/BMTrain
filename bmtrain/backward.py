@@ -20,7 +20,7 @@ def optim_step(optim : torch.optim.Optimizer, lr_scheduler : Optional[WarmupLRSc
 
     """
     
-    has_scale = hasattr(optim, 'scale')
+    has_scale = hasattr(optim, 'scale') and optim.scale > 1
     current_stream =  torch.cuda.current_stream()
     # some reduce ops of distributed parameter were launched on load stream
     current_stream.wait_stream(config['load_stream'])
