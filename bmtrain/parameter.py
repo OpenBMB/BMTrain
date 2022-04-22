@@ -44,7 +44,9 @@ class DistributedParameter(torch.nn.Parameter):
 
         start_of_partition = cuda_storage_size * config["rank"]
         end_of_partition = min(num_of_elements, cuda_storage_size * (config["rank"] + 1))
-        cuda_tensor_size = end_of_partition - start_of_partition
+
+        # FX: cuda_tensor_size < 0 if num_of_elements is too small
+        cuda_tensor_size = max(end_of_partition - start_of_partition, 0)
 
         cuda_tensor.set_(cuda_storage, 0, (cuda_tensor_size,))
         cuda_tensor.copy_(data.view(-1)[start_of_partition: end_of_partition])
