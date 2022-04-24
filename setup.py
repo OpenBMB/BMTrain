@@ -75,7 +75,7 @@ except (RuntimeError, OSError):
 
 setup(
     name='bmtrain',
-    version='0.1.3',
+    version='0.1.4',
     author="Guoyang Zeng",
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",

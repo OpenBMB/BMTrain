@@ -1,3 +1,4 @@
+import datetime
 import torch
 import random
 import torch.distributed as dist
@@ -5,8 +6,10 @@ import os
 from .utils import print_dict
 from .global_var import config
 from . import nccl
+import time
 
 def init_distributed(
+        init_method : str = "env://",
         seed : int = 0,
         loss_scale_factor : float = 2,
         loss_scale_steps : int = 1024
@@ -42,8 +45,14 @@ def init_distributed(
     world_size = int(os.environ["WORLD_SIZE"])
     local_size = int(os.environ["LOCAL_WORLD_SIZE"])
     master = os.environ["MASTER_ADDR"] + ":" + os.environ["MASTER_PORT"]
+    timeout = datetime.timedelta(seconds=1800)
+    rendezvous_iterator = dist.rendezvous(
+        init_method, rank, world_size, timeout=timeout
+    )
+    store, rank, world_size = next(rendezvous_iterator)
+    store.set_timeout(timeout)
 
-    store = dist.TCPStore(os.environ["MASTER_ADDR"], int(os.environ["MASTER_PORT"]), world_size, is_master=(rank == 0), wait_for_workers=True)
+    store = dist.PrefixStore("bmtrain", store)
     torch.cuda.set_device(local_rank)
 
     config["local_rank"] = local_rank
