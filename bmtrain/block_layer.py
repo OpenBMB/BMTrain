@@ -643,7 +643,7 @@ class CheckpointBlock(torch.nn.Module):
         if not isinstance(mode, bool):
             raise ValueError("training mode is expected to be boolean")
         self.training = mode
-        self._module.train()
+        self._module.train(mode)
         return self
 
     def eval(self):
