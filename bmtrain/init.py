@@ -7,6 +7,7 @@ from .utils import print_dict
 from .global_var import config
 from . import nccl
 import time
+from .synchronize import synchronize
 
 def init_distributed(
         init_method : str = "env://",
@@ -96,12 +97,15 @@ def init_distributed(
     unique_id = bytes.fromhex(store.get("BMTRAIN_UNIQUE_ID").decode())
     config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
     
-    print_dict("Initialization", {
-        "rank": rank,
-        "local_rank": local_rank,
-        "world_size": world_size,
-        "local_size": local_size,
-        "master" : master,
-        "device": torch.cuda.current_device(),
-        "cpus": cpus_this_worker 
-    })
+    for i in range(world_size):
+        if i == rank:
+            print_dict("Initialization", {
+                "rank": rank,
+                "local_rank": local_rank,
+                "world_size": world_size,
+                "local_size": local_size,
+                "master" : master,
+                "device": torch.cuda.current_device(),
+                "cpus": cpus_this_worker 
+            })
+        synchronize()
