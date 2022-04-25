@@ -186,7 +186,7 @@ class InspectTensor:
             all_names.append(f"{group_name_prefix}{index}.{name}")
 
         for item in self._summary:
-            if item[name] in all_names:
+            if item["name"] in all_names:
                 return item["tensor"]
         return None
 
