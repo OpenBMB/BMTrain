@@ -27,11 +27,11 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
         self._scale = scale
         self._steps_since_last_scale = 0
         self._hold_steps = hold_steps
-    
+
     @property
     def scale(self):
         return self._scale
-    
+
     @property
     def steps_since_last_scale(self):
         return self._steps_since_last_scale
@@ -49,7 +49,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 and returns the loss.
         The remaining arguments are deprecated, and are only retained (for the moment) for error-checking purposes.
         """
-        
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -61,7 +61,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
             for p in group['params']:
                 if p.grad is not None and p.dtype == torch.half:
                     G.f_has_inf_nan(p.grad, has_inf_or_nan)
-        
+
         if "comm" in config:
             nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
 
@@ -78,7 +78,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
                     if p.dtype not in [torch.float16, torch.float32]:
                         raise RuntimeError('Adam only supports fp32 or fp16 gradients')
-                        
+
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
@@ -101,7 +101,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
 
                             # placeholder
                             state["_grad_fp32"] = torch.empty(p.size(), dtype=torch.float32, pin_memory=True)   # on host
-                        
+
                         state["_load_event"] = torch.cuda.Event()
 
                     update_params.append((p, state, group['betas'][0], group['betas'][1], group['eps'], group['lr'], group['weight_decay']))
@@ -113,13 +113,13 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
             else:
                 state["_grad_fp32"].copy_(param.grad, non_blocking=True)
             torch.cuda.current_stream().record_event(state["_load_event"])
-        
+
         for param, state, beta1, beta2, eps, lr, weight_decay in update_params:
             # wait for transfer to host
             state["_load_event"].synchronize()
-            
+
             state["step"] += 1
-            
+
             # update parameters
             if param.dtype == torch.half:
                 C.f_adam_cpu(
@@ -150,15 +150,16 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     beta2=beta2,
                     lr=0.0 if state["step"] <= self._hold_steps else lr,
                     weight_decay=weight_decay,
-                    eps=eps
+                    eps=eps,
+                    maximize=False
                 )
                 # transfer parameters back to device asynchronously
                 param.copy_(state["_param_fp32"], non_blocking=True)
-        
+
         self._steps_since_last_scale += 1
 
         return loss
-    
+
     def loss_scale(self, loss : torch.Tensor) -> torch.Tensor:
         """
         Backward with loss scale.
