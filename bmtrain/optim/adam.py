@@ -27,11 +27,11 @@ class AdamOptimizer(torch.optim.Optimizer):
         self._scale = scale
         self._steps_since_last_scale = 0
         self._hold_steps = hold_steps
-    
+
     @property
     def scale(self):
         return self._scale
-    
+
     @property
     def steps_since_last_scale(self):
         return self._steps_since_last_scale
@@ -56,7 +56,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                 and returns the loss.
         The remaining arguments are deprecated, and are only retained (for the moment) for error-checking purposes.
         """
-        
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -68,13 +68,13 @@ class AdamOptimizer(torch.optim.Optimizer):
             for p in group['params']:
                 if p.grad is not None and p.dtype == torch.half:
                     C.f_has_inf_nan(p.grad, has_inf_or_nan)
-        
+
         if "comm" in config:
             nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
 
         if has_inf_or_nan > 0:
             raise OverflowError("Gradient overflow")
-        
+
         self._steps_since_last_scale += 1
 
         # update parameters
@@ -85,7 +85,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
                     if p.dtype not in [torch.float16, torch.float32]:
                         raise RuntimeError('Adam only supports fp32 or fp16 gradients')
-                        
+
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
@@ -101,7 +101,7 @@ class AdamOptimizer(torch.optim.Optimizer):
 
                     # update the steps for each param group update
                     state['step'] += 1
-                    
+
                     if p.dtype == torch.half:
                         C.f_adam(
                             state["param_fp32"],    # fp32
@@ -129,11 +129,12 @@ class AdamOptimizer(torch.optim.Optimizer):
                             beta2=group['betas'][1],
                             lr=0.0 if state["step"] <= self._hold_steps else group['lr'],
                             weight_decay=group['weight_decay'],
-                            eps=group['eps']
+                            eps=group['eps'],
+                            maximize=False
                         )
-        
+
         return loss
-    
+
     def loss_scale(self, loss : torch.Tensor) -> torch.Tensor:
         """
         Backward with loss scale.
