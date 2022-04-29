@@ -1,4 +1,3 @@
-import warnings
 from setuptools import setup, find_packages
 import torch
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
@@ -48,7 +47,7 @@ else:
 
 ext_modules = []
 
-try:
+if os.environ.get("GITHUB_ACTIONS", "false") == "false":
     ext_modules = [
         CUDAExtension('bmtrain.nccl._C', [
             'csrc/nccl.cpp',
@@ -69,13 +68,12 @@ try:
             'csrc/cuda/cross_entropy.cu',
         ], extra_compile_args={}),
     ]
-except (RuntimeError, OSError):
-    warnings.warn("CUDA is not available")
+else:
     ext_modules = []
 
 setup(
     name='bmtrain',
-    version='0.1.4',
+    version='0.1.5',
     author="Guoyang Zeng",
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",
