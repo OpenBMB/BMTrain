@@ -73,6 +73,7 @@ void has_nan_inf_launcher(
     torch::Tensor out
 ) {
     int n = g_fp16.numel();
+    if (n <= 0) return;
     auto g_ptr = reinterpret_cast<half*>(g_fp16.data_ptr<at::Half>());
     auto mid_ptr = mid.data_ptr<uint8_t>();
     auto stream = at::cuda::getCurrentCUDAStream();

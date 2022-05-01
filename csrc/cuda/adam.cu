@@ -50,6 +50,7 @@ void adam_launcher(
     float bias_correction2
 ) {
     int32_t n = param_fp32.numel();
+    if (n <= 0) return;
     auto g_ptr = reinterpret_cast<half*>(g_fp16.data_ptr<at::Half>());
     auto m_ptr = reinterpret_cast<half*>(m_fp16.data_ptr<at::Half>());
     auto v_ptr = v_fp32.data_ptr<float>();
