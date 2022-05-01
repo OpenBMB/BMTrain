@@ -142,11 +142,11 @@ class CheckpointBlockContext:
 
                 storage_type = local_param.storage_type()
 
-                self._param_buffer[kw] = storage_type(val["total"])
+                self._param_buffer[kw] = storage_type(val["partition_size"] * config["world_size"])
                 self._param_tensor[kw] = torch.tensor([], dtype=self._param_buffer[kw].dtype, device=self._param_buffer[kw].device).set_(self._param_buffer[kw])
 
                 if requires_grad and local_param.requires_grad:
-                    self._grad_buffer[kw] = storage_type(val["total"])
+                    self._grad_buffer[kw] = storage_type(val["partition_size"] * config["world_size"])
                     self._grad_tensor[kw] = torch.tensor([], dtype=self._grad_buffer[kw].dtype, device=self._grad_buffer[kw].device).set_(self._grad_buffer[kw]).zero_()
 
             nccl.groupStart()

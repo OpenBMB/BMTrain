@@ -46,9 +46,9 @@ def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix :
     for kw, val in model._storage_info.items():
         storage_type = model._storage_params[kw].storage_type()
 
-        _param_buffer[kw] = storage_type(val["total"])
+        _param_buffer[kw] = storage_type(val["partition_size"] * config['world_size'])
         if model._storage_params[kw].grad is not None:
-            _grad_buffer[kw] = storage_type(val["total"])
+            _grad_buffer[kw] = storage_type(val["partition_size"] * config['world_size'])
     
     nccl.groupStart()
     for kw, val in model._storage_info.items():
