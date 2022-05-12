@@ -96,6 +96,10 @@ class DistributedModule(torch.nn.Module):
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
+                if not is_param_lazy and isinstance(param, DistributedParameter) and input_param.shape != param._original_shape:
+                    error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
+                                      'the shape in current model is {}.'
+                                      .format(key, input_param.shape, param.shape))
                 try:
                     with torch.no_grad():
                         if isinstance(param, DistributedParameter):
