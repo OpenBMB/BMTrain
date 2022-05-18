@@ -3,6 +3,7 @@ from ..global_var import config
 import torch.optim._functional as F
 from . import _cuda as C
 from .. import nccl
+import inspect
 
 class AdamOptimizer(torch.optim.Optimizer):
     """
@@ -117,6 +118,9 @@ class AdamOptimizer(torch.optim.Optimizer):
                             state['step']
                         )
                     else:
+                        other_kwargs = {}
+                        if 'maximize' in inspect.signature(F.adam).parameters:
+                            other_kwargs['maximize'] = False
                         F.adam(
                             [p],
                             [p.grad / self._scale],
@@ -130,7 +134,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                             lr=0.0 if state["step"] <= self._hold_steps else group['lr'],
                             weight_decay=group['weight_decay'],
                             eps=group['eps'],
-                            maximize=False
+                            **other_kwargs
                         )
 
         return loss
