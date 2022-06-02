@@ -46,10 +46,6 @@ def init_distributed(
     local_rank = int(os.environ["LOCAL_RANK"])
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    dp_size = data_parallel_size
-    pp_size = pipe_parallel_size
-    assert (world_size%(dp_size*pp_size) == 0 and dp_size*pp_size <= world_size), "The data parallel size and pipeline size need to be valid"
-    zero_size = int(world_size//(dp_size*pp_size))
     local_size = int(os.environ["LOCAL_WORLD_SIZE"])
     master = os.environ["MASTER_ADDR"] + ":" + os.environ["MASTER_PORT"]
     timeout = datetime.timedelta(seconds=1800)

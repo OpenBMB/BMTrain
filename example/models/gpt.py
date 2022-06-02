@@ -24,13 +24,6 @@ class GPT(bmt.DistributedModule):
             )
             for _ in range(num_layers)
         ])
-        # self.transformers = [bmt.CheckpointBlock(
-        #         TransformerEncoder(
-        #             dim_model, dim_head, num_heads, dim_ff, bias, dtype
-        #         )
-        # )
-        #     for _ in range(num_layers)
-        # ]
 
         self.layernorm = Layernorm(dim_model, dtype=dtype)
 
@@ -44,10 +37,9 @@ class GPT(bmt.DistributedModule):
         mask_2d = mask_2d & (pos[:, None, :] >= pos[:, :, None])
 
         input_emb = self.pos_emb(pos) + self.word_emb(input)
-        # for i in range(len(self.transformers)):
-        #     input_emb = self.transformers[i](input_emb, mask_2d, None)
-        input_emb = self.transformers(input_emb, mask_2d, None)
-        out = self.layernorm(input_emb)
+
+        out = self.transformers(input_emb, mask_2d, None)
+        out = self.layernorm(out)
 
         logits = self.word_emb(out, projection=True)
         bmt.inspect.record_tensor(logits, "logits")

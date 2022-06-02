@@ -252,6 +252,10 @@ class CheckpointBlockContext:
         self._param_tensor = {}
         self._grad_buffer = {}
         self._param_buffer = {}
+<<<<<<< HEAD
+=======
+        
+>>>>>>> 9d221f3056f0b28b55c08224b277fa79dfd2b0db
     def __exit__(self, exc_type, exc_val, exc_tb):
         # reduce scatter gradients
         self.exit()
