@@ -29,6 +29,8 @@ def init_distributed_parameter(params : Iterable[torch.nn.Parameter]):
 
 def iterate_parameters(model : torch.nn.Module):
     for kw, val in model._parameters.items():
+        if hasattr(val,"_in_checkpoint_block") and val._in_checkpoint_block:
+            return []
         yield val
 
 def init_parameters(model : torch.nn.Module):
