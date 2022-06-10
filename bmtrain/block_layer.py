@@ -1,7 +1,6 @@
 from typing import Dict, Iterable, Iterator, Tuple, Union
 
-from torch.nn import parameter
-from collections import OrderedDict
+
 from .global_var import config
 import torch
 from . import nccl
@@ -247,7 +246,7 @@ class CheckpointBlockContext:
                 # grads can not be freed until reduce ops finish
                 self._grad_tensor[kw].record_stream(config["load_stream"])
 
-        # Release all parameters in buffer
+        # Release all parameters from buffer to block_storge
         for param in self.block._param_info:
             kw_name = param["kw_name"]
             param["parameter"].grad = None
@@ -375,8 +374,6 @@ class CheckpointBlock(torch.nn.Module):
             else:
                 storage_param.requires_grad_(False)
 
-            # register parameter
-            # self.register_parameter(kw, storage_param)
         
             self._storage_params[kw] = storage_param
 
