@@ -17,7 +17,7 @@ def init_distributed(
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
-    It must be called before any other distributed functions.siz
+    It must be called before any other distributed functions.
 
     Args:
         seed (int): The random seed.
@@ -46,7 +46,7 @@ def init_distributed(
     world_size = int(os.environ["WORLD_SIZE"])
     local_size = int(os.environ["LOCAL_WORLD_SIZE"])
     master = os.environ["MASTER_ADDR"] + ":" + os.environ["MASTER_PORT"]
-    timeout = datetime.timedelta(seconds=1800)  
+    timeout = datetime.timedelta(seconds=1800)
     rendezvous_iterator = dist.rendezvous(
         init_method, rank, world_size, timeout=timeout
     )

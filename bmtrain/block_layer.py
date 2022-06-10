@@ -14,6 +14,7 @@ import copy
 def round_up(x, d):
     return (x + d - 1) // d * d
 
+# the flag is used to control the zero level , 0 means normal zero3 , 1 means forward without release parameter ,2 means backward without gather parameter
 class OpCheckpointBlock(torch.autograd.Function):
     @staticmethod
     def forward(ctx, placeholder, block : 'CheckpointBlock', preserve_rng_state, len_args, *args):
@@ -423,7 +424,6 @@ class CheckpointBlock(torch.nn.Module):
                 self._param_info[-1]["end"] = (to_offset_end - to_offset_st,)
                 param.data[:] = \
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
-                # self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
                 del contiguous_param
             else:
                 param.data = torch.tensor([], dtype=param.dtype, device=param.device)
@@ -506,7 +506,6 @@ class CheckpointBlock(torch.nn.Module):
                 d_device = self._storage_params[kw_name].device
                 torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))[:] = \
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
-                # self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(contiguous_param.storage()[offset_st: offset_end])
                 del contiguous_param
             elif strict:
                 missing_keys.append(key)
@@ -563,10 +562,8 @@ class CheckpointBlock(torch.nn.Module):
                 # PyTorch 1.11 changed the API of storage.__getitem__
                 d_dtype = self._storage_params[kw_name].dtype
                 d_device = self._storage_params[kw_name].device
-                # param.data=torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
                 param.data[:] = \
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, (offset_end - offset_st,))[:]
-                # self._storage_params[kw_name].storage()[to_offset_st: to_offset_end].copy_(tmp_tensor.storage()[offset_st: offset_end])
                 del tmp_tensor
         
     def _named_members(self, get_members_fn, prefix='', recurse=True):
@@ -838,5 +835,3 @@ class TransformerBlockList(torch.nn.Module):
     def forward(self, hidden_state, *args):
         placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
         return OpTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)
-    # def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = '', remove_duplicate: bool = True):
-    #     return super().named_modules(memo, prefix, remove_duplicate)
