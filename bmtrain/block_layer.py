@@ -40,7 +40,7 @@ class OpCheckpointBlock(torch.autograd.Function):
             flag = 1
         else:
             flag = 0
-        with torch.no_grad(), ScopedTensorInspectorContext() as inspector, CheckpointBlockContext(block,ctx.param_dict,flag):
+        with torch.no_grad(), ScopedTensorInspectorContext() as inspector, CheckpointBlockContext(block, ctx.param_dict, flag):
             inp_args = args[:len_args]
             inp_kwargs = {}
             for k, v in zip(args[len_args::2], args[len_args + 1::2]):
@@ -80,7 +80,7 @@ class OpCheckpointBlock(torch.autograd.Function):
                     flag = 2
                 else:
                     flag = 0
-            with torch.enable_grad(), ScopedTensorInspectorContext() as inspector, CheckpointBlockContext(ctx.block,ctx.param_dict,flag):
+            with torch.enable_grad(), ScopedTensorInspectorContext() as inspector, CheckpointBlockContext(ctx.block, ctx.param_dict, flag):
                 inp_args = all_inputs[:len_args]
                 inp_kwargs = {}
                 for k, v in zip(all_inputs[len_args::2], all_inputs[len_args + 1::2]):
@@ -257,10 +257,10 @@ class CheckpointBlockContext:
             end = param["end"]
             dtype = self.block._storage_params[kw_name].dtype
             device = self.block._storage_params[kw_name].device
-            param["parameter"].data=torch.tensor([],dtype=dtype,device=device).set_(self.block._storage_params[kw_name].storage(),begin,end)
+            param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self.block._storage_params[kw_name].storage(), begin, end)
             if param["parameter"].requires_grad:
-                param["parameter"].grad=torch.tensor([],dtype=dtype,device=device).set_(self.block._storage_params[kw_name].grad.storage(),begin,end)
-        if self.flag==1:
+                param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self.block._storage_params[kw_name].grad.storage(), begin, end)
+        if self.flag == 1:
             for i in self._param_buffer:
                 self.ctx_dict[i] = self._param_buffer[i]
         self._grad_tensor = {}
@@ -663,7 +663,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                     flag = 1
                 else:
                     flag = 0
-                block_ctx = CheckpointBlockContext(self._modules[str(i)],ctx.layers_dict[i],flag = flag)
+                block_ctx = CheckpointBlockContext(self._modules[str(i)], ctx.layers_dict[i], flag)
                 # gather parameter on load stream
                 block_ctx.enter()
                 # call inner module directly
@@ -731,7 +731,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                                     flag = 2
                                 else:
                                     flag = 0
-                                block_ctx = CheckpointBlockContext(ctx.self._modules[str(j)],ctx.layers_dict[j],flag)
+                                block_ctx = CheckpointBlockContext(ctx.self._modules[str(j)], ctx.layers_dict[j], flag)
                                 block_ctx.enter()
                                 exit_prev(prev_ctx, prev_grad)
                                 output = ctx.self._modules[str(j)]._module._call_impl(layer_inputs[ctx.save_list[j][1]], *all_inputs)
@@ -746,7 +746,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                         flag = 2
                     else:
                         flag = 0
-                    block_ctx = CheckpointBlockContext(ctx.self._modules[str(i)],ctx.layers_dict[i],flag)
+                    block_ctx = CheckpointBlockContext(ctx.self._modules[str(i)], ctx.layers_dict[i], flag)
                     block_ctx.enter()
                     exit_prev(prev_ctx, prev_grad)
                     prev_ctx = block_ctx
