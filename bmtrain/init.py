@@ -13,8 +13,6 @@ def init_distributed(
         seed : int = 0,
         loss_scale_factor : float = 2,
         loss_scale_steps : int = 1024,
-        data_parallel_size: int = 1,
-        pipe_parallel_size: int =1,
         zero_level: int = 3,
     ):
     """Initialize distributed training.
@@ -48,7 +46,7 @@ def init_distributed(
     world_size = int(os.environ["WORLD_SIZE"])
     local_size = int(os.environ["LOCAL_WORLD_SIZE"])
     master = os.environ["MASTER_ADDR"] + ":" + os.environ["MASTER_PORT"]
-    timeout = datetime.timedelta(seconds=1800)
+    timeout = datetime.timedelta(seconds=1800)  
     rendezvous_iterator = dist.rendezvous(
         init_method, rank, world_size, timeout=timeout
     )
