@@ -10,7 +10,6 @@ class ConfigMap(TypedDict):
     load_stream : torch.cuda.Stream
     load_event : torch.cuda.Event
     barrier_stream : torch.cuda.Stream
-    # rank_graph : ParallelGraph
     loss_scale_factor : float
     loss_scale_steps : int
 
