@@ -301,19 +301,21 @@ def _get_param_kw(param : DistributedParameter):
     return type_name + grad_name + group_name
 
 class CheckpointBlock(torch.nn.Module):
-    """
-    CheckpointBlock is a leaf module that `inner_module` is invisible outside of CheckpointBlock.
-    Only these methods can acces `inner_module`:
-    - forward
-    - load_state_dict
-    - state_dict
+    """ Checkpoint a model or part of the model.
 
-    For other methods, it looks like a black box with several parameter.
+    Checkpoint block is used to save the occupation of GPU memory in training.
 
-    This is desinged to reduce the number of calls to the NCCL APIs by grouping parameters inside the inner_module.
+    For details, please refer to `Checkpointing <https://pytorch.org/docs/stable/checkpoint.html>`_ .
 
-    If you want to get the parameters inside the inner_module, you can use the state_dict method.
-
+    Args:
+        model (torch.nn.Module): The model to be checkpointed. All kinds of modules are supported.
+    
+    Examples:
+        >>> transformer_block = TransformerBlock(...)
+        >>> checkpoint_block = CheckpointBlock(transformer_block)
+        >>> y1, ... = checkpoint_block(x)
+        >>> y2, ... = transformer_block(x)
+        >>> assert torch.allclose(y1, y2)
     """
     def __init__(self, inner_module : torch.nn.Module):
         super().__init__()
