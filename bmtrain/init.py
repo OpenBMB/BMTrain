@@ -23,6 +23,7 @@ def init_distributed(
         seed (int): The random seed.
         loss_scale_factor (float): The loss scale factor.
         loss_scale_steps (int): The loss scale steps.
+        zero_level (int): The ZeRO optimization level. 2 for stage-2, 3 for stage-3.
 
     **init_distributed** reads the following environment variables: 
     
