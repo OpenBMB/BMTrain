@@ -129,7 +129,40 @@ void pyNCCLReduceScatter(
         reinterpret_cast<cudaStream_t>(stream)
     ));
 }
-
+void pyNCCLSend(
+    std::uintptr_t sendbuff,
+    size_t sendcount,
+    int data_type,
+    int peer,
+    std::uintptr_t comm,
+    std::uintptr_t stream
+) {
+    checkNCCLStatus(ncclSend(
+        reinterpret_cast<void*>(sendbuff),
+        sendcount,
+        static_cast<ncclDataType_t>(data_type),
+        peer,
+        reinterpret_cast<ncclComm_t>(comm),
+        reinterpret_cast<cudaStream_t>(stream)
+    ));
+}
+void pyNCCLRecv(
+    std::uintptr_t recvbuff,
+    size_t recvcount,
+    int data_type,
+    int peer,
+    std::uintptr_t comm,
+    std::uintptr_t stream
+) {
+    checkNCCLStatus(ncclRecv(
+        reinterpret_cast<void*>(recvbuff),
+        recvcount,
+        static_cast<ncclDataType_t>(data_type),
+        peer,
+        reinterpret_cast<ncclComm_t>(comm),
+        reinterpret_cast<cudaStream_t>(stream)
+    ));
+}
 void pyNCCLGroupStart() {
     checkNCCLStatus(ncclGroupStart());
 }
@@ -149,4 +182,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("ncclReduceScatter", &pyNCCLReduceScatter, "nccl reduce scatter");
     m.def("ncclGroupStart", &pyNCCLGroupStart, "nccl group start");
     m.def("ncclGroupEnd", &pyNCCLGroupEnd, "nccl group end");
+    m.def("ncclSend",&pyNCCLSend,"nccl send");
+    m.def("ncclRecv",&pyNCCLRecv,"nccl recv");
 }
