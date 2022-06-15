@@ -187,8 +187,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
         for i, module in enumerate(modules):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
-            self._modules[str(i)] = module
-            self.add_module(str(i), module)
+        
+        self._modules[str(i)] = module
+        self.add_module(str(i), module)
 
         if sqrt:
             length = len(self)

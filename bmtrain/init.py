@@ -14,6 +14,7 @@ def init_distributed(
         loss_scale_factor : float = 2,
         loss_scale_steps : int = 1024,
         zero_level: int = 3,
+        pipe_size: int = 1,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -55,7 +56,7 @@ def init_distributed(
 
     store = dist.PrefixStore("bmtrain", store)
     torch.cuda.set_device(local_rank)
-
+    config["pipe_size"] = pipe_size
     config["local_rank"] = local_rank
     config["local_size"] = local_size
     config["rank"] = rank
@@ -67,7 +68,7 @@ def init_distributed(
     config["zero_level"] = zero_level
     config["loss_scale_factor"] = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
     config["loss_scale_steps"] = loss_scale_steps
-
+    config["topology"] = init_topology(config)
     cpus_this_worker = None
     
     all_available_cpus = sorted(list(os.sched_getaffinity(0)))
@@ -109,3 +110,18 @@ def init_distributed(
                 "cpus": cpus_this_worker 
             })
         synchronize()
+def init_topology(config):
+    pp_size = config["pipe_size"]
+    world_size = config["world_size"]
+    assert world_size % pp_size == 0, "The nums of GPUs must be divisible by the pipeline parallel size"
+
+    dp_size = world_size // pp_size
+    topo=torch.tensor(range(dp_size*pp_size),dtype=torch.int,device='cuda')
+    topo=topo.view(pp_size,dp_size)
+    pp_group=topo.transpose(0,1).reshape(-1,pp_size)
+    dp_group=topo
+
+    return {
+        "pipe_group": pp_group,
+        "data_group": dp_group
+    }
