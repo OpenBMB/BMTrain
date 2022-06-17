@@ -4,7 +4,7 @@ from ..global_var import config
 from ..utils import round_up, print_rank
 from .utils import format_size
 import torch
-
+from ..pipe_comm import send_activations, recv_activations
 def send_recv():
     current_stream = torch.cuda.current_stream()
     for shape in SHAPES:
@@ -20,11 +20,9 @@ def send_recv():
         nccl.groupStart()
         if config['rank'] in [0,2,4,6]:
             nccl.send(send_buffer.storage(), config['rank']+1, config['comm'])
-            # nccl.recv(recv_buffer.storage(), config['rank']+1, config['comm'])
         else:
             nccl.recv(recv_buffer.storage(), config['rank']-1, config['comm'])
         nccl.groupEnd()
-            # nccl.send(send_buffer.storage(), config['rank']+1, config['comm'])
         current_stream.record_event(end_evt)
         current_stream.synchronize()
         time_usage = start_evt.elapsed_time(end_evt)

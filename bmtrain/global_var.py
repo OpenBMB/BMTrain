@@ -7,13 +7,14 @@ class ConfigMap(TypedDict):
     local_size : int
     zero_level : int
     pipe_size : int
+    num_micro_batches : int
     calc_stream : torch.cuda.Stream
     load_stream : torch.cuda.Stream
     load_event : torch.cuda.Event
     barrier_stream : torch.cuda.Stream
     loss_scale_factor : float
     loss_scale_steps : int
-    topology : dict
+    topology : 'topology'
     gradient_inspect : bool
 
     comm : 'NCCLCommunicator'

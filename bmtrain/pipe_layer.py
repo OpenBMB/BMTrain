@@ -15,7 +15,7 @@ import copy
 from .block_layer import CheckpointBlockContext,CheckpointBlock,round_up
 class OpPipeTransformerBlockList(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, placeholder, self : 'TransformerBlockList', save_list, hidden_state, *args):
+    def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', save_list, hidden_state, *args):
         with PipeContext(self, hidden_state) as pipe:
             tensors = []
             others = []
@@ -241,7 +241,6 @@ class PipeContext:
         self.recv_buffer = {}
     def enter(self):
         if self.stage_id != 0:
-            
             recv_activations(self.hidden_state, self.prev_rank, self.recv_buffer)
         else:
 

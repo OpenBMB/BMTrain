@@ -15,6 +15,7 @@ def init_distributed(
         loss_scale_steps : int = 1024,
         zero_level: int = 3,
         pipe_size: int = 1,
+        num_micro_batches: int = 1
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -68,7 +69,7 @@ def init_distributed(
     config["zero_level"] = zero_level
     config["loss_scale_factor"] = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
     config["loss_scale_steps"] = loss_scale_steps
-    config["topology"] = init_topology(config)
+    config["topology"] = topology(config)
     cpus_this_worker = None
     
     all_available_cpus = sorted(list(os.sched_getaffinity(0)))
@@ -110,18 +111,23 @@ def init_distributed(
                 "cpus": cpus_this_worker 
             })
         synchronize()
-def init_topology(config):
-    pp_size = config["pipe_size"]
-    world_size = config["world_size"]
-    assert world_size % pp_size == 0, "The nums of GPUs must be divisible by the pipeline parallel size"
+class topology:
+    def __init__(self,config):
+        self.rank = config['rank']
+        pp_size = config["pipe_size"]
+        world_size = config["world_size"]
+        assert world_size % pp_size == 0, "The nums of GPUs must be divisible by the pipeline parallel size"
 
-    dp_size = world_size // pp_size
-    topo=torch.tensor(range(dp_size*pp_size),dtype=torch.int,device='cuda')
-    topo=topo.view(pp_size,dp_size)
-    pp_group=topo.transpose(0,1).reshape(-1,pp_size)
-    dp_group=topo
-
-    return {
-        "pipe_group": pp_group,
-        "data_group": dp_group
-    }
+        dp_size = world_size // pp_size
+        topo=torch.tensor(range(dp_size*pp_size),dtype=torch.int,device='cuda')
+        topo=topo.view(pp_size,dp_size)
+        self.pp_group=topo.transpose(0,1).reshape(-1,pp_size)
+        self.dp_group=topo
+        self.stage_id = (self.pp_group == self.rank).nonzero()[0,-1].item()
+        self.stages = config['pipe_size']
+        # pipe_idx is the idx of the pipeline in the group
+        self.pipe_idx = (self.pp_group == self.rank).nonzero()[0, 0].item() # x axes
+        self.next_rank = self.pp_group[self.pipe_idx, self.stage_id + 1].item() if self.stage_id < config['pipe_size'] - 1 else -1
+        self.prev_rank = self.pp_group[self.pipe_idx, self.stage_id - 1].item() if self.stage_id > 0 else -1
+        self.tails = self.pp_group[self.pipe_idx, self.stage_id:].tolist()
+        self.heads = self.pp_group[self.pipe_idx, :self.stage_id + 1].tolist()

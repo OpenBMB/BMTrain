@@ -162,7 +162,7 @@ def recv(dst : torch.storage._StorageBase,
         comm.ptr,
         torch.cuda.current_stream().cuda_stream
     )
-        
+    
 def broadcast(
         src : torch.storage._StorageBase,
         dst : torch.storage._StorageBase,
