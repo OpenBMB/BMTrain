@@ -108,6 +108,10 @@ class AdamOptimizer(torch.optim.Optimizer):
                     state['step'] += 1
 
                     if p.dtype == torch.half:
+                        if ('maximize' in group) and (group['maximize'] is True):
+                            grad = -p.grad
+                        else:
+                            grad = p.grad
                         C.f_adam(
                             state["_param_fp32"],    # fp32
                             p,                      # fp16
