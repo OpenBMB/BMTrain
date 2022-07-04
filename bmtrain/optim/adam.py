@@ -115,7 +115,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                         C.f_adam(
                             state["_param_fp32"],    # fp32
                             p,                      # fp16
-                            p.grad,                 # fp16
+                            grad,                 # fp16
                             state['exp_avg'],       # fp16: m
                             state["exp_avg_sq"],    # fp32: v
                             group['betas'][0], group['betas'][1],
