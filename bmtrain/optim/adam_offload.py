@@ -136,7 +136,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 C.f_adam_cpu(
                     state["_param_fp32"].view(-1),
                     state["_param_fp16"].view(-1),
-                    grad,
+                    grad.view(-1),
                     state["exp_avg"].view(-1),
                     state["exp_avg_sq"].view(-1),
                     beta1, beta2,
