@@ -107,11 +107,12 @@ class AdamOptimizer(torch.optim.Optimizer):
                     # update the steps for each param group update
                     state['step'] += 1
 
+                    if ('maximize' in group) and (group['maximize'] is True):
+                        grad = -p.grad
+                    else:
+                        grad = p.grad
+                        
                     if p.dtype == torch.half:
-                        if ('maximize' in group) and (group['maximize'] is True):
-                            grad = -p.grad
-                        else:
-                            grad = p.grad
                         C.f_adam(
                             state["_param_fp32"],    # fp32
                             p,                      # fp16
@@ -131,7 +132,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                             other_kwargs['maximize'] = False
                         F.adam(
                             [p],
-                            [p.grad / self._scale],
+                            [grad / self._scale],
                             [state['exp_avg']],
                             [state["exp_avg_sq"]],
                             [],
