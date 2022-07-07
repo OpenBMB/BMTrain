@@ -831,7 +831,8 @@ class TransformerBlockList(torch.nn.Module):
             
     def __len__(self) -> int:
         return len(self._modules)
-    
+    def __iter__(self) -> Iterator[CheckpointBlock]:
+        return iter(self._modules.values())
     def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
         return self._modules[str(index)]
 
