@@ -81,12 +81,26 @@ def see_memory(message, detail=False):
     torch.cuda.reset_peak_memory_stats()
 
 class AverageRecorder:
+    """A utility class to record the average value of a quantity over time.
+
+    Args:
+        alpha (float): The decay factor of the average.
+        start_value (float): The initial value of the average.
+    
+    Use `.value` to get the current average value.
+    It is calculated as `alpha * old_value + (1 - alpha) * new_value`.
+    
+    """
     def __init__(self, alpha = 0.9, start_value = 0):
         self._value = start_value
         self.alpha = alpha
         self._steps = 0
     
     def record(self, v):
+        """Records a new value.
+        Args:
+            v (float): The new value.
+        """
         self._value = self._value * self.alpha + v * (1 - self.alpha)
         self._steps += 1
     

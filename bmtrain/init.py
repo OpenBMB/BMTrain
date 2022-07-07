@@ -8,12 +8,12 @@ from .global_var import config
 from . import nccl
 import time
 from .synchronize import synchronize
-
 def init_distributed(
         init_method : str = "env://",
         seed : int = 0,
         loss_scale_factor : float = 2,
-        loss_scale_steps : int = 1024
+        loss_scale_steps : int = 1024,
+        zero_level: int = 3,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -23,6 +23,7 @@ def init_distributed(
         seed (int): The random seed.
         loss_scale_factor (float): The loss scale factor.
         loss_scale_steps (int): The loss scale steps.
+        zero_level (int): The ZeRO optimization level. 2 for stage-2, 3 for stage-3.
 
     **init_distributed** reads the following environment variables: 
     
@@ -64,7 +65,7 @@ def init_distributed(
     config["load_stream"] = torch.cuda.Stream(priority=-1)
     config['barrier_stream'] = torch.cuda.Stream()
     config["load_event"] = torch.cuda.Event()
-
+    config["zero_level"] = zero_level
     config["loss_scale_factor"] = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
     config["loss_scale_steps"] = loss_scale_steps
 

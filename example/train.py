@@ -6,6 +6,7 @@ import time
 def main():
     bmt.init_distributed(
         seed=0,
+        zero_level=2
     )
 
     model = GPT(

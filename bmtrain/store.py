@@ -35,8 +35,7 @@ def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
 
 
 def save(model : torch.nn.Module, file_name : str):
-    """
-    Saves the model to the file.
+    """Saves the model to the file.
 
     Similar to torch.save, but it used for distributed modules.
 
@@ -44,6 +43,8 @@ def save(model : torch.nn.Module, file_name : str):
         model (torch.nn.Module): The model to be saved.
         file_name (str): The file name of the checkpoint.
 
+    Examples:
+        >>> bmtrain.save(model, "model.pt")
     """
     torch.cuda.synchronize()
     state_dict = _save_to_rank0(model)
@@ -176,8 +177,7 @@ class DistributedStateDictWrapper:
         return broadcast_object(list(self._state_dict.keys()))
 
 def load(model : torch.nn.Module, file_name : str, strict : bool = True):
-    """
-    Loads the model from the file.
+    """Loads the model from the file.
 
     Similar to torch.load, but it uses less memory when loading large models.
 
@@ -186,6 +186,8 @@ def load(model : torch.nn.Module, file_name : str, strict : bool = True):
         file_name (str): The file name of the checkpoint.
         strict (bool): Strict option of `load_state_dict`.
     
+    Example:
+        >>> bmtrain.load(model, "model.pt", strict=True)
     """
     if config['rank'] == 0:
         state_dict = DistributedStateDictWrapper(torch.load(file_name))

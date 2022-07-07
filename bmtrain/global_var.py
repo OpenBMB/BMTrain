@@ -5,12 +5,11 @@ class ConfigMap(TypedDict):
     local_rank : int
     world_size : int
     local_size : int
-
+    zero_level : int
     calc_stream : torch.cuda.Stream
     load_stream : torch.cuda.Stream
     load_event : torch.cuda.Event
     barrier_stream : torch.cuda.Stream
-
     loss_scale_factor : float
     loss_scale_steps : int
 
