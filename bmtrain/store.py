@@ -12,7 +12,7 @@ def _save_to_state_dict(model : torch.nn.Module, destination, prefix):
         if config['rank'] != 0:
             destination = OrderedDict() # creates an temporary ordered dict
             destination._metadata = OrderedDict()
-        model.state_dict(destination, prefix, False)
+        model.state_dict(destination=destination, prefix=prefix, keep_vars=False)
     else:
         if config['rank'] != 0:
             destination = OrderedDict() # creates an temporary ordered dict

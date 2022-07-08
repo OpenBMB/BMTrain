@@ -464,7 +464,7 @@ class CheckpointBlock(torch.nn.Module):
         # gather here
         with torch.no_grad():
             with CheckpointBlockContext(self):
-                return self._module.state_dict(destination, prefix, keep_vars)
+                return self._module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
     
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
