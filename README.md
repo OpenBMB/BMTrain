@@ -67,15 +67,16 @@ Before you can use BMTrain, you need to initialize it at the beginning of your c
 import bmtrain as bmt
 bmt.init_distributed(
     seed=0,
+    zero_level=3,   # support 2 and 3 now
     # ...
 )
 ```
 
 **NOTE:** Do not use PyTorch's distributed module and its associated communication functions when using BMTrain.
 
-### Step 2: Enable ZeRO-3 Optimization
+### Step 2: Enable ZeRO Optimization
 
-To enable ZeRO-3 optimization, you need to make some simple replacements to the original model's code.
+To enable ZeRO optimization, you need to make some simple replacements to the original model's code.
 
 * `torch.nn.Module` -> `bmtrain.DistributedModule`
 * `torch.nn.Parameter` -> `bmtrain.DistributedParameter`
@@ -232,7 +233,7 @@ The code mainly consists of the following parts.
 
 Above is the directory structure of the code in the part of Model Definition.
 
-We defined all the layers needed in GPT-2 and used BMTrain's `DistributedModule` and `DistributedParameter` to enable ZeRO-3 optimization.
+We defined all the layers needed in GPT-2 and used BMTrain's `DistributedModule` and `DistributedParameter` to enable ZeRO optimization.
 
 ### Part 2: BMTrain Initialization
 
