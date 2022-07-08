@@ -41,7 +41,7 @@ def all_gather(x : torch.Tensor):
 class OpAllReduce(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input : torch.Tensor, op : str):
-        if not input.contiguous():
+        if not input.is_contiguous():
             input = input.contiguous()
         if input.storage_offset() != 0 or input.storage().size() != input.numel():
             input = input.clone()
