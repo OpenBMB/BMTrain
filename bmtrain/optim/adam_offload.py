@@ -129,10 +129,14 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
 
             # update parameters
             if param.dtype == torch.half:
+                if ('maximize' in group) and (group['maximize'] is True):
+                    grad = -state["_grad_fp16"]
+                else:
+                    grad = state["_grad_fp16"]
                 C.f_adam_cpu(
                     state["_param_fp32"].view(-1),
                     state["_param_fp16"].view(-1),
-                    state["_grad_fp16"].view(-1),
+                    grad.view(-1),
                     state["exp_avg"].view(-1),
                     state["exp_avg_sq"].view(-1),
                     beta1, beta2,
@@ -145,13 +149,16 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 param.copy_(state["_param_fp16"], non_blocking=True)
             else:
                 state["_grad_fp32"].mul_(1.0 / self._scale)
-                
+                if ('maximize' in group) and (group['maximize'] is True):
+                    grad = -state["_grad_fp32"]
+                else:
+                    grad = state["_grad_fp32"]
                 other_kwargs = {}
                 if 'maximize' in inspect.signature(F.adam).parameters:
                     other_kwargs['maximize'] = False
                 F.adam(
                     [state["_param_fp32"]],
-                    [state["_grad_fp32"]],
+                    [grad],
                     [state["exp_avg"]],
                     [state["exp_avg_sq"]],
                     [],
