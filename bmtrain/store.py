@@ -5,6 +5,7 @@ from .global_var import config
 from .block_layer import CheckpointBlock
 from . import nccl
 import io, pickle
+from typing import Mapping
 
 def _save_to_state_dict(model : torch.nn.Module, destination, prefix):
     if isinstance(model, CheckpointBlock):
@@ -109,8 +110,8 @@ def broadcast_object(obj):
         obj = _unpickler(io.BytesIO(buf)).load()
     return obj
     
-
-class DistributedStateDictWrapper:
+# Must be a Mapping after pytorch 1.12.0
+class DistributedStateDictWrapper(Mapping):
     def __init__(self, state_dict : Dict) -> None:
         self._state_dict = state_dict
         self._metadata = broadcast_object(getattr(state_dict, "_metadata", None))
@@ -175,6 +176,10 @@ class DistributedStateDictWrapper:
     
     def keys(self):
         return broadcast_object(list(self._state_dict.keys()))
+
+    def __iter__(self):
+        # pytorch 1.12.0 updated the load_state_dict method, which needs the state_dict to be a `Mapping`.
+        return iter(self.keys())
 
 def load(model : torch.nn.Module, file_name : str, strict : bool = True):
     """Loads the model from the file.
