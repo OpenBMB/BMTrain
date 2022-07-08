@@ -33,6 +33,9 @@ class DistributedParameter(torch.nn.Parameter):
             init_method : Optional[Callable[['DistributedParameter'], None]] = None,
             group : Optional[str] = None
         ):
+        if not config["initialized"]:
+            raise RuntimeError("BMTrain is not initialized")
+
         num_of_elements = data.numel()
 
         cuda_tensor = torch.tensor([], dtype=data.dtype, device="cuda") 

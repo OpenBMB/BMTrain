@@ -6,7 +6,6 @@ import os
 from .utils import print_dict
 from .global_var import config
 from . import nccl
-import time
 from .synchronize import synchronize
 def init_distributed(
         init_method : str = "env://",
@@ -57,6 +56,7 @@ def init_distributed(
     store = dist.PrefixStore("bmtrain", store)
     torch.cuda.set_device(local_rank)
 
+    config["initialized"] = True
     config["local_rank"] = local_rank
     config["local_size"] = local_size
     config["rank"] = rank
@@ -110,3 +110,6 @@ def init_distributed(
                 "cpus": cpus_this_worker 
             })
         synchronize()
+
+def is_initialized() -> bool:
+    return config["initialized"]

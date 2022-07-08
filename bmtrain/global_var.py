@@ -14,10 +14,11 @@ class ConfigMap(TypedDict):
     loss_scale_steps : int
 
     gradient_inspect : bool
+    initialized : bool
 
     comm : 'NCCLCommunicator'
 
-config = ConfigMap()
+config = ConfigMap(rank=0, local_rank=0, world_size=1, initialized=False)
 
 def rank():
     """

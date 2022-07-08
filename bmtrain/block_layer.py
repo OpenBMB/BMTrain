@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, Iterator, Tuple, Union
+from typing import Dict, Iterable, Iterator, Union
 
 
 from .global_var import config
@@ -8,7 +8,6 @@ from .synchronize import wait_loader
 from .parameter import DistributedParameter, OpAllGather
 from .checkpointing import ScopedTensorInspectorContext
 from . import debug
-from  torch.nn.modules.module import _addindent
 import copy
 
 def round_up(x, d):
@@ -331,7 +330,8 @@ class CheckpointBlock(torch.nn.Module):
 
         # calc total number of parameters
         for name, param in ordered_parameters:
-            assert isinstance(param, DistributedParameter), "All parameters in checkpoint block must be DistributedParameter."
+            if not isinstance(param, DistributedParameter):
+                raise ValueError("All parameters in checkpoint block must be DistributedParameter.")
 
             storage_type = storage_type_cuda(param.storage_type())
             kw_name = _get_param_kw(param)
