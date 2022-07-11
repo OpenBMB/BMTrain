@@ -5,6 +5,10 @@ from . import _cuda as C
 from .. import nccl
 import inspect
 
+from copy import deepcopy
+from itertools import chain
+from collections import defaultdict
+
 class AdamOptimizer(torch.optim.Optimizer):
     """
     Adam optimizer
@@ -97,17 +101,22 @@ class AdamOptimizer(torch.optim.Optimizer):
                         state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device)   # on device
 
                         if p.dtype == torch.half:
-                            state['param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device=p.device)   # on device
-                            state['param_fp32'].copy_(p)
+                            state['_param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device=p.device)   # on device
+                            state['_param_fp32'].copy_(p)
 
                     # update the steps for each param group update
                     state['step'] += 1
 
+                    if ('maximize' in group) and (group['maximize'] is True):
+                        grad = -p.grad
+                    else:
+                        grad = p.grad
+                        
                     if p.dtype == torch.half:
                         C.f_adam(
-                            state["param_fp32"],    # fp32
+                            state["_param_fp32"],    # fp32
                             p,                      # fp16
-                            p.grad,                 # fp16
+                            grad,                 # fp16
                             state['exp_avg'],       # fp16: m
                             state["exp_avg_sq"],    # fp32: v
                             group['betas'][0], group['betas'][1],
@@ -123,7 +132,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                             other_kwargs['maximize'] = False
                         F.adam(
                             [p],
-                            [p.grad / self._scale],
+                            [grad / self._scale],
                             [state['exp_avg']],
                             [state["exp_avg_sq"]],
                             [],
@@ -144,3 +153,58 @@ class AdamOptimizer(torch.optim.Optimizer):
         Backward with loss scale.
         """
         return loss * (self.scale / config['world_size'])
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        r"""Loads the optimizer state.
+
+        Args:
+            state_dict (dict): optimizer state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        # deepcopy, to be consistent with module API
+        state_dict = deepcopy(state_dict)
+        # Validate the state_dict
+        groups = self.param_groups
+        saved_groups = state_dict['param_groups']
+
+        if len(groups) != len(saved_groups):
+            raise ValueError("loaded state dict has a different number of "
+                             "parameter groups")
+        param_lens = (len(g['params']) for g in groups)
+        saved_lens = (len(g['params']) for g in saved_groups)
+        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
+            raise ValueError("loaded state dict contains a parameter group "
+                             "that doesn't match the size of optimizer's group")
+
+        # Update the state
+        id_map = {old_id: p for old_id, p in
+                  zip(chain.from_iterable((g['params'] for g in saved_groups)),
+                      chain.from_iterable((g['params'] for g in groups)))}
+
+        # Copy state assigned to params (and cast tensors to appropriate types).
+        # State that is not assigned to params is copied as is (needed for
+        # backward compatibility).
+        state = defaultdict(dict)
+        for k, v in state_dict['state'].items():
+            if k in id_map:
+                param = id_map[k]
+
+                if param.dtype == torch.half and "_param_fp32" not in v:
+                    v["_param_fp32"] = torch.empty(param.size(), dtype=torch.float32, device=param.device)
+                    v["_param_fp32"].copy_(param)
+
+                for name, dtype in [("exp_avg", param.dtype), ("exp_avg_sq", torch.float32), ("_param_fp32", torch.float32)]:
+                    if name in v:
+                        v[name] = v[name].to(param.device).to(dtype)
+
+                state[param] = v
+            else:
+                state[k] = v
+
+        # Update parameter groups, setting their 'params' value
+        def update_group(group, new_group):
+            new_group['params'] = group['params']
+            return new_group
+        param_groups = [
+            update_group(g, ng) for g, ng in zip(groups, saved_groups)]
+        self.__setstate__({'state': state, 'param_groups': param_groups})

@@ -5,13 +5,14 @@ from .global_var import config
 from .block_layer import CheckpointBlock
 from . import nccl
 import io, pickle
+from typing import Mapping
 
 def _save_to_state_dict(model : torch.nn.Module, destination, prefix):
     if isinstance(model, CheckpointBlock):
         if config['rank'] != 0:
             destination = OrderedDict() # creates an temporary ordered dict
             destination._metadata = OrderedDict()
-        model.state_dict(destination, prefix, False)
+        model.state_dict(destination=destination, prefix=prefix, keep_vars=False)
     else:
         if config['rank'] != 0:
             destination = OrderedDict() # creates an temporary ordered dict
@@ -35,8 +36,7 @@ def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
 
 
 def save(model : torch.nn.Module, file_name : str):
-    """
-    Saves the model to the file.
+    """Saves the model to the file.
 
     Similar to torch.save, but it used for distributed modules.
 
@@ -44,6 +44,8 @@ def save(model : torch.nn.Module, file_name : str):
         model (torch.nn.Module): The model to be saved.
         file_name (str): The file name of the checkpoint.
 
+    Examples:
+        >>> bmtrain.save(model, "model.pt")
     """
     torch.cuda.synchronize()
     state_dict = _save_to_rank0(model)
@@ -108,8 +110,8 @@ def broadcast_object(obj):
         obj = _unpickler(io.BytesIO(buf)).load()
     return obj
     
-
-class DistributedStateDictWrapper:
+# Must be a Mapping after pytorch 1.12.0
+class DistributedStateDictWrapper(Mapping):
     def __init__(self, state_dict : Dict) -> None:
         self._state_dict = state_dict
         self._metadata = broadcast_object(getattr(state_dict, "_metadata", None))
@@ -175,9 +177,12 @@ class DistributedStateDictWrapper:
     def keys(self):
         return broadcast_object(list(self._state_dict.keys()))
 
+    def __iter__(self):
+        # pytorch 1.12.0 updated the load_state_dict method, which needs the state_dict to be a `Mapping`.
+        return iter(self.keys())
+
 def load(model : torch.nn.Module, file_name : str, strict : bool = True):
-    """
-    Loads the model from the file.
+    """Loads the model from the file.
 
     Similar to torch.load, but it uses less memory when loading large models.
 
@@ -186,6 +191,8 @@ def load(model : torch.nn.Module, file_name : str, strict : bool = True):
         file_name (str): The file name of the checkpoint.
         strict (bool): Strict option of `load_state_dict`.
     
+    Example:
+        >>> bmtrain.load(model, "model.pt", strict=True)
     """
     if config['rank'] == 0:
         state_dict = DistributedStateDictWrapper(torch.load(file_name))

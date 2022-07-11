@@ -6,7 +6,6 @@ import os
 from .utils import print_dict
 from .global_var import config
 from . import nccl
-import time
 from .synchronize import synchronize
 def init_distributed(
         init_method : str = "env://",
@@ -25,6 +24,7 @@ def init_distributed(
         seed (int): The random seed.
         loss_scale_factor (float): The loss scale factor.
         loss_scale_steps (int): The loss scale steps.
+        zero_level (int): The ZeRO optimization level. 2 for stage-2, 3 for stage-3.
 
     **init_distributed** reads the following environment variables: 
     
@@ -58,6 +58,8 @@ def init_distributed(
     store = dist.PrefixStore("bmtrain", store)
     torch.cuda.set_device(local_rank)
     config["pipe_size"] = pipe_size
+
+    config["initialized"] = True
     config["local_rank"] = local_rank
     config["local_size"] = local_size
     config["rank"] = rank
@@ -131,3 +133,6 @@ class topology:
         self.prev_rank = self.pp_group[self.pipe_idx, self.stage_id - 1].item() if self.stage_id > 0 else -1
         self.tails = self.pp_group[self.pipe_idx, self.stage_id:].tolist()
         self.heads = self.pp_group[self.pipe_idx, :self.stage_id + 1].tolist()
+
+def is_initialized() -> bool:
+    return config["initialized"]
