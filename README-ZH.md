@@ -68,15 +68,16 @@ BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿
 import bmtrain as bmt
 bmt.init_distributed(
     seed=0,
+    zero_level=3,   # 目前支持2和3
     # ...
 )
 ```
 
 **注意：** 使用 BMTrain 时请不要使用 PyTorch 自带的 `distributed` 模块，包括 `torch.distributed.init_process_group` 以及相关通信函数。
 
-### 步骤 2: 使用 ZeRO-3 优化
+### 步骤 2: 使用 ZeRO 优化
 
-使用ZeRO-3优化需要对模型代码进行简单替换：
+使用ZeRO优化需要对模型代码进行简单替换：
 
 * `torch.nn.Module` -> `bmtrain.DistributedModule`
 * `torch.nn.Parameter` -> `bmtrain.DistributedParameter`
@@ -229,7 +230,7 @@ $ torchrun --nnodes=${NNODES} --nproc_per_node=${GPU_PER_NODE} --rdzv_id=1 --rdz
 
 上面是代码的目录结构。
 
-我们定义了 GPT-2 需要的所有模型层，并使用 BMTrain 的 `DistributedModule` 和 `DistributedParameter` 来启用 ZeRO-3 优化。
+我们定义了 GPT-2 需要的所有模型层，并使用 BMTrain 的 `DistributedModule` 和 `DistributedParameter` 来启用 ZeRO 优化。
 
 ### 第 2 部分: 初始化 BMTrain
 

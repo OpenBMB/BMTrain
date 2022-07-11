@@ -32,13 +32,16 @@ def all_gather(x : torch.Tensor):
     Returns:
         torch.Tensor: The gathered tensor of shape (world_size, ...).
     """
+    if not config["initialized"]:
+        raise RuntimeError("BMTrain is not initialized")
+    
     assert x.is_cuda
     return OpAllGather.apply(x)
 
 class OpAllReduce(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input : torch.Tensor, op : str):
-        if not input.contiguous():
+        if not input.is_contiguous():
             input = input.contiguous()
         if input.storage_offset() != 0 or input.storage().size() != input.numel():
             input = input.clone()
@@ -82,6 +85,9 @@ def all_reduce(x : torch.Tensor, op : str = "sum"):
         torch.Tensor: The reduced tensor of shape (...).
     
     """
+    if not config["initialized"]:
+        raise RuntimeError("BMTrain is not initialized")
+
     assert x.is_cuda
     return OpAllReduce.apply(x, op)
 
