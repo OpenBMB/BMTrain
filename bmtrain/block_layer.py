@@ -1,6 +1,6 @@
 from typing import Dict, Iterable, Iterator, Union
 
-
+from .utils import round_up
 from .global_var import config
 import torch
 from . import nccl
@@ -10,8 +10,6 @@ from .checkpointing import ScopedTensorInspectorContext
 from . import debug
 import copy
 
-def round_up(x, d):
-    return (x + d - 1) // d * d
 
 # the flag is used to control the zero level , 0 means normal zero3 , 1 means forward without release parameter ,2 means backward without gather parameter
 class OpCheckpointBlock(torch.autograd.Function):
@@ -162,7 +160,7 @@ class CheckpointBlockContext:
                     nccl.allGather(
                         self.block._storage_params[kw].storage(),
                         self._param_buffer[kw],
-                        config["comm"]
+                        config["zero_comm"]
                     )
                 nccl.groupEnd()
 
@@ -237,7 +235,7 @@ class CheckpointBlockContext:
                             self._grad_buffer[kw],
                             local_param.grad.storage(),
                             "sum",
-                            config["comm"]
+                            config["zero_comm"]
                         )
                 nccl.groupEnd()
 

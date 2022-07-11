@@ -42,7 +42,7 @@ def init_distributed(
 
     """
     torch.backends.cudnn.enabled = False
-    
+
     local_rank = int(os.environ["LOCAL_RANK"])
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
@@ -54,7 +54,6 @@ def init_distributed(
     )
     store, rank, world_size = next(rendezvous_iterator)
     store.set_timeout(timeout)
-
     store = dist.PrefixStore("bmtrain", store)
     torch.cuda.set_device(local_rank)
     config["pipe_size"] = pipe_size
@@ -100,7 +99,20 @@ def init_distributed(
     
     unique_id = bytes.fromhex(store.get("BMTRAIN_UNIQUE_ID").decode())
     config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
-    
+    if config['pipe_size'] > 1:
+        topo = config['topology']
+        if topo.stage_id == 0:
+            unique_id = nccl.getUniqueId()
+            store.set(f"PIPE_UNIQUE_ID{topo.pipe_idx}", unique_id.hex())
+        unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
+        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size , topo.stage_id)
+        if topo.zero_id == 0:
+            unique_id = nccl.getUniqueId()
+            store.set(f"ZERO_UNIQUE_ID{topo.zero_idx}", unique_id.hex() )
+        unique_id = bytes.fromhex(store.get(f"ZERO_UNIQUE_ID{topo.zero_idx}").decode())
+        config ['zero_comm'] = nccl.commInitRank(unique_id, world_size//pipe_size, topo.zero_id)
+    else:
+        config['zero_comm'] = config['comm']
     for i in range(world_size):
         if i == rank:
             print_dict("Initialization", {
@@ -115,6 +127,7 @@ def init_distributed(
         synchronize()
 class topology:
     def __init__(self,config):
+        # pipe_idx is the idx of the pipeline in the group
         self.rank = config['rank']
         pp_size = config["pipe_size"]
         world_size = config["world_size"]
@@ -127,12 +140,26 @@ class topology:
         self.dp_group=topo
         self.stage_id = (self.pp_group == self.rank).nonzero()[0,-1].item()
         self.stages = config['pipe_size']
-        # pipe_idx is the idx of the pipeline in the group
         self.pipe_idx = (self.pp_group == self.rank).nonzero()[0, 0].item() # x axes
-        self.next_rank = self.pp_group[self.pipe_idx, self.stage_id + 1].item() if self.stage_id < config['pipe_size'] - 1 else -1
-        self.prev_rank = self.pp_group[self.pipe_idx, self.stage_id - 1].item() if self.stage_id > 0 else -1
+        self.zero_id = self.pipe_idx
+        self.zero_idx = self.stage_id
+        self.next_rank = self.stage_id+1 if self.stage_id < config['pipe_size'] - 1 else -1
+        self.prev_rank = self.stage_id-1 if self.stage_id > 0 else -1
         self.tails = self.pp_group[self.pipe_idx, self.stage_id:].tolist()
         self.heads = self.pp_group[self.pipe_idx, :self.stage_id + 1].tolist()
+<<<<<<< Updated upstream
 
 def is_initialized() -> bool:
     return config["initialized"]
+=======
+    def get_group_id(self,group_name):
+        if group_name == "pipe":
+            return self.pipe_idx
+        elif group_name == "zero":
+            return self.zero_idx
+    def get_group_rank(self,group_name):
+        if group_name == "pipe":
+            return self.stage_id
+        elif group_name == "zero":
+            return self.zero_id
+>>>>>>> Stashed changes

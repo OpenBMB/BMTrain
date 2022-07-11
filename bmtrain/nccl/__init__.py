@@ -83,7 +83,13 @@ def commDestroy(comm : NCCLCommunicator):
     """
     C.ncclCommDestroy(comm.ptr)
     comm._destroy_ptr()
+def commCount(comm : NCCLCommunicator):
+    """NCCL API: `ncclCommCount <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclcommcount>`_
 
+    Args:
+        comm (NCCLCommunicator): NCCL communicator.
+    """
+    return C.ncclCommCount(comm.ptr)
 ### collective
 
 def allReduce(

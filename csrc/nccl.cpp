@@ -170,6 +170,13 @@ void pyNCCLGroupStart() {
 void pyNCCLGroupEnd() {
     checkNCCLStatus(ncclGroupEnd());
 }
+int pyNCCLCommCount(
+    std::uintptr_t comm
+){
+    int res;
+    checkNCCLStatus(ncclCommCount(reinterpret_cast<ncclComm_t>(comm),&res));
+    return res;
+}
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("ncclGetUniqueId", &pyNCCLGetUniqueID, "nccl get unique ID");
@@ -184,4 +191,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("ncclGroupEnd", &pyNCCLGroupEnd, "nccl group end");
     m.def("ncclSend",&pyNCCLSend,"nccl send");
     m.def("ncclRecv",&pyNCCLRecv,"nccl recv");
+    m.def("ncclCommCount",&pyNCCLCommCount,"nccl comm count");
 }
