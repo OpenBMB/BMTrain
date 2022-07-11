@@ -148,10 +148,13 @@ class topology:
         self.tails = self.pp_group[self.pipe_idx, self.stage_id:].tolist()
         self.heads = self.pp_group[self.pipe_idx, :self.stage_id + 1].tolist()
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 
 def is_initialized() -> bool:
     return config["initialized"]
 =======
+=======
+>>>>>>> Stashed changes
     def get_group_id(self,group_name):
         if group_name == "pipe":
             return self.pipe_idx
@@ -162,4 +165,7 @@ def is_initialized() -> bool:
             return self.stage_id
         elif group_name == "zero":
             return self.zero_id
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
