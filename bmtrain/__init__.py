@@ -10,7 +10,7 @@ from .checkpointing import checkpoint
 from .block_layer import CheckpointBlock, TransformerBlockList
 from .backward import optim_step
 from .wrapper import BMTrainModelWrapper
-
+from .pipe_layer import PipelineTransformerBlockList
 from . import debug
 from .store import save, load
 

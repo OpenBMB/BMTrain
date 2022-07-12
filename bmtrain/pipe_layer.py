@@ -5,7 +5,7 @@ import copy
 from typing import Dict, Iterable, Iterator, Tuple, Union
 
 from torch.autograd import backward
-from .pipe_comm import forward_pass,backward_pass,send_grad,receive_grad,recv_activations,send_activations
+from .pipe_comm import recv_activations,send_activations,broadcast,gather_input
 from .global_var import config
 import torch
 from . import nccl
@@ -15,11 +15,13 @@ from .checkpointing import ScopedTensorInspectorContext
 from . import debug
 from  torch.nn.modules.module import _addindent
 import copy
+from .pipe_comm import gather_input
 from .block_layer import CheckpointBlockContext,CheckpointBlock,round_up
 class OpPipeTransformerBlockList(torch.autograd.Function):
     @staticmethod
     def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', save_list, hidden_state, *args):
-        with PipeContext(self, hidden_state) as pipe_input:
+        args = list(args)
+        with PipeContext(self, hidden_state, args) as pipe_input:
             hidden_state = pipe_input[0]
             tensors = []
             others = []
@@ -44,7 +46,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                         layer_inputs.append(hidden_state)
                     cuda_rng_state.append( torch.cuda.get_rng_state() )
                     #TODO  for micro batch in pipe,the checkpoint activation needs to save until all micro batch are finished when forward
-                    block_ctx = CheckpointBlockContext(self._modules[str(i)], ctx.layers_dict[i], 1)
+                    block_ctx = CheckpointBlockContext(self._modules[str(i)], ctx.layers_dict[i], 1, pipe=True)
                     # gather parameter on load stream
                     block_ctx.enter()
                     # call inner module directly
@@ -61,7 +63,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
             
             ctx.save_for_backward(*layer_inputs, *tensors)
             pipe_input[0] = hidden_state
-        return hidden_state
+        return pipe_input[0]
 
 
     @staticmethod
@@ -106,7 +108,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                     for i in reversed(range(len(ctx.self))):
                         torch.cuda.set_rng_state(ctx.cuda_rng_state[i])
                         ipt = layer_inputs[ctx.save_list[i][1]].detach().requires_grad_()
-                        block_ctx = CheckpointBlockContext(ctx.self._modules[str(i)], ctx.layers_dict[i], 2)
+                        block_ctx = CheckpointBlockContext(ctx.self._modules[str(i)], ctx.layers_dict[i], 2, pipe=True)
                         block_ctx.enter()
                         exit_prev(prev_ctx, prev_grad)
                         prev_ctx = block_ctx
@@ -114,7 +116,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
 
                         with ScopedTensorInspectorContext() as inspector:
                             output = ctx.self._modules[str(i)]._module._call_impl(ipt, *all_inputs)
-                        
+
                         assert len(ctx.layer_inspector[i]) == len(inspector.hidden_states), "Backward step changed"
                         for j, it in enumerate(inspector.hidden_states):
                             assert it["name"] == ctx.layer_inspector[i][j]["name"], "Backward step changed"
@@ -129,7 +131,6 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                         )
                         grad_hidden_state = ipt.grad
                     exit_prev(prev_ctx, prev_grad)
-                    print(ctx.self._modules['1'].w.grad)
 
             pipe_input[0] = grad_hidden_state
         grads = []
@@ -138,7 +139,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None, None, grad_hidden_state) + tuple(grads)
+        return (None, None, None, pipe_input[0]) + tuple(grads)
     
 class PipelineTransformerBlockList(torch.nn.Module):
     r"""
@@ -183,26 +184,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
             self._modules[str(i)] = module
             self.layer_ids.append(id)
 
-        # if sqrt:
-        #     length = len(self)
-        #     num_save_needed = 0
-        #     num_freed = 0
-        #     save_list = [None]*length
-        #     for i in range(length-1, -1, -1):
-        #         if num_freed == 0 or i == 0:
-        #             num_save_needed += 1
-        #             save_list[i] = [1, -num_save_needed]
-        #             num_freed = num_save_needed
-        #         else:
-        #             num_freed -= 1
-        #             save_list[i] = [0, -(num_save_needed - num_freed)]
-        #     for i in range(length-1, -1, -1):
-        #         save_list[i][1] += num_save_needed
-        #     for i in range(0, length):
-        #         save_list[i][0] = i if save_list[i][0]==1 else save_list[i-1][0]
-
-            # self.save_list = save_list
-        # else:
         self.save_list = [(i, i) for i in range(len(self))]
             
     def __len__(self) -> int:
@@ -225,7 +206,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         idxs = range(start, end)
         return idxs,parts
 class PipeContext:
-    def __init__(self, module, hidden_state, backward=False):
+    def __init__(self, module, hidden_state, args=None, backward=False):
         self.module = module
         self.stage_id = module.stage_id
         self.stages = module.stages
@@ -234,11 +215,17 @@ class PipeContext:
         self.hidden_state = [hidden_state]
         self.backward = backward
         self.send_buffer = {}
+        self.args = args
     def enter(self):
         if self.backward:
+            self.hidden_state[0] = gather_input(self.hidden_state[0], config['pipe_comm'])
             if self.stage_id != self.stages -1:
-                self.hidden_state[0] = recv_activations(self.stage_id + 1, config['pipe_comm']).requires_grad_(False)
+                self.hidden_state[0] = recv_activations(self.stage_id + 1, config['pipe_comm'])
         else:
+            for i,item in enumerate(self.args):
+                if torch.is_tensor(item):
+                    self.args[i] = gather_input(self.args[i],config["pipe_comm"])
+            self.hidden_state[0] = gather_input(self.hidden_state[0],config['pipe_comm'])
             if self.stage_id != 0:
                 self.hidden_state[0] = recv_activations(self.stage_id - 1, config['pipe_comm'])
         return self.hidden_state
@@ -249,6 +236,9 @@ class PipeContext:
         else:
             if self.stage_id != self.stages - 1:
                 send_activations(self.hidden_state[0], self.stage_id + 1, config['pipe_comm'])
+            broadcast(self.hidden_state[0], self.stages - 1, config['pipe_comm'], inplace=True)
+        batch_size = self.hidden_state[0].shape[0] // self.stages
+        self.hidden_state[0] = self.hidden_state[0][self.stage_id * batch_size:(self.stage_id + 1) * batch_size]
     def __enter__(self):
         return self.enter()
     def __exit__(self, exc_type, exc_val, exc_tb):

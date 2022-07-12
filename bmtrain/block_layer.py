@@ -118,7 +118,7 @@ class OpCheckpointBlock(torch.autograd.Function):
         return (None, None, None, None) + tuple(grads)
 
 class CheckpointBlockContext:
-    def __init__(self ,block : 'CheckpointBlock',ctx_dict : dict = None, flag : int = 0) -> None:
+    def __init__(self ,block : 'CheckpointBlock',ctx_dict : dict = None, flag : int = 0, pipe = False) -> None:
         self.block = block
         self.ctx_dict=ctx_dict
         self._param_buffer = {}
@@ -127,7 +127,10 @@ class CheckpointBlockContext:
         self._grad_tensor = {}
         self.flag = flag
         self._need_release = False
-    
+        if pipe:
+            self.comm = config["zero_comm"] 
+        else:
+            self.comm = config["comm"]
     def enter(self):
         """
         gather parameters
@@ -144,15 +147,15 @@ class CheckpointBlockContext:
                 assert self.block._storage_params[kw].is_cuda
                 assert kw not in self._grad_buffer
                 assert kw not in self._param_buffer
-                local_param = self.block._storage_params[kw]
-
+                local_param = self.block._storage_params[kw]    
+           
                 storage_type = local_param.storage_type()
                 if self.flag != 2:
-                    self._param_buffer[kw] = storage_type(val["partition_size"] * config["world_size"])
+                    self._param_buffer[kw] = storage_type(val["partition_size"] * val["world_size"])
                     self._param_tensor[kw] = torch.tensor([], dtype=self._param_buffer[kw].dtype, device=self._param_buffer[kw].device).set_(self._param_buffer[kw])
 
                 if requires_grad and local_param.requires_grad:
-                    self._grad_buffer[kw] = storage_type(val["partition_size"] * config["world_size"])
+                    self._grad_buffer[kw] = storage_type(val["partition_size"] * val["world_size"])
                     self._grad_tensor[kw] = torch.tensor([], dtype=self._grad_buffer[kw].dtype, device=self._grad_buffer[kw].device).set_(self._grad_buffer[kw]).zero_()
             if self.flag != 2:
                 nccl.groupStart()
@@ -160,7 +163,7 @@ class CheckpointBlockContext:
                     nccl.allGather(
                         self.block._storage_params[kw].storage(),
                         self._param_buffer[kw],
-                        config["zero_comm"]
+                        self.comm
                     )
                 nccl.groupEnd()
 
@@ -207,7 +210,6 @@ class CheckpointBlockContext:
             return
         self._need_release = False
         self.block._ready = False
-
         requires_grad = torch.is_grad_enabled()
         if requires_grad:
             for kw, val in self.block._storage_info.items():
@@ -235,7 +237,7 @@ class CheckpointBlockContext:
                             self._grad_buffer[kw],
                             local_param.grad.storage(),
                             "sum",
-                            config["zero_comm"]
+                            self.comm
                         )
                 nccl.groupEnd()
 
@@ -353,10 +355,12 @@ class CheckpointBlock(torch.nn.Module):
         offsets = {}
         # intialize storage buffers
         for kw, val in self._storage_info.items():
-            partition_size = round_up(val["total"], config['world_size']) // config['world_size']
+            val["world_size"] = config["world_size"] // config["pipe_size"]
+            partition_size = round_up(val["total"], val["world_size"]) // val["world_size"]
             val["partition_size"] = partition_size
-            val["begin"] = config['rank'] * partition_size
-            val["end"] = (config['rank'] + 1) * partition_size
+            val["begin"] = config['zero_rank'] * partition_size
+            val["end"] = (config['zero_rank'] + 1) * partition_size
+            assert config["world_size"] % config["pipe_size"] == 0, "world_size needs to be divisible by pipe_size"
             offsets[kw] = 0
 
 

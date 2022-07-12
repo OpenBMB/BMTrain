@@ -14,7 +14,7 @@ def init_distributed_parameter(params : Iterable[torch.nn.Parameter]):
             continue
         with torch.no_grad():
             partition_size = param.storage().size()
-            global_size = partition_size * config['world_size']
+            global_size = partition_size * config['world_size']//config['pipe_size']
             
             tmp_storage = param.storage_type()(global_size)
             tmp_tensor = torch.tensor([], dtype=param.dtype, device="cuda")
@@ -23,8 +23,9 @@ def init_distributed_parameter(params : Iterable[torch.nn.Parameter]):
             param._init_method(tmp_tensor)
 
             # Pytorch 1.11 changed the API of storage.__getitem__
+            # use zero_rank to support pipeline
             torch.tensor([], dtype=param.dtype, device=param.device).set_(param.storage())[:] = \
-                torch.tensor([], dtype=param.dtype, device=param.device).set_(tmp_storage)[partition_size * config['rank'] : partition_size * (config['rank'] + 1)]
+                torch.tensor([], dtype=param.dtype, device=param.device).set_(tmp_storage)[partition_size * config['zero_rank'] : partition_size * (config['zero_rank'] + 1)]
             # param.storage().copy_(tmp_storage[partition_size * config['rank'] : partition_size * (config['rank'] + 1)])
 
 def iterate_parameters(model : torch.nn.Module):

@@ -57,7 +57,6 @@ def init_distributed(
     store = dist.PrefixStore("bmtrain", store)
     torch.cuda.set_device(local_rank)
     config["pipe_size"] = pipe_size
-
     config["initialized"] = True
     config["local_rank"] = local_rank
     config["local_size"] = local_size
@@ -71,6 +70,7 @@ def init_distributed(
     config["loss_scale_factor"] = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
     config["loss_scale_steps"] = loss_scale_steps
     config["topology"] = topology(config)
+    config["zero_rank"] = config["topology"].get_group_rank("zero") if pipe_size > 1 else config['rank']
     cpus_this_worker = None
     
     all_available_cpus = sorted(list(os.sched_getaffinity(0)))

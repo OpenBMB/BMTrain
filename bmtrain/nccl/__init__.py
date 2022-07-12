@@ -38,7 +38,8 @@ def dtype2nccl(dtype : torch.dtype) -> int:
         torch.float32 : ncclFloat32,
         torch.float : ncclFloat,
         torch.float64 : ncclFloat64,
-        torch.double : ncclDouble
+        torch.double : ncclDouble,
+        torch.bool : ncclBool
     }
     if dtype not in MAP:
         raise TypeError("Unsupport dtype %s" % dtype)

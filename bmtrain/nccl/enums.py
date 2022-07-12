@@ -15,7 +15,7 @@ ncclFloat32    = 7
 ncclFloat      = 7
 ncclFloat64    = 8
 ncclDouble     = 8
-
+ncclBool       = 0
 
 ### ncclRedOp_t
 
