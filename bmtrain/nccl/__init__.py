@@ -92,7 +92,13 @@ def commCount(comm : NCCLCommunicator):
     """
     return C.ncclCommCount(comm.ptr)
 ### collective
+def commRank(comm : NCCLCommunicator):
+    """NCCL API: `ncclCommUserRank <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclCommUserRank>`_
 
+    Args:
+        comm (NCCLCommunicator): NCCL communicator.
+    """
+    return C.ncclCommUserRank(comm.ptr)
 def allReduce(
         src : torch.storage._StorageBase,
         dst : torch.storage._StorageBase,
@@ -266,7 +272,6 @@ def allGather(
     recvbuff = dst.data_ptr()
     sendcount = src.size()
     datatype = dtype2nccl(src.dtype)
-
     assert dst.size() % sendcount == 0, "Buffer size not aligned"
     C.ncclAllGather(
         sendbuff, 

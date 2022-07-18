@@ -177,7 +177,13 @@ int pyNCCLCommCount(
     checkNCCLStatus(ncclCommCount(reinterpret_cast<ncclComm_t>(comm),&res));
     return res;
 }
-
+int pyNCCLCommUserRank(
+    std::uintptr_t comm
+){
+    int rank;
+    checkNCCLStatus(ncclCommUserRank(reinterpret_cast<ncclComm_t>(comm),&rank));
+    return rank;
+}
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("ncclGetUniqueId", &pyNCCLGetUniqueID, "nccl get unique ID");
     m.def("ncclCommInitRank", &pyNCCLCommInitRank, "nccl init rank");
@@ -192,4 +198,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("ncclSend",&pyNCCLSend,"nccl send");
     m.def("ncclRecv",&pyNCCLRecv,"nccl recv");
     m.def("ncclCommCount",&pyNCCLCommCount,"nccl comm count");
+    m.def("ncclCommUserRank",&pyNCCLCommUserRank,"nccl comm user rank");
 }

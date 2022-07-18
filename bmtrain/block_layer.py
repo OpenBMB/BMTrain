@@ -355,12 +355,11 @@ class CheckpointBlock(torch.nn.Module):
         offsets = {}
         # intialize storage buffers
         for kw, val in self._storage_info.items():
-            val["world_size"] = config["world_size"] // config["pipe_size"]
+            val["world_size"] = config["world_size"]
             partition_size = round_up(val["total"], val["world_size"]) // val["world_size"]
             val["partition_size"] = partition_size
-            val["begin"] = config['zero_rank'] * partition_size
-            val["end"] = (config['zero_rank'] + 1) * partition_size
-            assert config["world_size"] % config["pipe_size"] == 0, "world_size needs to be divisible by pipe_size"
+            val["begin"] = config['rank'] * partition_size
+            val["end"] = (config['rank'] + 1) * partition_size
             offsets[kw] = 0
 
 
@@ -540,7 +539,6 @@ class CheckpointBlock(torch.nn.Module):
                 # initialzie here
                 tmp_tensor = torch.empty(it["shape"], device=param.device, dtype=param.dtype)
                 param._init_method(tmp_tensor)
-                
                 param_st = it["offset"]
                 param_end = it["offset"] + it["size"]
                 kw_name = it["kw_name"]

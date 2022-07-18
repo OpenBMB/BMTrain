@@ -58,6 +58,7 @@ def init_distributed(
     torch.cuda.set_device(local_rank)
     config["pipe_size"] = pipe_size
     config["initialized"] = True
+    config["pipe_enabled"] = config["pipe_size"] > 1
     config["local_rank"] = local_rank
     config["local_size"] = local_size
     config["rank"] = rank
