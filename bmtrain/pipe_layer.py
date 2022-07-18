@@ -270,6 +270,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
                         param.data = torch.tensor([], dtype=param.dtype, device=param.device)
                 del contiguous_param
         return idxs
+class PipeContext:
     def __init__(self, module, hidden_state, args, backward=False):
         self.module = module
         self.stage_id = module.stage_id
