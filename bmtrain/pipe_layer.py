@@ -6,7 +6,7 @@ from typing import Dict, Iterable, Iterator, Tuple, Union, List
 from .store import allgather_object
 from torch.autograd import backward
 from .pipe_comm import send_activations, recv_activations
-from bmtrain.distributed import all_gather,broadcast
+from bmtrain.distributed import all_gather,broadcast,all_reduce
 from .global_var import config
 import torch
 from . import nccl
@@ -22,15 +22,8 @@ class OpMicroForward(torch.autograd.Function):
     def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', save_list, hidden_state, *args):
         with PipeContext(self, hidden_state) as pipe_input:
             hidden_state = pipe_input[0]
-            tensors = []
-            others = []
-            for arg in args:
-                if torch.is_tensor(arg):
-                    tensors.append(arg)
-                    others.append(None)
-                else:
-                    tensors.append(None)
-                    others.append(arg)
+            tensors = [arg if torch.is_tensor(arg) else None for arg in args]
+            others = [arg if not torch.is_tensor(arg) else None for arg in args]
             ctx.nontensor_inputs = others
             ctx.self = self
             ctx.save_list = copy.deepcopy(save_list)
@@ -44,7 +37,6 @@ class OpMicroForward(torch.autograd.Function):
                     if save_list[idx][0] == idx:
                         layer_inputs.append(hidden_state)
                     cuda_rng_state.append( torch.cuda.get_rng_state() )
-                    #TODO  for micro batch in pipe,the checkpoint activation needs to save until all micro batch are finished when forward
                     block_ctx = CheckpointBlockContext(self._modules[str(layer_id)], ctx.layers_dict[idx], 1, pipe=True)
                     # gather parameter on load stream
                     block_ctx.enter()
@@ -146,55 +138,41 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
         args_list = [[] for _ in range(num_micros)]
         tensors = []
         others = []
-        for idx,arg in enumerate(args):
-            if torch.is_tensor(arg):
-                arg_all = all_gather(arg, config['pipe_comm'])
-                tensors.append(arg_all)
-                others.append(None)
-            else:
-                arg_all = [arg for i in range(num_micros)]
-                tensors.append(None)
-                others.append(arg_all)
-            for i in range(num_micros):
-                args_list[i].append(arg_all[i])
-        ctx.nontensor_inputs = others
-        all_inputs = []
         input_requires_grad = []
-        for tensor, other in zip(tensors, ctx.nontensor_inputs):
-            if tensor is None:
-                all_inputs.append(other)
-                input_requires_grad.append(False)
-            else:
-                # detach for tensor inputs
-                input_requires_grad.append( tensor.requires_grad )
-                nw_tensor = tensor.detach()
-                nw_tensor.requires_grad = tensor.requires_grad
-                all_inputs.append(nw_tensor)
-        grads = []
         with torch.enable_grad():
+            for arg in args:
+                if torch.is_tensor(arg):
+                    arg_all = all_gather(arg, config['pipe_comm']).chunk(num_micros, dim=0)
+                    arg_all = [tensor[0].detach().requires_grad_(arg.requires_grad) for tensor in arg_all]
+                    input_requires_grad.append(arg.requires_grad)
+                else:
+                    arg_all = [arg for _ in range(num_micros)]
+                    input_requires_grad.append(False)
+                for i in range(num_micros):
+                    args_list[i].append(arg_all[i])
             outputs = []
             hidden_state_list = all_gather(hidden_state, config["pipe_comm"]).detach().requires_grad_()
-            for hidden_state,args in zip(hidden_state_list, args_list):
+            for hidden_state, arg in zip(hidden_state_list, args_list):
                 placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-                output = OpMicroForward.apply(placeholder, self, save_list, hidden_state, *args)
+                output = OpMicroForward.apply(placeholder, self, save_list, hidden_state, *arg)
                 outputs.append(output)
+            ctx.args_list = args_list
             outputs = torch.cat(outputs, dim=0)
-        ctx.all_inputs = [i[self.stage_id] for i in all_inputs]
+
         ctx.input_requires_grad = input_requires_grad
-        ctx.save_for_backward(hidden_state_list)
+        ctx.save_for_backward(hidden_state_list, outputs)
         with torch.enable_grad():
-            ctx.output = outputs
             outputs = broadcast(outputs, config["pipe_size"] - 1, config["pipe_comm"])
             result = outputs.chunk(num_micros, dim=0)
             result = result[self.stage_id].clone()
-        return result.clone()
+        return result
 
 
     @staticmethod
     def backward(ctx, grad_hidden_state : torch.Tensor):
-        output_list = ctx.output
         ipt_list = ctx.saved_tensors[0]
-        all_inputs = ctx.all_inputs
+        output_list = ctx.saved_tensors[1]
+        args_list = ctx.args_list
         input_requires_grad = ctx.input_requires_grad
         grad_hidden_state_list = all_gather(grad_hidden_state, config["pipe_comm"]).flatten(start_dim=0, end_dim=1)
         torch.autograd.backward(
@@ -202,14 +180,18 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
             [grad_hidden_state_list],
         )
         grads = []
-        for inp, requires_grad in zip(all_inputs, input_requires_grad):
-            if requires_grad:
-                grads.append(inp.grad)
-            else:
-                grads.append(None)
-        with torch.no_grad():
-            grad =  broadcast(ipt_list.grad, 0, config["pipe_comm"])
-        grad = grad[ctx.self.stage_id] 
+        for micro in range(ctx.num_micros):
+            for inp, requires_grad in zip(args_list[micro], input_requires_grad):
+                if requires_grad:
+                    grad = inp.grad
+                    grad = all_reduce(grad, "sum", config["pipe_comm"])
+                else:
+                    grad = None
+                if ctx.self.stage_id == micro:
+                    grads.append(grad)
+        grad = broadcast(ipt_list.grad, 0, config["pipe_comm"])
+        grad = grad[ctx.self.stage_id]
+
         return (None, None, None, grad) + tuple(grads)
 
 class PipelineTransformerBlockList(torch.nn.Module):
@@ -244,15 +226,15 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.stages = topo.stages
         self.stage_id = topo.stage_id
         self.pipe_idx = topo.pipe_idx 
+        for idx,module in enumerate(modules):
+            if not isinstance(module, CheckpointBlock):
+                modules[idx] = CheckpointBlock(module)
+            self._modules[str(idx)] = modules[idx]
         self.layer_ids = self.partition_modules(modules)
         self.next_rank = pipe_group[self.pipe_idx, self.stage_id + 1] if self.stage_id < config['pipe_size'] - 1 else -1
         self.prev_rank = pipe_group[self.pipe_idx, self.stage_id - 1] if self.stage_id > 0 else -1
         # self.micro_batches = config['num_micro_batches']
             
-        for idx,module in enumerate(modules):
-            if not isinstance(module, CheckpointBlock):
-                module = CheckpointBlock(module)
-            self._modules[str(idx)] = module
         self.save_list = [(i, i) for i in range(len(self.layer_ids))]
             
     def __len__(self) -> int:

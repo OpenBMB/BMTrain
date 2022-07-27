@@ -604,7 +604,6 @@ class CheckpointBlock(torch.nn.Module):
             1 -> ('0', Linear(in_features=2, out_features=2, bias=True))
 
         """
-        # print("here in named_modules hahaha")
 
         if memo is None:
             memo = set()
@@ -676,6 +675,7 @@ class OpTransformerBlockList(torch.autograd.Function):
 
         
         ctx.save_for_backward(*layer_inputs, *tensors)
+        # print(hidden_state.shape)
         return hidden_state
 
 
