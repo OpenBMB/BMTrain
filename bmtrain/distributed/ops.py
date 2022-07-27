@@ -1,29 +1,87 @@
 import torch
 from ..global_var import config
-from ..nccl import allGather as ncclAllGather
+from ..nccl import allGather as ncclAllGather, recv
 from ..nccl import allReduce as ncclAllReduce
-
+from ..nccl import broadcast as ncclBroadcast
+from ..nccl import send as ncclSend
+from ..nccl import recv as ncclRecv
+from ..nccl import commCount,commRank,NCCLCommunicator
+DTYPE_LIST = [
+    torch.float64,
+    torch.float32,
+    torch.float16,
+    torch.int64,
+    torch.int32,
+    torch.int16,
+    torch.int8,
+    torch.bfloat16,
+    torch.bool
+]
+def send_meta(x, next_rank, comm):
+    meta = [len(x.size()), DTYPE_LIST.index(x.dtype)] + list(x.size())
+    meta_data = torch.tensor(data=meta, device=x.device, dtype=torch.long)
+    ncclSend(meta_data.storage(), next_rank, comm)
+def recv_meta(prev_rank, comm):
+    meta_data = torch.tensor(data=[0]*50, device="cuda", dtype=torch.long)
+    ncclRecv(meta_data.storage(), prev_rank, comm)
+    n_dims = meta_data[0].item()
+    dtype = DTYPE_LIST[meta_data[1].item()]
+    shape = meta_data[2:n_dims+2].tolist()
+    return dtype,shape
+class OpBroadcast(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, src, root, comm = None):
+        if comm is None:
+            comm = config["comm"]
+        ctx.comm = comm
+        outputs = torch.empty_like(src, dtype = src.dtype, device = src.device)
+        ncclBroadcast(src.storage(), outputs.storage(), root, comm)
+        return outputs
+    @staticmethod
+    def backward(ctx, grad_output):
+        res = all_reduce(grad_output, "sum", ctx.comm)
+        return res, None, None
+def broadcast(src, root, comm=None):
+    if not config["initialized"]:
+        raise RuntimeError("BMTrain is not initialized")
+    if comm is None:
+        comm = config["comm"]
+    return OpBroadcast.apply(src, root, comm)
+# class OpScatter(torch.autograd.Function):
+#     @staticmethod
+#     def forward(ctx, src, root, comm = None):
+#         if comm is None:
+#             comm = config["comm"]
+#         ctx.comm = comm
+#         ctx.root = root
+#         ctx.src = src
+#         ctx.dst = torch.empty_like(src, dtype = src.dtype, device = src.device)
+#         ncclScatter(src.storage(), ctx.dst.storage(), root, comm)
+#         return ctx.dst
 class OpAllGather(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input : torch.Tensor):
+    def forward(ctx, input : torch.Tensor, comm = None):
+        if comm is None:
+            comm = config["comm"]
+        world_size = commCount(comm)
         if not input.is_contiguous():
             input = input.contiguous()
         if input.storage_offset() != 0 or input.storage().size() != input.numel():
             input = input.clone()
-        output = torch.empty( (config['world_size'],) + input.size(), dtype=input.dtype, device=input.device)
-        
+        output = torch.empty( (world_size,) + input.size(), dtype=input.dtype, device=input.device)
+        ctx.comm = comm
         ncclAllGather(
             input.storage(),
             output.storage(),
-            config['comm']
+            comm
         )
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output[config['rank']]
+        return grad_output[commRank(ctx.comm)], None
 
-def all_gather(x : torch.Tensor):
+def all_gather(x : torch.Tensor, comm = None):
     """Gathers the input tensor from all processes.
 
     Args:
@@ -36,11 +94,14 @@ def all_gather(x : torch.Tensor):
         raise RuntimeError("BMTrain is not initialized")
     
     assert x.is_cuda
-    return OpAllGather.apply(x)
+    return OpAllGather.apply(x, comm)
 
 class OpAllReduce(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input : torch.Tensor, op : str):
+    def forward(ctx, input : torch.Tensor, op : str, comm : NCCLCommunicator = None):
+        if comm is None:
+            comm = config["comm"]
+        ctx.comm = comm
         if not input.is_contiguous():
             input = input.contiguous()
         if input.storage_offset() != 0 or input.storage().size() != input.numel():
@@ -51,10 +112,10 @@ class OpAllReduce(torch.autograd.Function):
             input.storage(),
             output.storage(),
             op,
-            config['comm']
+            comm
         )
         ctx.op = op
-
+        
         if op in ["sum", "avg"]:
             pass
         elif op in ["max", "min"]:
@@ -66,15 +127,15 @@ class OpAllReduce(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.op == "sum":
-            return grad_output, None
+            return grad_output, None, None
         elif ctx.op == "avg":
-            return grad_output / config['world_size'], None
+            return grad_output / commCount(ctx.comm), None, None
         elif ctx.op in ["max", "min"]:
-            return torch.masked_fill(grad_output, ctx.saved_tensors[0], 0), None
+            return torch.masked_fill(grad_output, ctx.saved_tensors[0], 0), None, None
         else:
-            return grad_output * ctx.saved_tensors[0], None
+            return grad_output * ctx.saved_tensors[0], None, None
 
-def all_reduce(x : torch.Tensor, op : str = "sum"):
+def all_reduce(x : torch.Tensor, op : str = "sum", comm = None):
     """Reduces the input tensor from all processes.
 
     Args:
@@ -89,7 +150,7 @@ def all_reduce(x : torch.Tensor, op : str = "sum"):
         raise RuntimeError("BMTrain is not initialized")
 
     assert x.is_cuda
-    return OpAllReduce.apply(x, op)
+    return OpAllReduce.apply(x, op, comm)
 
 
             

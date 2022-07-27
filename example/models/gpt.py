@@ -1,6 +1,7 @@
 import torch
 import bmtrain as bmt
 from layers import TransformerEncoder, Layernorm, Embedding, TransformerEncoder
+from torch.nn.modules import transformer
 
 class GPT(bmt.DistributedModule):
     def __init__(self,
@@ -36,9 +37,10 @@ class GPT(bmt.DistributedModule):
         mask_2d = mask[:, None, :] & mask[:, :, None]   # (batch, seq_len, seq_len)
         mask_2d = mask_2d & (pos[:, None, :] >= pos[:, :, None])
 
-        input_emb = self.pos_emb(pos) + self.word_emb(input)
+        out = self.pos_emb(pos) + self.word_emb(input)
 
-        out = self.transformers(input_emb, mask_2d, None)
+        # for layer in self.transformers:
+        out = self.transformers(out, mask_2d, None)
         out = self.layernorm(out)
 
         logits = self.word_emb(out, projection=True)

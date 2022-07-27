@@ -1,6 +1,5 @@
 from typing import Generator, Iterable, List, Tuple
 import torch
-
 from .block_layer import CheckpointBlock
 from .parameter import DistributedParameter
 from .global_var import config
@@ -23,6 +22,7 @@ def init_distributed_parameter(params : Iterable[torch.nn.Parameter]):
             param._init_method(tmp_tensor)
 
             # Pytorch 1.11 changed the API of storage.__getitem__
+            # use zero_rank to support pipeline
             torch.tensor([], dtype=param.dtype, device=param.device).set_(param.storage())[:] = \
                 torch.tensor([], dtype=param.dtype, device=param.device).set_(tmp_storage)[partition_size * config['rank'] : partition_size * (config['rank'] + 1)]
             # param.storage().copy_(tmp_storage[partition_size * config['rank'] : partition_size * (config['rank'] + 1)])

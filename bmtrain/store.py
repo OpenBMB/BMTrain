@@ -66,9 +66,28 @@ DTYPE_LIST = [
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
-
-def broadcast_object(obj):
-    if config['rank'] == 0:
+def allgather_object(obj, comm):
+    f = io.BytesIO()
+    _pickler(f).dump(obj)
+    byte_storage = torch.ByteStorage.from_buffer(f.getvalue())
+    # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
+    # Otherwise, it will casue 100X slowdown.
+    # See:
+    byte_tensor = torch.ByteTensor(byte_storage).cuda()
+    all_bytes_tensors = torch.empty(byte_tensor.numel() * nccl.commCount(comm), dtype=torch.uint8, device="cuda")
+    nccl.allGather(
+        byte_tensor.storage(),
+        all_bytes_tensors.storage(),
+        comm
+    )
+    obj_list = []
+    for i in range(nccl.commCount(comm)):
+        buf = all_bytes_tensors[i*byte_tensor.numel():(i+1)*byte_tensor.numel()].cpu().numpy().tobytes()
+        obj = _unpickler(io.BytesIO(buf)).load()
+        obj_list.append(obj)
+    return obj_list
+def broadcast_object(obj, comm):
+    if nccl.commRank(comm) == 0:
         f = io.BytesIO()
         _pickler(f).dump(obj)
         byte_storage = torch.ByteStorage.from_buffer(f.getvalue())
@@ -82,13 +101,13 @@ def broadcast_object(obj):
             local_size.storage(),
             local_size.storage(),
             0,
-            config['comm']
+            comm
         )
         nccl.broadcast(
             byte_tensor.storage(),
             byte_tensor.storage(),
             0,
-            config['comm']
+            comm
         )
     else:
         local_size = torch.LongTensor([0]).cuda()
@@ -96,7 +115,7 @@ def broadcast_object(obj):
             local_size.storage(),
             local_size.storage(),
             0,
-            config['comm']
+            comm
         )
         byte_tensor_size = local_size[0].item()
         byte_tensor = torch.empty(int(byte_tensor_size), dtype=torch.uint8, device="cuda")
@@ -104,7 +123,7 @@ def broadcast_object(obj):
             byte_tensor.storage(),
             byte_tensor.storage(),
             0,
-            config['comm']
+            comm
         )
         buf = byte_tensor.cpu().numpy().tobytes()
         obj = _unpickler(io.BytesIO(buf)).load()
@@ -114,7 +133,7 @@ def broadcast_object(obj):
 class DistributedStateDictWrapper(Mapping):
     def __init__(self, state_dict : Dict) -> None:
         self._state_dict = state_dict
-        self._metadata = broadcast_object(getattr(state_dict, "_metadata", None))
+        self._metadata = broadcast_object(getattr(state_dict, "_metadata", None), config["comm"])
     
     def __getitem__(self, key : str):
         tmp_shape = torch.zeros(32, device="cuda", dtype=torch.int32)
@@ -169,13 +188,13 @@ class DistributedStateDictWrapper(Mapping):
         return self
 
     def __len__(self):
-        return broadcast_object(len(self._state_dict))
+        return broadcast_object(len(self._state_dict), config["comm"])
     
     def __contains__(self, key : str):
-        return broadcast_object(key in self._state_dict)
+        return broadcast_object(key in self._state_dict, config["comm"])
     
     def keys(self):
-        return broadcast_object(list(self._state_dict.keys()))
+        return broadcast_object(list(self._state_dict.keys()),config["comm"])
 
     def __iter__(self):
         # pytorch 1.12.0 updated the load_state_dict method, which needs the state_dict to be a `Mapping`.
