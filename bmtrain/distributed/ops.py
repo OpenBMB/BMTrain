@@ -17,6 +17,14 @@ DTYPE_LIST = [
     torch.bfloat16,
     torch.bool
 ]
+def send_activations(hidden_state, next_rank, comm):
+    send_meta(hidden_state, next_rank, comm)
+    ncclSend(hidden_state.storage(), next_rank, comm)
+def recv_activations(prev_rank, comm):
+    dtype, shape = recv_meta(prev_rank, comm)
+    hidden_state = torch.empty(shape, dtype=dtype, device="cuda")
+    ncclRecv(hidden_state.storage(), prev_rank, comm)
+    return hidden_state
 def send_meta(x, next_rank, comm):
     meta = [len(x.size()), DTYPE_LIST.index(x.dtype)] + list(x.size())
     meta_data = torch.tensor(data=meta, device=x.device, dtype=torch.long)
@@ -47,17 +55,6 @@ def broadcast(src, root, comm=None):
     if comm is None:
         comm = config["comm"]
     return OpBroadcast.apply(src, root, comm)
-# class OpScatter(torch.autograd.Function):
-#     @staticmethod
-#     def forward(ctx, src, root, comm = None):
-#         if comm is None:
-#             comm = config["comm"]
-#         ctx.comm = comm
-#         ctx.root = root
-#         ctx.src = src
-#         ctx.dst = torch.empty_like(src, dtype = src.dtype, device = src.device)
-#         ncclScatter(src.storage(), ctx.dst.storage(), root, comm)
-#         return ctx.dst
 class OpAllGather(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input : torch.Tensor, comm = None):

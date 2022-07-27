@@ -5,8 +5,7 @@ import copy
 from typing import Dict, Iterable, Iterator, Tuple, Union, List
 from .store import allgather_object
 from torch.autograd import backward
-from .pipe_comm import send_activations, recv_activations
-from bmtrain.distributed import all_gather,broadcast,all_reduce
+from bmtrain.distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations
 from .global_var import config
 import torch
 from . import nccl
@@ -16,7 +15,7 @@ from .checkpointing import ScopedTensorInspectorContext
 from . import debug
 from  torch.nn.modules.module import _addindent
 import copy
-from .block_layer import CheckpointBlockContext,CheckpointBlock,round_up,_get_param_kw
+from .block_layer import CheckpointBlockContext, CheckpointBlock, round_up, _get_param_kw
 class OpMicroForward(torch.autograd.Function):
     @staticmethod
     def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', save_list, hidden_state, *args):
@@ -147,7 +146,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                     arg_all = all_gather(arg, config['pipe_comm'])
                     if arg.shape[0] == batch_size:
                         batch_related.append(True)
-                        arg_all = arg_all.flatten(0,1).chunk(num_micros, dim=0)
+                        arg_all = arg_all.flatten(0, 1).chunk(num_micros, dim=0)
                         arg_all = [tensor.detach().requires_grad_(arg.requires_grad) for tensor in arg_all]
                     else:
                         batch_related.append(False)
@@ -161,7 +160,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                 for i in range(num_micros):
                     args_list[i].append(arg_all[i])
             outputs = []
-            hidden_state_list = all_gather(hidden_state, config["pipe_comm"]).flatten(0,1).detach().requires_grad_()
+            hidden_state_list = all_gather(hidden_state, config["pipe_comm"]).flatten(0, 1).detach().requires_grad_()
             ctx.hidden_state_list = hidden_state_list
             hidden_state_list = hidden_state_list.chunk(num_micros, dim=0)
             for hidden_state, arg in zip(hidden_state_list, args_list):
@@ -270,7 +269,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         idxs = range(start, end)
         for i in range(len(modules)):
             if i not in idxs:
-                for name,param in modules[i]._module.named_parameters():
+                for name, param in modules[i]._module.named_parameters():
                     param.data = torch.tensor([], dtype = param.dtype, device = param.device)
                 for kw, val in modules[i]._storage_info.items():
                     val["begin"] = self.stage_id
@@ -308,8 +307,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
                     else:
                         modules[i]._storage_params[kw].requires_grad_(False)
                 ordered_parameters = list(modules[i]._module.named_parameters())
-                for idx,named_param in enumerate(ordered_parameters):
-                    name,param = named_param
+                for idx, named_param in enumerate(ordered_parameters):
+                    name, param = named_param
                     param_info = modules[i]._param_info[idx]
                     kw_name = _get_param_kw(param)
                     storage_info = modules[i]._storage_info[kw_name]
