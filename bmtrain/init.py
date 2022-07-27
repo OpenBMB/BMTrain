@@ -14,7 +14,7 @@ def init_distributed(
         loss_scale_steps : int = 1024,
         zero_level: int = 3,
         pipe_size: int = 1,
-        num_micro_batches: int = 1
+        num_micro_batches: int = None,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -101,6 +101,7 @@ def init_distributed(
     unique_id = bytes.fromhex(store.get("BMTRAIN_UNIQUE_ID").decode())
     config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
     if config['pipe_size'] > 1:
+        config["micros"] = num_micro_batches if num_micro_batches else config["pipe_size"]
         topo = config['topology']
         if topo.stage_id == 0:
             unique_id = nccl.getUniqueId()
