@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 import torch
 from .global_var import config
 from .utils import print_rank
@@ -43,3 +43,34 @@ def optim_step(optim : torch.optim.Optimizer, lr_scheduler : Optional[WarmupLRSc
             lr_scheduler.step()
 
     config['load_stream'].wait_stream(current_stream)
+
+def synchronize_optim_scale(optims: List[torch.optim.Optimizer]):
+    r"""
+    Synchronize the scale of mutliple optimizers.
+    
+    Use before `loss = optimizer.loss_scale(loss)` when there are multiple optimizers.
+
+    Args:
+        optims (List[torch.optim.Optimizer]): optimizers to be synchronized in scale
+        
+    Example:
+        >>> bmt.synchronize_optimizer_scale([opt1, opt2, opt3])
+        >>> loss = opt1.loss_scale(loss) # opt1 can be replaced with opt2 or opt3 because they have the same scale now
+        >>> loss.backward()
+        >>> bmt.optim_step(opt1, lr1)
+        >>> bmt.optim_step(opt2, lr2)
+        >>> bmt.optim_step(opt3, lr3)
+    """
+
+    min_scale = float('inf')
+    for optim in optims:
+        if hasattr(optim, 'scale'):
+            if optim.scale < min_scale:
+                min_scale = optim.scale
+        else:
+            # no scale, treat as scale = 1
+            min_scale = 1
+
+    for optim in optims:
+        if hasattr(optim, 'scale') and optim.scale != min_scale:
+            optim.justify_scale(min_scale)
