@@ -118,9 +118,9 @@ class OpCheckpointBlock(torch.autograd.Function):
         return (None, None, None, None) + tuple(grads)
 
 class CheckpointBlockContext:
-    def __init__(self ,block : 'CheckpointBlock',ctx_dict : dict = None, flag : int = 0, pipe = False) -> None:
+    def __init__(self, block : 'CheckpointBlock', ctx_dict : dict = None, flag : int = 0, pipe = False) -> None:
         self.block = block
-        self.ctx_dict=ctx_dict
+        self.ctx_dict = ctx_dict
         self._param_buffer = {}
         self._grad_buffer = {}
         self._param_tensor = {}
@@ -178,25 +178,25 @@ class CheckpointBlockContext:
                 self._grad_tensor[kw].record_stream(current_stream)
 
         # update parameters in block
-            for param in self.block._param_info:
-                kw_name = param["kw_name"]
-                offset = param["offset"]
-                shape = param["shape"]
+        for param in self.block._param_info:
+            kw_name = param["kw_name"]
+            offset = param["offset"]
+            shape = param["shape"]
 
-                if self.flag != 2:
-                    dtype = self._param_buffer[kw_name].dtype
-                    device = self._param_buffer[kw_name].device
-                    param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self._param_buffer[kw_name], offset, shape)                
-                else:
-                    dtype = param["parameter"].data.dtype
-                    device = param["parameter"].data.device
-                    param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self.ctx_dict[kw_name], offset, shape)
+            if self.flag != 2:
+                dtype = self._param_buffer[kw_name].dtype
+                device = self._param_buffer[kw_name].device
+                param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self._param_buffer[kw_name], offset, shape)                
+            else:
+                dtype = param["parameter"].data.dtype
+                device = param["parameter"].data.device
+                param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self.ctx_dict[kw_name], offset, shape)
 
-                if requires_grad and kw_name in self._grad_buffer:
-                    param["parameter"].requires_grad_(True)
-                    param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self._grad_buffer[kw_name], offset, shape)
-                else:
-                    param["parameter"].requires_grad_(False)
+            if requires_grad and kw_name in self._grad_buffer:
+                param["parameter"].requires_grad_(True)
+                param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self._grad_buffer[kw_name], offset, shape)
+            else:
+                param["parameter"].requires_grad_(False)
 
     def __enter__(self):
         self.enter()

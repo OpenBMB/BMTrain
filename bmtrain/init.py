@@ -107,7 +107,7 @@ def init_distributed(
             unique_id = nccl.getUniqueId()
             store.set(f"PIPE_UNIQUE_ID{topo.pipe_idx}", unique_id.hex())
         unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
-        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size , topo.stage_id)
+        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id)
         if topo.zero_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"ZERO_UNIQUE_ID{topo.zero_idx}", unique_id.hex() )
