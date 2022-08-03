@@ -129,13 +129,18 @@ class OpMicroForward(torch.autograd.Function):
                 grads.append(None)
         return (None, None, None, pipe_input[0]) + tuple(grads)
 class OpPipeTransformerBlockList(torch.autograd.Function):
+
+
     @staticmethod
     def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', save_list, hidden_state, *args):
         num_micros = config["micros"]
         ctx.self = self
         ctx.num_micros = num_micros
         args_list = [[] for _ in range(num_micros)]
-        batch_related = []
+        batch_related = args[-1]
+        batch_related_origin = [True if i in args[-1] else False for i in range(len(args[:-1]))]
+        batch_related_rule = []
+        args = args[:-1]
         batch_size = hidden_state.shape[0]
         assert batch_size % num_micros == 0, "The batch size must be divisible by the number of micro_batch"
         assert batch_size % config["pipe_size"] == 0 ,"The batch size must be divisible by the pipe_size"
@@ -145,16 +150,16 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                 if torch.is_tensor(arg):
                     arg_all = all_gather(arg, config['pipe_comm'])
                     if arg.shape[0] == batch_size:
-                        batch_related.append(True)
+                        batch_related_rule.append(True)
                         arg_all = arg_all.flatten(0, 1).chunk(num_micros, dim=0)
                         arg_all = [tensor.detach().requires_grad_(arg.requires_grad) for tensor in arg_all]
                     else:
-                        batch_related.append(False)
+                        batch_related_rule.append(False)
                         arg_all = all_gather(arg, config['pipe_comm'])
                         arg_all = [arg_all[i // (num_micros // self.stages)].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)]
                     input_requires_grad.append(arg.requires_grad)
                 else:
-                    batch_related.append(False)
+                    batch_related_rule.append(False)
                     arg_all = [arg for _ in range(num_micros)]
                     input_requires_grad.append(False)
                 for i in range(num_micros):
@@ -167,7 +172,10 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                 placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
                 output = OpMicroForward.apply(placeholder, self, save_list, hidden_state, *arg)
                 outputs.append(output)
-        ctx.batch_related = batch_related
+        if len(batch_related) == 0:
+            ctx.batch_related = batch_related_rule
+        else:
+            ctx.batch_related = batch_related_origin
         ctx.args_list = args_list
         ctx.input_requires_grad = input_requires_grad
         ctx.output_list = outputs
@@ -205,7 +213,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
         grad = broadcast(ipt.grad, 0, config["pipe_comm"]).chunk(ctx.self.stages)
         grad = grad[ctx.self.stage_id]
 
-        return (None, None, None, grad) + tuple(grads)
+        return (None, None, None, grad) + tuple(grads) + (None,)
 
 class PipelineTransformerBlockList(torch.nn.Module):
     r"""
@@ -256,8 +264,10 @@ class PipelineTransformerBlockList(torch.nn.Module):
     def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
         return self._modules[str(index)]
 
-    def forward(self, hidden_state, *args):
+    def forward(self, hidden_state, *args, batch_related=[]):
         placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+        args = list(args)
+        args.append(batch_related)
         hidden_state = OpPipeTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)
         return hidden_state
     def partition_modules(self, modules: Iterable[CheckpointBlock])->  List[int]:
