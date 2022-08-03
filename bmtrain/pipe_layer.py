@@ -268,6 +268,16 @@ class PipelineTransformerBlockList(torch.nn.Module):
         end = min((self.stage_id + 1) * part_len, len(modules))
         idxs = range(start, end)
         for i in range(len(modules)):
+            contiguous_params = {}
+            for kw, val in modules[i]._storage_info.items():
+                storage_type = val["storage_type"]
+                contiguous_params[kw] = storage_type(round_up(val["total"], config["world_size"] // config["pipe_size"]))
+                nccl.allGather(
+                    modules[i]._storage_params[kw].storage(),
+                    contiguous_params[kw],
+                    config["comm"]
+                )
+
             if i not in idxs:
                 for name, param in modules[i]._module.named_parameters():
                     param.data = torch.tensor([], dtype = param.dtype, device = param.device)
@@ -281,21 +291,13 @@ class PipelineTransformerBlockList(torch.nn.Module):
                     modules[i]._storage_params[kw] = \
                         torch.nn.Parameter(torch.tensor([0], dtype = dtype, device=device))
             else:
-                contiguous_params = {}
                 for kw, val in modules[i]._storage_info.items():
                     storage_type = val["storage_type"]
-                    contiguous_params[kw] = storage_type(val["partition_size"]*val["world_size"])
                     val["world_size"] = config["world_size"] // config["pipe_size"]
                     partition_size = round_up(val["total"], val["world_size"]) // val["world_size"]
                     val["partition_size"] = partition_size
                     val["begin"] = config['zero_rank'] * partition_size
                     val["end"] = (config['zero_rank'] + 1) * partition_size
-                    assert config["world_size"] % config["pipe_size"] == 0, "world_size needs to be divisible by pipe_size"
-                    nccl.allGather(
-                        modules[i]._storage_params[kw].storage(),
-                        contiguous_params[kw],
-                        config["comm"]
-                    )
                     storage_param_buffer = storage_type(partition_size)
                     dtype = storage_param_buffer.dtype
                     device = storage_param_buffer.device
@@ -335,6 +337,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
                     else:
                         param.data = torch.tensor([], dtype=param.dtype, device=param.device)
                 del contiguous_param
+            del contiguous_params
         return idxs
 class PipeContext:
     def __init__(self, module, hidden_state, backward=False):
