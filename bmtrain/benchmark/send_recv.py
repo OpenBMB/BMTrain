@@ -1,10 +1,9 @@
 from .. import nccl
 from .shape import SHAPES
 from ..global_var import config
-from ..utils import round_up, print_rank
+from ..utils import print_rank
 from .utils import format_size
 import torch
-from ..pipe_comm import send_activations, recv_activations
 def send_recv():
     current_stream = torch.cuda.current_stream()
     for shape in SHAPES:
