@@ -328,12 +328,10 @@ class PipelineTransformerBlockList(torch.nn.Module):
                     storage_end = storage_info["end"]
                     param_st = param_info["offset"]
                     param_end = param_st + param_info["size"]
-                    storage = contiguous_params[kw_name]
-                    contiguous_param = torch.tensor([],dtype = storage.dtype, device=storage.device).set_(storage, param_info["offset"],param_info["shape"])
                     if not (param_st >= storage_end or param_end <= storage_st):
                         # copy offset in parameter storage
                         offset_st = max(storage_st - param_st, 0)
-                        offset_end = min(storage_end - param_st, contiguous_param.numel())
+                        offset_end = min(storage_end - param_st, param_info["size"])
                         assert offset_st < offset_end
                         to_offset_st = offset_st + param_st - storage_st
                         to_offset_end = offset_end + param_st - storage_st
@@ -343,10 +341,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
                         param_info["begin"] = to_offset_st
                         param_info["end"] = (to_offset_end - to_offset_st,)
                         param.data[:] = \
-                            torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
+                            torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_params[kw], storage_st+to_offset_st, (to_offset_end - to_offset_st,))[:]
                     else:
                         param.data = torch.tensor([], dtype=param.dtype, device=param.device)
-                del contiguous_param
             del contiguous_params
         return idxs
     

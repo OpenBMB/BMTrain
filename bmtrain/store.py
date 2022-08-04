@@ -56,8 +56,6 @@ def save(model : torch.nn.Module, file_name : str):
     torch.cuda.synchronize()
     state_dict = _save_to_rank0(model)
     if config["rank"] == 0:
-        print(file_name)
-        print(state_dict)
         torch.save(state_dict, file_name)
 
 DTYPE_LIST = [
