@@ -14,7 +14,7 @@ from .block_layer import CheckpointBlockContext, CheckpointBlock, round_up, _get
 
 class OpMicroForward(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', save_list, hidden_state, *args):
+    def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', layers_dict, save_list, hidden_state, *args):
         with PipeContext(self, hidden_state) as pipe_input:
             hidden_state = pipe_input[0]
             tensors = [arg if torch.is_tensor(arg) else None for arg in args]
@@ -23,7 +23,7 @@ class OpMicroForward(torch.autograd.Function):
             ctx.self = self
             ctx.save_list = copy.deepcopy(save_list)
             ctx.num_save_needed = save_list[-1][1]+1
-            ctx.layers_dict=[{} for _ in range(len(self))]
+            ctx.layers_dict = layers_dict
             layer_inputs = []
             layer_inspector = []
             cuda_rng_state = []
@@ -32,7 +32,10 @@ class OpMicroForward(torch.autograd.Function):
                     if save_list[idx][0] == idx:
                         layer_inputs.append(hidden_state)
                     cuda_rng_state.append( torch.cuda.get_rng_state() )
-                    block_ctx = CheckpointBlockContext(self._modules[str(layer_id)], ctx.layers_dict[idx], 1, pipe=True)
+                    if not ctx.layers_dict[idx]:
+                        block_ctx = CheckpointBlockContext(self._modules[str(layer_id)], ctx.layers_dict[idx], 1, pipe=True)
+                    else:
+                        block_ctx = CheckpointBlockContext(self._modules[str(layer_id)], ctx.layers_dict[idx], 2, pipe=True)
                     # gather parameter on load stream
                     block_ctx.enter()
                     # call inner module directly
@@ -124,7 +127,7 @@ class OpMicroForward(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None, None, pipe_input[0]) + tuple(grads)
+        return (None, None, None, None, pipe_input[0]) + tuple(grads)
 
 class OpPipeTransformerBlockList(torch.autograd.Function):
     @staticmethod
@@ -132,6 +135,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
         num_micros = config["micros"]
         ctx.self = self
         ctx.num_micros = num_micros
+        layers_dict = [{} for _ in range(len(self))]
         args_list = [[] for _ in range(num_micros)]
         batch_related = args[-1]
         batch_related_origin = [True if i in args[-1] else False for i in range(len(args[:-1]))]
@@ -150,7 +154,8 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                         arg_all = [tensor.detach().requires_grad_(arg.requires_grad) for tensor in arg_all]
                     else:
                         batch_related_rule.append(False)
-                        arg_all = [arg_all[i // (num_micros // self.stages)].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)] # TODO batch unrelated only support num_micros % stages == 0
+                        assert num_micros % self.stages == 0, "batch unrelated only support num_micros % stages == 0"
+                        arg_all = [arg_all[i // (num_micros // self.stages)].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)]
                     input_requires_grad.append(arg.requires_grad)
                 else:
                     batch_related_rule.append(False)
@@ -162,9 +167,9 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
             hidden_state_list = all_gather(hidden_state, config["pipe_comm"]).flatten(0, 1).detach().requires_grad_()
             ctx.hidden_state_list = hidden_state_list
             hidden_state_list = hidden_state_list.chunk(num_micros, dim=0)
-            for hidden_state, arg in zip(hidden_state_list, args_list):
+            for micro_idx, (hidden_state, arg) in enumerate(zip(hidden_state_list, args_list)):
                 placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-                output = OpMicroForward.apply(placeholder, self, save_list, hidden_state, *arg)
+                output = OpMicroForward.apply(placeholder, self, layers_dict, save_list, hidden_state, *arg)
                 outputs.append(output)
         if len(batch_related) == 0:
             ctx.batch_related = batch_related_rule
