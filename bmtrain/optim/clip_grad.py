@@ -23,7 +23,7 @@ def clip_grad_norm(param_groups, max_norm, scale, norm_type=2, eps=1e-6):
         >>> bmt.optim.clip_grad_norm(optimizer.param_groups, max_norm=1.0, scale=optimizer.scale, norm_type=2)
 
     """
-    scale = scale / config['world_size']
+    scale = scale * config['pipe_size'] / config['world_size']
     grads = []
     parameters = [p for group in param_groups for p in group['params']]
     for p in parameters:
