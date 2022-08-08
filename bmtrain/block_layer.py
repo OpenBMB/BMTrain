@@ -759,6 +759,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                         assert it["group"] == ctx.layer_inspector[i][j]["group"], "Backward step changed"
                         
                         # change the tensor in placeholder
+                        ctx.layer_inspector[i][j]["requires_grad"] = it["requires_grad"]
                         ctx.layer_inspector[i][j]["tensor"] = it["tensor"]
                     torch.autograd.backward(
                         [output],

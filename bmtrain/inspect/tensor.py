@@ -37,6 +37,11 @@ class InspectTensor:
                 group_idx[group][name] = 0
 
             group_name_prefix = f"{group}." if group is not None else ""
+            if item["inside_pipe"]:
+                group_name_prefix = f"pipe.{item['inside_pipe'][0]}.{group_name_prefix}"
+                comm = config["zero_comm"]
+            else:
+                comm = config["comm"]
             if group_cnt[group][name] > 1:
                 item["name"] = f"{group_name_prefix}{group_idx[group][name]}.{name}"
             else:
@@ -50,7 +55,7 @@ class InspectTensor:
                     info.storage(),
                     info.storage(),
                     "avg",
-                    config['comm']
+                    comm
                 )
                 x_mean = info[0].cpu().item()
                 x_std = math.sqrt(info[1].cpu().item())
@@ -63,7 +68,7 @@ class InspectTensor:
                     info.storage(),
                     info.storage(),
                     'max',
-                    config['comm']
+                    comm
                 )
                 x_max = info[0].cpu().item()
                 x_min = - info[1].cpu().item()
@@ -93,6 +98,10 @@ class InspectTensor:
         nw_summary = []
         for item in self._summary:
             if item["requires_grad"] and item["tensor"].grad is not None:
+                if item["inside_pipe"]:
+                    comm = config["zero_comm"]
+                else:
+                    comm = config["comm"]
                 x = item["tensor"]
                 info = torch.empty(4, dtype=x.dtype, device=x.device)
                 info[0] = x.mean()
@@ -103,7 +112,7 @@ class InspectTensor:
                     info.storage(),
                     info.storage(),
                     "avg",
-                    config['comm']
+                    comm
                 )
                 x_mean = info[0].cpu().item()
                 x_std = math.sqrt(info[1].cpu().item())
@@ -116,7 +125,7 @@ class InspectTensor:
                     info.storage(),
                     info.storage(),
                     'max',
-                    config['comm']
+                    comm
                 )
                 x_max = info[0].cpu().item()
                 x_min = - info[1].cpu().item()
@@ -132,7 +141,8 @@ class InspectTensor:
                     "shape": item["shape"],
                     "grad_mean" : grad_mean,
                     "grad_std" : grad_std,
-                    "tensor": item["tensor"]
+                    "tensor": item["tensor"],
+                    "inside_pipe": item["inside_pipe"],
                 })
             else:
                 nw_summary.append(item)
@@ -260,7 +270,7 @@ def record_tensor(x : torch.Tensor, name : str, group = None, requires_grad = Tr
     debug.append("_inspect_hidden_states", {
         "name": name,
         "group": group,
-        "requires_grad": requires_grad and x.requires_grad,
+        "requires_grad": requires_grad,
         "min": None,
         "max": None,
         "mean": None,
@@ -268,5 +278,6 @@ def record_tensor(x : torch.Tensor, name : str, group = None, requires_grad = Tr
         "shape": x_shape,
         "grad_mean" : None,
         "grad_std" : None,
-        "tensor": x
+        "tensor": x,
+        "inside_pipe": None,
     })
