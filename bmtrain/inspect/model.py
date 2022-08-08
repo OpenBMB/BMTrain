@@ -1,4 +1,6 @@
 import torch
+from ..store import broadcast_object
+from ..pipe_layer import PipelineTransformerBlockList
 from ..block_layer import CheckpointBlock
 from ..parameter import DistributedParameter
 from .. import nccl
@@ -29,6 +31,91 @@ def _gather_value(value : torch.Tensor, partition_size, origin_size):
     output_tensor.set_(storage, 0, origin_size)
 
     return output_tensor
+
+def inspect_pipeline_transformer_block_list(pipe_model: PipelineTransformerBlockList, param_name : str, _prefix : str = ''):
+    ret = []
+    for name, model in pipe_model._modules.items():
+        idx = int(name)
+        prefix = _prefix + name + '.'
+
+        # fast check
+        pass_fast_check = False
+        for param in model._param_info:
+            abs_name = prefix + param["name"]
+            if fnmatch.fnmatch(abs_name, param_name):
+                pass_fast_check = True
+                break
+        if not pass_fast_check:
+            continue
+
+        if idx in pipe_model.layer_ids:
+            _param_buffer = {}
+            _grad_buffer = {}
+            for kw, val in model._storage_info.items():
+                storage_type = model._storage_params[kw].storage_type()
+
+                _param_buffer[kw] = storage_type(val["partition_size"] * val['world_size'])
+                if model._storage_params[kw].grad is not None:
+                    _grad_buffer[kw] = storage_type(val["partition_size"] * val['world_size'])
+            
+            nccl.groupStart()
+            for kw, val in model._storage_info.items():
+                nccl.allGather(
+                    model._storage_params[kw].storage(),
+                    _param_buffer[kw],
+                    config["zero_comm"]
+                )
+                if model._storage_params[kw].grad is not None:
+                    nccl.allGather(
+                        model._storage_params[kw].grad.storage(),
+                        _grad_buffer[kw],
+                        config["zero_comm"]
+                    )
+
+            nccl.groupEnd()
+            for param in model._param_info:
+                abs_name = prefix + param["name"]
+                if fnmatch.fnmatch(abs_name, param_name):
+                    kw_name = param["kw_name"]
+                    dtype = _param_buffer[kw_name].dtype
+                    device = _param_buffer[kw_name].device
+                    offset = param["offset"]
+                    shape = param["shape"]
+                    p = torch.tensor([], dtype=dtype, device=device).set_(_param_buffer[kw_name], offset, shape)
+                    if kw_name in _grad_buffer:
+                        g = torch.tensor([], dtype=dtype, device=device).set_(_grad_buffer[kw_name], offset, shape)
+                        info = {
+                            "name": abs_name,
+                            "shape": tuple(shape),
+                            "std": p.std().cpu().item(),
+                            "mean": p.mean().cpu().item(),
+                            "grad_std": g.std().cpu().item(),
+                            "grad_mean": g.mean().cpu().item(),
+                            "max": p.max().cpu().item(),
+                            "min": p.min().cpu().item(),
+                        }
+                    else:
+                        info = {
+                            "name": abs_name,
+                            "shape": tuple(shape),
+                            "std": p.std().cpu().item(),
+                            "mean": p.mean().cpu().item(),
+                            "grad_std": None,
+                            "grad_mean": None,
+                            "max": p.max().cpu().item(),
+                            "min": p.min().cpu().item(),
+                        }
+                    broadcast_object(info, config["pipe_comm"], idx // pipe_model.part_len)
+                    ret.append(info)
+        else:
+            for param in model._param_info:
+                abs_name = prefix + param["name"]
+                if fnmatch.fnmatch(abs_name, param_name):
+                    info = broadcast_object({}, config["pipe_comm"], idx // pipe_model.part_len)
+                    ret.append(info)
+
+    return ret
+
 
 def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix : str = ''):
     # fast check
@@ -121,7 +208,9 @@ def inspect_model(model : torch.nn.Module, param_name : str, prefix : str = ''):
         ...
 
     """
-    if isinstance(model, CheckpointBlock):
+    if isinstance(model, PipelineTransformerBlockList):
+        return inspect_pipeline_transformer_block_list(model, param_name, prefix)
+    elif isinstance(model, CheckpointBlock):
         return inspect_checkpoint_block(model, param_name, prefix)
     else:
         ret = []

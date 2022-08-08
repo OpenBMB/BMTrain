@@ -92,8 +92,8 @@ def allgather_object(obj, comm):
         obj = _unpickler(io.BytesIO(buf)).load()
         obj_list.append(obj)
     return obj_list
-def broadcast_object(obj, comm):
-    if nccl.commRank(comm) == 0:
+def broadcast_object(obj, comm, src = 0):
+    if nccl.commRank(comm) == src:
         f = io.BytesIO()
         _pickler(f).dump(obj)
         byte_storage = torch.ByteStorage.from_buffer(f.getvalue())
@@ -106,13 +106,13 @@ def broadcast_object(obj, comm):
         nccl.broadcast(
             local_size.storage(),
             local_size.storage(),
-            0,
+            src,
             comm
         )
         nccl.broadcast(
             byte_tensor.storage(),
             byte_tensor.storage(),
-            0,
+            src,
             comm
         )
     else:
@@ -120,7 +120,7 @@ def broadcast_object(obj, comm):
         nccl.broadcast(
             local_size.storage(),
             local_size.storage(),
-            0,
+            src,
             comm
         )
         byte_tensor_size = local_size[0].item()
@@ -128,7 +128,7 @@ def broadcast_object(obj, comm):
         nccl.broadcast(
             byte_tensor.storage(),
             byte_tensor.storage(),
-            0,
+            src,
             comm
         )
         buf = byte_tensor.cpu().numpy().tobytes()
