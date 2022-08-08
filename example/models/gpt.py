@@ -1,7 +1,6 @@
 import torch
 import bmtrain as bmt
 from layers import TransformerEncoder, Layernorm, Embedding, TransformerEncoder
-from torch.nn.modules import transformer
 
 class GPT(bmt.DistributedModule):
     def __init__(self,

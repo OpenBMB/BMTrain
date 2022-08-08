@@ -52,8 +52,6 @@ class OpBroadcast(torch.autograd.Function):
 def broadcast(src, root, comm=None):
     if not config["initialized"]:
         raise RuntimeError("BMTrain is not initialized")
-    if comm is None:
-        comm = config["comm"]
     return OpBroadcast.apply(src, root, comm)
 class OpAllGather(torch.autograd.Function):
     @staticmethod

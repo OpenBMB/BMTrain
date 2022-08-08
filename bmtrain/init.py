@@ -13,7 +13,7 @@ def init_distributed(
         loss_scale_factor : float = 2,
         loss_scale_steps : int = 1024,
         zero_level: int = 3,
-        pipe_size: int = 1,
+        pipe_size: int = -1,
         num_micro_batches: int = None,
     ):
     """Initialize distributed training.
@@ -56,9 +56,9 @@ def init_distributed(
     store.set_timeout(timeout)
     store = dist.PrefixStore("bmtrain", store)
     torch.cuda.set_device(local_rank)
-    config["pipe_size"] = pipe_size
     config["initialized"] = True
-    config["pipe_enabled"] = config["pipe_size"] > 1
+    config["pipe_size"] = pipe_size if pipe_size > 0 else 1
+    config["pipe_enabled"] = pipe_size > 0
     config["local_rank"] = local_rank
     config["local_size"] = local_size
     config["rank"] = rank
@@ -100,14 +100,14 @@ def init_distributed(
     
     unique_id = bytes.fromhex(store.get("BMTRAIN_UNIQUE_ID").decode())
     config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
-    if config['pipe_size'] > 1:
+    if config['pipe_enabled']:
         config["micros"] = num_micro_batches if num_micro_batches else config["pipe_size"]
         topo = config['topology']
         if topo.stage_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"PIPE_UNIQUE_ID{topo.pipe_idx}", unique_id.hex())
         unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
-        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size , topo.stage_id)
+        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id)
         if topo.zero_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"ZERO_UNIQUE_ID{topo.zero_idx}", unique_id.hex() )
