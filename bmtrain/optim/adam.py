@@ -152,7 +152,7 @@ class AdamOptimizer(torch.optim.Optimizer):
         """
         Backward with loss scale.
         """
-        return loss * (self.scale / config['world_size'])
+        return loss * (self.scale * config['pipe_size'] / config['world_size'])
 
     def load_state_dict(self, state_dict: dict) -> None:
         r"""Loads the optimizer state.
