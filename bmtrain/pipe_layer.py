@@ -41,9 +41,14 @@ class OpMicroForward(torch.autograd.Function):
                     # call inner module directly
                     with ScopedTensorInspectorContext() as inspector:
                         hidden_state = self._modules[str(layer_id)]._module._call_impl(hidden_state, *args)
-                    for it in inspector.hidden_states:
+                    for ith, it in enumerate(inspector.hidden_states):
                         it["shape"] = ((it["shape"][0] / config['pipe_size'],) + it["shape"][1:])
-                        it["inside_pipe"] = (self.stage_id, self.stages)
+                        it["inside_pipe"] = {
+                            "stage_id": self.stage_id,
+                            "stages": self.stages,
+                            "st": (layer_id==self.layer_ids[0] and ith==0),
+                            "ed": (layer_id==self.layer_ids[-1] and ith==len(inspector.hidden_states)-1),
+                        }
                         debug.append("_inspect_hidden_states", it)
                     layer_inspector.append(inspector.hidden_states)
                     block_ctx.exit()
@@ -109,6 +114,7 @@ class OpMicroForward(torch.autograd.Function):
 
                         assert len(ctx.layer_inspector[idx]) == len(inspector.hidden_states), "Backward step changed"
                         for j, it in enumerate(inspector.hidden_states):
+                            it["shape"] = ((it["shape"][0] / config['pipe_size'],) + it["shape"][1:])
                             assert it["name"] == ctx.layer_inspector[idx][j]["name"], "Backward step changed"
                             assert it["shape"] == ctx.layer_inspector[idx][j]["shape"], "Backward step changed"
                             assert it["group"] == ctx.layer_inspector[idx][j]["group"], "Backward step changed"
