@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, Iterator, Union
+from typing import Dict, Iterable, Iterator, Union, List
 
 from .utils import round_up
 from .global_var import config
@@ -653,7 +653,7 @@ class OpTransformerBlockList(torch.autograd.Function):
         with torch.no_grad():
             for i in range(len(self)):
                 if save_list[i][0] == i:
-                    layer_inputs.append(hidden_state)
+                    layer_inputs.append(hidden_state.detach())
                 cuda_rng_state.append( torch.cuda.get_rng_state() )
                 if config['zero_level']==2:
                     flag = 1
@@ -673,14 +673,20 @@ class OpTransformerBlockList(torch.autograd.Function):
         ctx.layer_inspector = layer_inspector
         ctx.cuda_rng_state = cuda_rng_state
 
-        
         ctx.save_for_backward(*layer_inputs, *tensors)
-        # print(hidden_state.shape)
-        return hidden_state
+
+        if self.return_hidden_states:
+            middle_hiddens = layer_inputs 
+            for mid in middle_hiddens:
+                mid.requires_grad_()
+            middle_hiddens = torch.stack(middle_hiddens, dim=0)
+            return hidden_state, middle_hiddens
+        else:
+            return hidden_state, None
 
 
     @staticmethod
-    def backward(ctx, grad_hidden_state : torch.Tensor):
+    def backward(ctx, grad_hidden_state : torch.Tensor, grad_middle: List[torch.Tensor]):
         def exit_prev(prev_ctx, prev_grad):
             if prev_ctx is not None:
                 if prev_grad:
@@ -738,7 +744,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                                 ctx.save_list[j+1][0] = j+1
                 
                     torch.cuda.set_rng_state(ctx.cuda_rng_state[i])
-                    ipt = layer_inputs[ctx.save_list[i][1]].detach().requires_grad_()
+                    ipt = layer_inputs[ctx.save_list[i][1]].requires_grad_()
                     if config['zero_level'] == 2:
                         flag = 2
                     else:
@@ -766,6 +772,8 @@ class OpTransformerBlockList(torch.autograd.Function):
                         [grad_hidden_state]
                     )
                     grad_hidden_state = ipt.grad
+                    if grad_middle is not None:
+                        grad_hidden_state = grad_hidden_state + grad_middle[i]
                 
                 exit_prev(prev_ctx, prev_grad)
 
@@ -837,6 +845,11 @@ class TransformerBlockList(torch.nn.Module):
     def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
         return self._modules[str(index)]
 
-    def forward(self, hidden_state, *args):
+    def forward(self, hidden_state, *args, return_hidden_states = False):
+        self.return_hidden_states = return_hidden_states
         placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-        return OpTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)
+        last_hidden, middle_hiddens = OpTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)
+        if return_hidden_states:
+            return last_hidden, middle_hiddens
+        else:
+            return last_hidden
