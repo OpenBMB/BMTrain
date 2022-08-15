@@ -16,7 +16,7 @@ class OpMicroForward(torch.autograd.Function):
     @staticmethod
     def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', layers_dict, save_list, hidden_state, *args):
         with PipeContext(self, hidden_state) as pipe_input:
-            hidden_state = pipe_input[0]
+            hidden_state = pipe_input[0].detach()
             tensors = [arg if torch.is_tensor(arg) else None for arg in args]
             others = [arg if not torch.is_tensor(arg) else None for arg in args]
             ctx.nontensor_inputs = others
@@ -30,7 +30,7 @@ class OpMicroForward(torch.autograd.Function):
             with torch.no_grad():
                 for idx,layer_id in enumerate(self.layer_ids):
                     if save_list[idx][0] == idx:
-                        layer_inputs.append(hidden_state)
+                        layer_inputs.append(hidden_state.detach())
                     cuda_rng_state.append( torch.cuda.get_rng_state() )
                     if not ctx.layers_dict[idx]:
                         block_ctx = CheckpointBlockContext(self._modules[str(layer_id)], ctx.layers_dict[idx], 1, pipe=True)
@@ -42,7 +42,7 @@ class OpMicroForward(torch.autograd.Function):
                     with ScopedTensorInspectorContext() as inspector:
                         hidden_state = self._modules[str(layer_id)]._module._call_impl(hidden_state, *args)
                     for ith, it in enumerate(inspector.hidden_states):
-                        it["shape"] = ((it["shape"][0] / config['pipe_size'],) + it["shape"][1:])
+                        it["shape"] = ((it["shape"][0] // config['pipe_size'],) + it["shape"][1:])
                         it["inside_pipe"] = {
                             "stage_id": self.stage_id,
                             "stages": self.stages,
@@ -108,7 +108,7 @@ class OpMicroForward(torch.autograd.Function):
                     prev_grad = False
                     for idx,layer_id in list(enumerate(ctx.self.layer_ids))[::-1]:
                         torch.cuda.set_rng_state(ctx.cuda_rng_state[idx])
-                        ipt = layer_inputs[ctx.save_list[idx][1]].detach().requires_grad_()
+                        ipt = layer_inputs[ctx.save_list[idx][1]].requires_grad_()
                         block_ctx = CheckpointBlockContext(ctx.self._modules[str(layer_id)], ctx.layers_dict[idx], 2, pipe=True)
                         block_ctx.enter()
                         exit_prev(prev_ctx, prev_grad)
@@ -120,7 +120,7 @@ class OpMicroForward(torch.autograd.Function):
 
                         assert len(ctx.layer_inspector[idx]) == len(inspector.hidden_states), "Backward step changed"
                         for j, it in enumerate(inspector.hidden_states):
-                            it["shape"] = ((it["shape"][0] / config['pipe_size'],) + it["shape"][1:])
+                            it["shape"] = ((it["shape"][0] // config['pipe_size'],) + it["shape"][1:])
                             assert it["name"] == ctx.layer_inspector[idx][j]["name"], "Backward step changed"
                             assert it["shape"] == ctx.layer_inspector[idx][j]["shape"], "Backward step changed"
                             assert it["group"] == ctx.layer_inspector[idx][j]["group"], "Backward step changed"
@@ -171,8 +171,9 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                         arg_all = [tensor.detach().requires_grad_(arg.requires_grad) for tensor in arg_all]
                     else:
                         batch_related_rule.append(False)
-                        assert num_micros % self.stages == 0, "batch unrelated only support num_micros % stages == 0"
-                        arg_all = [arg_all[i // (num_micros // self.stages)].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)]
+                        # assert num_micros % self.stages == 0, "batch unrelated only support num_micros % stages == 0"
+                        # arg_all = [arg_all[i // (num_micros // self.stages)].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)]
+                        arg_all = [arg_all[0].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)]
                     input_requires_grad.append(arg.requires_grad)
                 else:
                     batch_related_rule.append(False)
@@ -266,7 +267,10 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                 grad = all_reduce(grad, "sum", config["pipe_comm"])
                 split_size = ctx.self.stages if ctx.batch_related[idx] else ctx.num_micros
                 grad = grad.chunk(split_size)
-                grads.append(grad[ctx.self.stage_id])
+                if ctx.batch_related[idx]:
+                    grads.append(grad[ctx.self.stage_id])
+                else:
+                    grads.append(grad[0])
             else:
                 grads.append(None)
         grad = broadcast(ipt.grad, 0, config["pipe_comm"]).chunk(ctx.self.stages)

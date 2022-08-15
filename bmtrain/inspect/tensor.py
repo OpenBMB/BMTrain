@@ -24,7 +24,6 @@ class InspectTensor:
 
         kw_cnt = {}
         i = 0
-        print(f"{config['rank']} {summary}")
         while i < len(summary):
             item = summary[i]
             if item["inside_pipe"] is not None:
@@ -58,6 +57,13 @@ class InspectTensor:
                             if kw not in kw_cnt:
                                 kw_cnt[kw] = 0
                             item["name"] = f'{item["prefix"]}{kw_cnt[kw]}.{item["name"]}'
+                            item["shape"] = ((item["shape"][0] * config['micros'],) + item["shape"][1:])
+                            if item['tensor'].grad is not None:
+                                grad = torch.cat([summary[k+m*(j-i)]['tensor'].grad for m in range(config['micros'])], dim=0)
+                            else:
+                                grad = None
+                            item["tensor"] = torch.cat([summary[k+m*(j-i)]['tensor'] for m in range(config['micros'])], dim=0)
+                            item["tensor"].grad = grad
                             self._summary.append(item)
                             kw_cnt[kw] += 1
                     else:
@@ -82,7 +88,7 @@ class InspectTensor:
                                 })
                                 kw_cnt[kw] += 1
 
-                i = j
+                i = i + config['micros'] * (j - i)
             else:
                 kw = f'{item["prefix"]}{item["name"]}'
                 if kw not in kw_cnt:
