@@ -105,13 +105,13 @@ def inspect_pipeline_transformer_block_list(pipe_model: PipelineTransformerBlock
                             "max": p.max().cpu().item(),
                             "min": p.min().cpu().item(),
                         }
-                    broadcast_object(info, config["pipe_comm"], idx // pipe_model.part_len)
+                    broadcast_object(info, config["pipe_comm"], pipe_model.get_stage_by_layer_id(idx))
                     ret.append(info)
         else:
             for param in model._param_info:
                 abs_name = prefix + param["name"]
                 if fnmatch.fnmatch(abs_name, param_name):
-                    info = broadcast_object({}, config["pipe_comm"], idx // pipe_model.part_len)
+                    info = broadcast_object({}, config["pipe_comm"], pipe_model.get_stage_by_layer_id(idx))
                     ret.append(info)
 
     return ret
