@@ -191,11 +191,8 @@ class CheckpointBlockContext:
                     device = param["parameter"].data.device
                     param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self.ctx_dict[kw_name], offset, shape)
 
-                if requires_grad and kw_name in self._grad_buffer:
-                    param["parameter"].requires_grad_(True)
+                if requires_grad and kw_name in self._grad_buffer and param["parameter"].requires_grad:
                     param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self._grad_buffer[kw_name], offset, shape)
-                else:
-                    param["parameter"].requires_grad_(False)
 
     def __enter__(self):
         self.enter()
@@ -258,7 +255,7 @@ class CheckpointBlockContext:
             begin = param["begin"]
             end = param["end"]
             param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self.block._storage_params[kw_name].storage(), begin, end)
-            if param["parameter"].requires_grad:
+            if requires_grad and param["parameter"].requires_grad:
                 param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self.block._storage_params[kw_name].grad.storage(), begin, end)
         if self.flag == 1:
             for i in self._param_buffer:
