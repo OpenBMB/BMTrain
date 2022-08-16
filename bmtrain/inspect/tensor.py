@@ -3,6 +3,7 @@ import torch
 from .. import debug
 from .. import nccl
 from ..global_var import config
+from ..store import broadcast_object
 import math
 
 
@@ -16,62 +17,88 @@ class InspectTensor:
         self._summary = []
     
     def _set_summary(self, summary):
+        for item in summary:
+            item['prefix'] = "" if item["group"] is None else f'{item["group"]}.'
+            
         self._summary = []
-        group_cnt = {}
-        for item in summary:
-            group = item["group"]
-            name = item["name"]
-            if group not in group_cnt:
-                group_cnt[group] = {}
-            if name not in group_cnt[group]:
-                group_cnt[group][name] = 0
-            group_cnt[group][name] += 1
-        
-        group_idx = {}
-        for item in summary:
-            group = item["group"]
-            name = item["name"]
-            if group not in group_idx:
-                group_idx[group] = {}
-            if name not in group_idx[group]:
-                group_idx[group][name] = 0
 
-            group_name_prefix = f"{group}." if group is not None else ""
-            if group_cnt[group][name] > 1:
-                item["name"] = f"{group_name_prefix}{group_idx[group][name]}.{name}"
+        kw_cnt = {}
+        i = 0
+        while i < len(summary):
+            item = summary[i]
+            if item["inside_pipe"] is not None:
+                assert item["inside_pipe"]["st"]
+                pipe_cnt = {}
+                j = i
+                while j < len(summary):
+                    item = summary[j]
+                    kw = f'{item["prefix"]}{item["name"]}'
+
+                    assert item["inside_pipe"] is not None
+                    stage_id = item["inside_pipe"]["stage_id"]
+                    stages = item["inside_pipe"]["stages"]
+                    st = item["inside_pipe"]["st"]
+                    ed = item["inside_pipe"]["ed"]
+
+                    if kw not in pipe_cnt:
+                        pipe_cnt[kw] = 0
+                    pipe_cnt[kw] += 1
+
+                    j += 1
+                    if ed:
+                        break
+
+                for stage in range(stages):
+                    if stage_id == stage:
+                        broadcast_object(pipe_cnt, config["pipe_comm"], src = stage)
+                        for k in range(i, j):
+                            item = summary[k]
+                            kw = f'{item["prefix"]}{item["name"]}'
+                            if kw not in kw_cnt:
+                                kw_cnt[kw] = 0
+                            item["name"] = f'{item["prefix"]}{kw_cnt[kw]}.{item["name"]}'
+                            item["shape"] = ((item["shape"][0] * config['micros'],) + item["shape"][1:])
+                            if item['tensor'].grad is not None:
+                                grad = torch.cat([summary[k+m*(j-i)]['tensor'].grad for m in range(config['micros'])], dim=0)
+                            else:
+                                grad = None
+                            item["tensor"] = torch.cat([summary[k+m*(j-i)]['tensor'] for m in range(config['micros'])], dim=0)
+                            item["tensor"].grad = grad
+                            self._summary.append(item)
+                            kw_cnt[kw] += 1
+                    else:
+                        cnt = broadcast_object({}, config["pipe_comm"], src = stage)
+                        for kw, val in cnt.items():
+                            if kw not in kw_cnt:
+                                kw_cnt[kw] = 0
+                            for _ in range(val):
+                                self._summary.append({
+                                    "name": f'{item["prefix"]}{kw_cnt[kw]}.{item["name"]}',
+                                    "group": None,
+                                    "requires_grad": None,
+                                    "min": None,
+                                    "max": None,
+                                    "mean": None,
+                                    "std": None,
+                                    "shape": None,
+                                    "grad_mean" : None,
+                                    "grad_std" : None,
+                                    "tensor": None,
+                                    "inside_pipe": {"stage_id": stage},
+                                })
+                                kw_cnt[kw] += 1
+
+                i = i + config['micros'] * (j - i)
             else:
-                item["name"] = f"{group_name_prefix}{name}"
-            if not item["requires_grad"]:
-                x = item["tensor"]
-                info = torch.empty(2, dtype=x.dtype, device=x.device)
-                info[0] = x.mean()
-                info[1] = x.var()
-                nccl.allReduce(
-                    info.storage(),
-                    info.storage(),
-                    "avg",
-                    config['comm']
-                )
-                x_mean = info[0].cpu().item()
-                x_std = math.sqrt(info[1].cpu().item())
-                item["mean"] = x_mean
-                item["std"] = x_std
+                kw = f'{item["prefix"]}{item["name"]}'
+                if kw not in kw_cnt:
+                    kw_cnt[kw] = 0
+                item["name"] = f'{item["prefix"]}{kw_cnt[kw]}.{item["name"]}'
+                self._summary.append(item)
+                kw_cnt[kw] += 1
+                i = i + 1
 
-                info[0] = x.max()
-                info[1] = -x.min()
-                nccl.allReduce(
-                    info.storage(),
-                    info.storage(),
-                    'max',
-                    config['comm']
-                )
-                x_max = info[0].cpu().item()
-                x_min = - info[1].cpu().item()
-                item["max"] = x_max
-                item["min"] = x_min
 
-            self._summary.append(item)
-            group_idx[group][name] += 1
     
     def get_summary(self):
         """Get the summary of the tensors recorded by `record_tensor`.
@@ -90,78 +117,71 @@ class InspectTensor:
         **Note:** This method must be called outside of the `with` block.
 
         """
-        nw_summary = []
+        ret = []
         for item in self._summary:
-            if item["requires_grad"] and item["tensor"].grad is not None:
-                x = item["tensor"]
-                info = torch.empty(4, dtype=x.dtype, device=x.device)
-                info[0] = x.mean()
-                info[1] = x.var()
-                info[2] = x.grad.mean()
-                info[3] = x.grad.var()
-                nccl.allReduce(
-                    info.storage(),
-                    info.storage(),
-                    "avg",
-                    config['comm']
-                )
-                x_mean = info[0].cpu().item()
-                x_std = math.sqrt(info[1].cpu().item())
-                grad_mean = info[2].cpu().item()
-                grad_std = math.sqrt(info[3].cpu().item())
-                
+            comm = config["zero_comm"] if item["inside_pipe"] else config["comm"]
+            if item["tensor"] is not None:
+                if not item["requires_grad"] or item["tensor"].grad is None:
+                    x = item["tensor"]
+                    info = torch.empty(2, dtype=x.dtype, device=x.device)
+                    info[0] = x.mean()
+                    info[1] = x.var()
+                    nccl.allReduce(
+                        info.storage(),
+                        info.storage(),
+                        "avg",
+                        comm
+                    )
+                    x_mean = info[0].cpu().item()
+                    x_std = math.sqrt(info[1].cpu().item())
+                    grad_mean = None
+                    grad_std = None
+                else:
+                    x = item["tensor"]
+                    info = torch.empty(4, dtype=x.dtype, device=x.device)
+                    info[0] = x.mean()
+                    info[1] = x.var()
+                    info[2] = x.grad.mean()
+                    info[3] = x.grad.var()
+                    nccl.allReduce(
+                        info.storage(),
+                        info.storage(),
+                        "avg",
+                        comm
+                    )
+                    x_mean = info[0].cpu().item()
+                    x_std = math.sqrt(info[1].cpu().item())
+                    grad_mean = info[2].cpu().item()
+                    grad_std = math.sqrt(info[3].cpu().item())
+
                 info[0] = x.max()
                 info[1] = -x.min()
                 nccl.allReduce(
                     info.storage(),
                     info.storage(),
                     'max',
-                    config['comm']
+                    comm
                 )
                 x_max = info[0].cpu().item()
                 x_min = - info[1].cpu().item()
 
-                nw_summary.append({
+                summary = {
                     "name": item["name"],
-                    "group": item["group"],
-                    "requires_grad" : False,
                     "min": x_min,
                     "max": x_max,
                     "mean": x_mean,
                     "std": x_std,
                     "shape": item["shape"],
                     "grad_mean" : grad_mean,
-                    "grad_std" : grad_std,
-                    "tensor": item["tensor"]
-                })
+                    "grad_std" : grad_std
+                }
+
+                if item["inside_pipe"] is not None:
+                    broadcast_object(summary, config["pipe_comm"], item["inside_pipe"]["stage_id"])
             else:
-                nw_summary.append(item)
-        
-        ret = []
-        self._summary = nw_summary
-        for item in self._summary:
-            if item["requires_grad"]:
-                ret.append({
-                    "name": item["name"],
-                    "min": item["min"],
-                    "max": item["max"],
-                    "mean": item["mean"],
-                    "std": item["std"],
-                    "shape": item["shape"],
-                    "grad_mean" : None,
-                    "grad_std" : None
-                })
-            else:
-                ret.append({
-                    "name": item["name"],
-                    "min": item["min"],
-                    "max": item["max"],
-                    "mean": item["mean"],
-                    "std": item["std"],
-                    "shape": item["shape"],
-                    "grad_mean" : item["grad_mean"],
-                    "grad_std" : item["grad_std"]
-                })
+                summary = broadcast_object({}, config["pipe_comm"], item["inside_pipe"]["stage_id"])
+
+            ret.append(summary)
         return ret
     
     def get_tensor(self, name : str, group : Optional[str] = None, index : Optional[int] = None) -> torch.Tensor:
@@ -268,5 +288,6 @@ def record_tensor(x : torch.Tensor, name : str, group = None, requires_grad = Tr
         "shape": x_shape,
         "grad_mean" : None,
         "grad_std" : None,
-        "tensor": x
+        "tensor": x,
+        "inside_pipe": None,
     })

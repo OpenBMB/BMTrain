@@ -16,7 +16,7 @@ class OpMicroForward(torch.autograd.Function):
     @staticmethod
     def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', layers_dict, save_list, hidden_state, *args):
         with PipeContext(self, hidden_state) as pipe_input:
-            hidden_state = pipe_input[0]
+            hidden_state = pipe_input[0].detach()
             tensors = [arg if torch.is_tensor(arg) else None for arg in args]
             others = [arg if not torch.is_tensor(arg) else None for arg in args]
             ctx.nontensor_inputs = others
@@ -30,7 +30,7 @@ class OpMicroForward(torch.autograd.Function):
             with torch.no_grad():
                 for idx,layer_id in enumerate(self.layer_ids):
                     if save_list[idx][0] == idx:
-                        layer_inputs.append(hidden_state)
+                        layer_inputs.append(hidden_state.detach())
                     cuda_rng_state.append( torch.cuda.get_rng_state() )
                     if not ctx.layers_dict[idx]:
                         block_ctx = CheckpointBlockContext(self._modules[str(layer_id)], ctx.layers_dict[idx], 1, pipe=True)
@@ -41,7 +41,14 @@ class OpMicroForward(torch.autograd.Function):
                     # call inner module directly
                     with ScopedTensorInspectorContext() as inspector:
                         hidden_state = self._modules[str(layer_id)]._module._call_impl(hidden_state, *args)
-                    for it in inspector.hidden_states:
+                    for ith, it in enumerate(inspector.hidden_states):
+                        it["shape"] = ((it["shape"][0] // config['pipe_size'],) + it["shape"][1:])
+                        it["inside_pipe"] = {
+                            "stage_id": self.stage_id,
+                            "stages": self.stages,
+                            "st": (layer_id==self.layer_ids[0] and ith==0),
+                            "ed": (layer_id==self.layer_ids[-1] and ith==len(inspector.hidden_states)-1),
+                        }
                         debug.append("_inspect_hidden_states", it)
                     layer_inspector.append(inspector.hidden_states)
                     block_ctx.exit()
@@ -49,13 +56,19 @@ class OpMicroForward(torch.autograd.Function):
             ctx.layer_inspector = layer_inspector
             ctx.cuda_rng_state = cuda_rng_state
 
-            
             ctx.save_for_backward(*layer_inputs, *tensors)
             pipe_input[0] = hidden_state
-        return pipe_input[0]
+        if self.return_hidden_states:
+            middle_hiddens = layer_inputs 
+            for mid in middle_hiddens:
+                mid.requires_grad_()
+            middle_hiddens = torch.stack(middle_hiddens, dim=0)
+            return pipe_input[0], middle_hiddens
+        else:
+            return pipe_input[0], None
 
     @staticmethod
-    def backward(ctx, grad_hidden_state : torch.Tensor):
+    def backward(ctx, grad_hidden_state : torch.Tensor, grad_middle : torch.Tensor):
         def exit_prev(prev_ctx, prev_grad):
             if prev_ctx is not None:
                 if prev_grad:
@@ -95,7 +108,7 @@ class OpMicroForward(torch.autograd.Function):
                     prev_grad = False
                     for idx,layer_id in list(enumerate(ctx.self.layer_ids))[::-1]:
                         torch.cuda.set_rng_state(ctx.cuda_rng_state[idx])
-                        ipt = layer_inputs[ctx.save_list[idx][1]].detach().requires_grad_()
+                        ipt = layer_inputs[ctx.save_list[idx][1]].requires_grad_()
                         block_ctx = CheckpointBlockContext(ctx.self._modules[str(layer_id)], ctx.layers_dict[idx], 2, pipe=True)
                         block_ctx.enter()
                         exit_prev(prev_ctx, prev_grad)
@@ -107,17 +120,21 @@ class OpMicroForward(torch.autograd.Function):
 
                         assert len(ctx.layer_inspector[idx]) == len(inspector.hidden_states), "Backward step changed"
                         for j, it in enumerate(inspector.hidden_states):
+                            it["shape"] = ((it["shape"][0] // config['pipe_size'],) + it["shape"][1:])
                             assert it["name"] == ctx.layer_inspector[idx][j]["name"], "Backward step changed"
                             assert it["shape"] == ctx.layer_inspector[idx][j]["shape"], "Backward step changed"
                             assert it["group"] == ctx.layer_inspector[idx][j]["group"], "Backward step changed"
                             
                             # change the tensor in placeholder
+                            ctx.layer_inspector[idx][j]["requires_grad"] = it["requires_grad"]
                             ctx.layer_inspector[idx][j]["tensor"] = it["tensor"]
                         torch.autograd.backward(
                             [output],
                             [grad_hidden_state]
                         )
                         grad_hidden_state = ipt.grad
+                        if grad_middle is not None:
+                            grad_hidden_state = grad_hidden_state + grad_middle[idx]
                     exit_prev(prev_ctx, prev_grad)
 
             pipe_input[0] = grad_hidden_state
@@ -154,8 +171,9 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                         arg_all = [tensor.detach().requires_grad_(arg.requires_grad) for tensor in arg_all]
                     else:
                         batch_related_rule.append(False)
-                        assert num_micros % self.stages == 0, "batch unrelated only support num_micros % stages == 0"
-                        arg_all = [arg_all[i // (num_micros // self.stages)].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)]
+                        # assert num_micros % self.stages == 0, "batch unrelated only support num_micros % stages == 0"
+                        # arg_all = [arg_all[i // (num_micros // self.stages)].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)]
+                        arg_all = [arg_all[0].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)]
                     input_requires_grad.append(arg.requires_grad)
                 else:
                     batch_related_rule.append(False)
@@ -164,13 +182,17 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                 for i in range(num_micros):
                     args_list[i].append(arg_all[i])
             outputs = []
+            if self.return_hidden_states:
+                middles = []
             hidden_state_list = all_gather(hidden_state, config["pipe_comm"]).flatten(0, 1).detach().requires_grad_()
             ctx.hidden_state_list = hidden_state_list
             hidden_state_list = hidden_state_list.chunk(num_micros, dim=0)
             for micro_idx, (hidden_state, arg) in enumerate(zip(hidden_state_list, args_list)):
                 placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-                output = OpMicroForward.apply(placeholder, self, layers_dict, save_list, hidden_state, *arg)
+                output, middle = OpMicroForward.apply(placeholder, self, layers_dict, save_list, hidden_state, *arg)
                 outputs.append(output)
+                if self.return_hidden_states:
+                    middles.append(middle)
         if len(batch_related) == 0:
             ctx.batch_related = batch_related_rule
         else:
@@ -178,27 +200,66 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
         ctx.args_list = args_list
         ctx.input_requires_grad = input_requires_grad
         ctx.output_list = outputs
+        if self.return_hidden_states:
+            ctx.middle_list = middles
+
         with torch.enable_grad():
-            result = torch.cat(outputs, dim=0)
-            result = broadcast(result, config["pipe_size"] - 1, config["pipe_comm"])
-            result = result.chunk(self.stages, dim=0)
-            result = result[self.stage_id].clone()
-        return result
+            last_hidden = torch.cat(outputs, dim=0)
+            last_hidden_shape = last_hidden.shape
+            last_hidden = broadcast(last_hidden, config["pipe_size"] - 1, config["pipe_comm"])
+            last_hidden = last_hidden.chunk(self.stages, dim=0)
+            last_hidden = last_hidden[self.stage_id].clone()
+
+        if self.return_hidden_states:
+            middle_hiddens = []
+            with torch.enable_grad():
+                for stage_id in range(self.stages):
+                    if self.stage_id == stage_id:
+                        middle_hidden = torch.cat(middles, dim=1) # [(layers, micro_batch, ...), ] -> (layers, full_batch, ...)
+                    else:
+                        middle_shape = (self.get_part_len_by_stage_id(stage_id),)+last_hidden_shape
+                        middle_hidden = torch.zeros(middle_shape, device=last_hidden.device, dtype=last_hidden.dtype)
+                    middle_hidden = broadcast(middle_hidden, stage_id, config["pipe_comm"])
+                    middle_hidden = middle_hidden.chunk(self.stages, dim=1)
+                    middle_hidden = middle_hidden[self.stage_id].clone()
+                    middle_hiddens.append(middle_hidden)
+                middle_hiddens = torch.cat(middle_hiddens, dim=0)
+            return last_hidden, middle_hiddens
+        else:
+            return last_hidden, None
 
 
     @staticmethod
-    def backward(ctx, grad_hidden_state : torch.Tensor):
+    def backward(ctx, grad_hidden_state : torch.Tensor, grad_middle : torch.Tensor):
         ipt = ctx.hidden_state_list
         args_list = ctx.args_list
         input_requires_grad = ctx.input_requires_grad
         grad_hidden_state_list = all_gather(grad_hidden_state, config["pipe_comm"]).flatten(start_dim=0, end_dim=1).chunk(ctx.num_micros, dim=0)
-        for m in range(ctx.num_micros):
-            output = ctx.output_list[m]
-            grad_hidden_state = grad_hidden_state_list[m]
-            torch.autograd.backward(
-                [output],
-                [grad_hidden_state],
-            )
+        if ctx.self.return_hidden_states:
+            for stage_id in range(ctx.self.stages):
+                layer_range = ctx.self.get_range_by_stage_id(stage_id)
+                grad_middle_state = grad_middle[layer_range]
+                grad_middle_state = all_gather(grad_middle_state.transpose(0,1), config["pipe_comm"]).flatten(start_dim=0, end_dim=1).transpose(0, 1).chunk(ctx.num_micros, dim=1) # (layer, micro_batch, ...)
+                if ctx.self.stage_id == stage_id:
+                    grad_middle_state_list = grad_middle_state
+
+            for m in range(ctx.num_micros):
+                output = ctx.output_list[m]
+                middle = ctx.middle_list[m]
+                grad_hidden_state = grad_hidden_state_list[m]
+                grad_middle_state = grad_middle_state_list[m]
+                torch.autograd.backward(
+                    [output, middle],
+                    [grad_hidden_state, grad_middle_state],
+                )
+        else:
+            for m in range(ctx.num_micros):
+                output = ctx.output_list[m]
+                grad_hidden_state = grad_hidden_state_list[m]
+                torch.autograd.backward(
+                    [output],
+                    [grad_hidden_state],
+                )
         grads = []
         for idx,requires_grad in enumerate(input_requires_grad):
             if requires_grad:
@@ -206,7 +267,10 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                 grad = all_reduce(grad, "sum", config["pipe_comm"])
                 split_size = ctx.self.stages if ctx.batch_related[idx] else ctx.num_micros
                 grad = grad.chunk(split_size)
-                grads.append(grad[ctx.self.stage_id])
+                if ctx.batch_related[idx]:
+                    grads.append(grad[ctx.self.stage_id])
+                else:
+                    grads.append(grad[0])
             else:
                 grads.append(None)
         grad = broadcast(ipt.grad, 0, config["pipe_comm"]).chunk(ctx.self.stages)
@@ -251,7 +315,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
                 module = CheckpointBlock(module)
             self._modules[str(idx)] = module
 
-        self.layer_ids = self.partition_modules(modules)
+        self.layer_ids = self.get_range_by_stage_id(self.stage_id)
+        self.partition_modules(self.layer_ids)
         self.next_rank = pipe_group[self.pipe_idx, self.stage_id + 1] if self.stage_id < config['pipe_size'] - 1 else -1
         self.prev_rank = pipe_group[self.pipe_idx, self.stage_id - 1] if self.stage_id > 0 else -1
         # self.micro_batches = config['num_micro_batches']
@@ -267,46 +332,60 @@ class PipelineTransformerBlockList(torch.nn.Module):
     def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
         return self._modules[str(index)]
 
-    def forward(self, hidden_state, *args, batch_related=[]):
+    def forward(self, hidden_state, *args, batch_related=[], return_hidden_states=False):
+        self.return_hidden_states = return_hidden_states
         placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
         args = list(args)
         args.append(batch_related)
-        hidden_state = OpPipeTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)
-        return hidden_state
+        hidden_state, middle_states = OpPipeTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)
+        if return_hidden_states:
+            return hidden_state, middle_states
+        else:
+            return hidden_state
 
-    def partition_modules(self, modules: Iterable[CheckpointBlock])->  List[int]:
-        if not isinstance(modules, list):
-            modules = list(modules)
-        part_len = round_up(len(modules),self.stages) // self.stages
-        self.part_len = part_len
-        start = self.stage_id * part_len
-        end = min((self.stage_id + 1) * part_len, len(modules))
-        idxs = range(start, end)
-        for i in range(len(modules)):
+    def get_range_by_stage_id(self, stage_id : int) -> List[int]:
+        part_lens = [0]+[self.get_part_len_by_stage_id(i) for i in range(stage_id+1)]
+        start = sum(part_lens[:stage_id+1])
+        end = start + part_lens[stage_id+1]
+        return range(start, end)
+
+    def get_part_len_by_stage_id(self, stage_id : int) -> int:
+        return len(self) // self.stages + (stage_id < (len(self) % self.stages))
+
+    def get_stage_by_layer_id(self, layer_id : int) -> int:
+        part_len = len(self) // self.stages
+        rest = len(self) % self.stages
+        if layer_id // (part_len + 1) < rest:
+            return layer_id // (part_len + 1)
+        else:
+            return rest + (layer_id - rest * (part_len+1)) // part_len
+
+    def partition_modules(self, idxs) -> None:
+        for i in range(len(self)):
             contiguous_params = {}
-            for kw, val in modules[i]._storage_info.items():
+            for kw, val in self[i]._storage_info.items():
                 storage_type = val["storage_type"]
                 contiguous_params[kw] = storage_type(round_up(val["total"], config["world_size"] // config["pipe_size"]))
                 nccl.allGather(
-                    modules[i]._storage_params[kw].storage(),
+                    self[i]._storage_params[kw].storage(),
                     contiguous_params[kw],
                     config["comm"]
                 )
 
             if i not in idxs:
-                for name, param in modules[i]._module.named_parameters():
+                for name, param in self[i]._module.named_parameters():
                     param.data = torch.tensor([], dtype = param.dtype, device = param.device)
-                for kw, val in modules[i]._storage_info.items():
+                for kw, val in self[i]._storage_info.items():
                     val["begin"] = self.stage_id
                     val["end"] = self.stage_id + 1
                     val["partition_size"] = 1
                     val["total"] = val["world_size"]
-                    dtype = modules[i]._storage_params[kw].dtype
-                    device = modules[i]._storage_params[kw].device
-                    modules[i]._storage_params[kw] = \
+                    dtype = self[i]._storage_params[kw].dtype
+                    device = self[i]._storage_params[kw].device
+                    self[i]._storage_params[kw] = \
                         torch.nn.Parameter(torch.tensor([0], dtype = dtype, device=device))
             else:
-                for kw, val in modules[i]._storage_info.items():
+                for kw, val in self[i]._storage_info.items():
                     storage_type = val["storage_type"]
                     val["world_size"] = config["world_size"] // config["pipe_size"]
                     partition_size = round_up(val["total"], val["world_size"]) // val["world_size"]
@@ -316,19 +395,19 @@ class PipelineTransformerBlockList(torch.nn.Module):
                     storage_param_buffer = storage_type(partition_size)
                     dtype = storage_param_buffer.dtype
                     device = storage_param_buffer.device
-                    modules[i]._storage_params[kw] = torch.nn.Parameter(
+                    self[i]._storage_params[kw] = torch.nn.Parameter(
                         torch.tensor([], dtype=dtype, device=device).set_(storage_param_buffer)
                     )
                     if val["requires_grad"]:
-                        modules[i]._storage_params[kw].requires_grad_(True)
+                        self[i]._storage_params[kw].requires_grad_(True)
                     else:
-                        modules[i]._storage_params[kw].requires_grad_(False)
-                ordered_parameters = list(modules[i]._module.named_parameters())
+                        self[i]._storage_params[kw].requires_grad_(False)
+                ordered_parameters = list(self[i]._module.named_parameters())
                 for idx, named_param in enumerate(ordered_parameters):
                     name, param = named_param
-                    param_info = modules[i]._param_info[idx]
+                    param_info = self[i]._param_info[idx]
                     kw_name = _get_param_kw(param)
-                    storage_info = modules[i]._storage_info[kw_name]
+                    storage_info = self[i]._storage_info[kw_name]
                     storage_st = storage_info["begin"]
                     storage_end = storage_info["end"]
                     param_st = param_info["offset"]
@@ -340,9 +419,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
                         assert offset_st < offset_end
                         to_offset_st = offset_st + param_st - storage_st
                         to_offset_end = offset_end + param_st - storage_st
-                        d_dtype = modules[i]._storage_params[kw_name].dtype
-                        d_device = modules[i]._storage_params[kw_name].device
-                        param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(modules[i]._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
+                        d_dtype = self[i]._storage_params[kw_name].dtype
+                        d_device = self[i]._storage_params[kw_name].device
+                        param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self[i]._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
                         param_info["begin"] = to_offset_st
                         param_info["end"] = (to_offset_end - to_offset_st,)
                         param.data[:] = \
@@ -350,7 +429,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
                     else:
                         param.data = torch.tensor([], dtype=param.dtype, device=param.device)
             del contiguous_params
-        return idxs
     
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         for name, module in self._modules.items():
@@ -373,7 +451,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
                             send_activations(tensor.cuda(), 0, config['pipe_comm'])
             if config['rank'] == 0 and idx not in self.layer_ids:
                 for n, parameter in module._module.named_parameters():
-                    destination[name+n] = recv_activations(idx // self.part_len, config['pipe_comm'])
+                    destination[name+n] = recv_activations(self.get_stage_by_layer_id(idx), config['pipe_comm'])
 
 class PipeContext:
     def __init__(self, module, hidden_state, backward=False):
