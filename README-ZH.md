@@ -262,7 +262,7 @@ bmtrain.init_parameters(model) # 或者使用`bmtrain.load`加载checkpoint
 
 ```python
 loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-optimizer = bmtrain.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2, scale=2**20)
+optimizer = bmtrain.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
 lr_scheduler = bmtrain.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 ```
 

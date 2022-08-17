@@ -6,7 +6,7 @@ import time
 def main():
     bmt.init_distributed(
         seed=0,
-        zero_level=2
+        zero_level=2,
     )
 
     model = GPT(
@@ -51,8 +51,11 @@ def main():
             break
     
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2, scale=2**20)
+    optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
+
+    loss_scaler = bmt.optim.LossScaler(loss_scale=2**20)
+    loss_scaler.add(optimizer, lr_scheduler)
 
     bmt.synchronize()
     
@@ -95,7 +98,7 @@ def main():
             )
         
 
-        bmt.optim_step(optimizer, lr_scheduler)
+        loss_scaler.optim_step(optimizer, lr_scheduler)
 
         # record time and loss
         iteration_time = time.time() - st
