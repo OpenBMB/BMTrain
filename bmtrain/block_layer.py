@@ -246,11 +246,11 @@ class CheckpointBlockContext:
         # Release all parameters from buffer to block_storge
         for param in self.block._param_info:
             kw_name = param["kw_name"]
-            param["parameter"].grad = None
             dtype = self.block._storage_params[kw_name].dtype
             device = self.block._storage_params[kw_name].device
             if "begin" not in param:
                 param["parameter"].data = torch.tensor([], dtype=dtype, device=device)
+                param["parameter"].grad = None
                 continue
             begin = param["begin"]
             end = param["end"]

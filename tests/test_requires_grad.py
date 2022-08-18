@@ -26,24 +26,33 @@ class Linear(bmt.DistributedModule):
         ret = F.linear(input, self.weight, self.bias)
         return ret
 
+def run(m, a, b):
+    inp = torch.rand((1, 10, 256)).cuda()*100
+    logits = m(inp)
+    loss = logits.sum()
+    loss.backward()
+
+    bmt.print_rank(
+        bmt.inspect.format_summary(
+            bmt.inspect.inspect_model(m, '*')
+        )
+    )
+    print(a.weight.grad is None)
+    print(a.bias.grad is None)
+
 bmt.init_distributed()
 a = Linear(256, 256)
 b = Linear(256, 256)
 m = TransformerBlockList([CheckpointBlock(a), CheckpointBlock(b)])
-a.bias.requires_grad_(False)
 bmt.init_parameters(m)
-inp = torch.rand((1, 10, 256)).cuda()*100
-if bmt.rank() == 0:
-    print("===============================================forward===========================================")
-bmt.synchronize()
-logits = m(inp)
-bmt.synchronize()
-loss = logits.sum()
-loss.backward()
-bmt.print_rank(
-    bmt.inspect.format_summary(
-        bmt.inspect.inspect_model(m, '*')
-    )
-)
-print(a.weight.grad)
-print(a.bias.grad)
+
+a.bias.requires_grad_(False)
+run(m, a, b)
+
+a.weight.requires_grad_(False)
+a.bias.requires_grad_(True)
+run(m, a, b)
+
+a.weight.requires_grad_(True)
+a.bias.requires_grad_(False)
+run(m, a, b)
