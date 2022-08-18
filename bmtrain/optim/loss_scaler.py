@@ -41,7 +41,7 @@ class LossScaler:
         loss_scale_steps : int = 1024,
     ):
         self.loss_scale = loss_scale
-        self.step_since_last_scale = 0
+        self.steps_since_last_scale = 0
         self.loss_scale_factor = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
         self.loss_scale_steps = loss_scale_steps
 
@@ -49,11 +49,11 @@ class LossScaler:
         self.lr_schedulers = []
 
     def add_optimizer(
+        self,
         optimizer: torch.optim.Optimizer,
         lr_scheduler: Optional[WarmupLRScheduler],
     ):
-        """
-        Add optimizer and (optional) its corresponding lr_scheduler into loss_scaler.
+        """Add optimizer and (optional) its corresponding lr_scheduler into loss_scaler.
         All optimizers in the same loss_scaler share the same loss scale.
 
         Args:
@@ -64,16 +64,23 @@ class LossScaler:
         if lr_scheduler is not None:
             self.lr_schedulers.append(lr_scheduler)
 
-    def loss_scale(self, loss : torch.Tensor) -> torch.Tensor:
+    def __call__(self, loss : torch.Tensor) -> torch.Tensor:
         """
         Backward with loss scale.
 
         Args:
             loss (torch.Tensor): loss
         """
-        return loss * (self.loss_scale / self.world_size)
+        return loss * (self.loss_scale / config['world_size'])
 
-    def optim_step(self):
+    def zero_grad(self):
+        """
+        This is a helper function to call optimizer.zero_grad()
+        """
+        for optimizer in self.optimizers:
+            optimizer.zero_grad()
+
+    def step(self):
         """
         Backward with loss scale.
         Synchronize streams before optimizer steps.
@@ -90,23 +97,22 @@ class LossScaler:
             has_overflow = False
             for optimizer in self.optimizers:
                 try:
-                    self._check_overflow(optimizer.param_groups)
+                    check_overflow(optimizer.param_groups)
                 except OverflowError:
                     has_overflow = True
                     break
             if has_overflow:
                 print_rank("Gradient overflow, change scale from %lf to %lf" % (self.loss_scale, self.loss_scale / self.loss_scale_factor))
                 self._justify_scale(self.loss_scale / self.loss_scale_factor)
-                for optimizer in optimizers:
-                    optimizer.zero_grad()
+                self.zero_grad()
                 return
                 
-        for optimizer, lr_scheduler in zip(optimizers, lr_schedulers):
+        for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
             if not optimizer._bmtrain_optimizer:
                 grad_rescale(optimizer.param_groups)
                 optimizer.step()
             else:
-                optimizer.step(self.loss_scale)
+                optimizer.step(scale=self.loss_scale)
 
             if lr_scheduler is not None:
                 lr_scheduler.step()
@@ -135,7 +141,7 @@ class LossScaler:
         Examples:
             >>> optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters())
             >>> loss_scaler = bmt.optim.LossScaler()
-            >>> loss_scaler.add(optimizer)
+            >>> loss_scaler.add_optimizer(optimizer)
             >>> # ...
             >>> # backward_step()
             >>> loss_scaler.clip_grad_norm(optimizer.param_groups, max_norm=1.0, norm_type=2)
@@ -170,5 +176,5 @@ class LossScaler:
             if hasattr(optimizer, "_on_justify_scale"):
                 optimizer._on_justify_scale(self.loss_scale, scale)
         self.loss_scale = scale
-        self.step_since_last_scale = 0
+        self.steps_since_last_scale = 0
 
