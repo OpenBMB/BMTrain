@@ -12,7 +12,7 @@ def check_overflow(param_groups):
     has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
     for group in param_groups:
         for p in group['params']:
-            if p.grad is not None and p.dtype == torch.half: # TODO support other types?
+            if p.grad is not None and p.dtype == torch.half: # TODO support other types
                 G.f_has_inf_nan(p.grad, has_inf_or_nan)
 
     if "comm" in config:
@@ -108,11 +108,11 @@ class LossScaler:
                 return
                 
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
-            if not optimizer._bmtrain_optimizer:
-                grad_rescale(optimizer.param_groups)
-                optimizer.step()
-            else:
+            if hasattr(optimizer, "_bmtrain_optimizer") and optimizer._bmtrain_optimizer:
                 optimizer.step(scale=self.loss_scale)
+            else:
+                grad_rescale(optimizer.param_groups, self.loss_scale)
+                optimizer.step()
 
             if lr_scheduler is not None:
                 lr_scheduler.step()
