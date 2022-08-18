@@ -255,7 +255,7 @@ class CheckpointBlockContext:
             begin = param["begin"]
             end = param["end"]
             param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self.block._storage_params[kw_name].storage(), begin, end)
-            if requires_grad and param["parameter"].requires_grad:
+            if param["parameter"].requires_grad and self.block._storage_params[kw_name].grad is not None:
                 param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self.block._storage_params[kw_name].grad.storage(), begin, end)
         if self.flag == 1:
             for i in self._param_buffer:
