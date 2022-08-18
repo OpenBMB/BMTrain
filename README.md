@@ -276,6 +276,50 @@ In addition, BMTrain also provides the common LRScheduler in the `bmtrain.lr_sch
 ### Part 4: Training Loop
 
 ```python
+# create a new instance of loss scaler
+loss_scaler = bmtrain.optim.LossScaler()
+# let loss_scaler handle all the optimizer and (optional) their corresponding lr_scheduler
+loss_scaler.add_optimizer(optimizer, lr_scheduler)
+# add_optimizer can be called multiple times to add other optimizers.
+
+for iteration in range(1000):
+    # ... load data for each rank ...
+
+    # zero grad
+    loss_scaler.zero_grad() # calling zero_grad for each optimizer
+
+    # forward
+    pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
+    logits = model(
+        enc_input,
+        pos,
+        pos < enc_length[:, None]
+    )
+    batch, seq_len, vocab_out_size = logits.size()
+
+    loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
+    
+    global_loss = bmtrain.sum_loss(loss).item() # sum the loss across all ranks
+
+    # loss scale and backward
+    loss = loss_scaler(loss)
+    loss.backward()
+
+    # optimizer step
+    loss_scaler.step()
+
+    # ... save checkpoint or print logs ...
+```
+
+The training loop part will be slightly longer, but just like a normal training loop, you don't need to adapt much to distributed training.
+
+You can follow the comments in the code to get an idea of what each section of code is doing.
+
+The only additional note is `loss_scaler`, *loss scale* is the technique widely used in mixed precision training to prevent gradient underflow by adding `loss_scaler(loss)` to scale the `loss` before backward. When using loss scaling, some details in optimizers should be adjusted. We have implemented all those details needed in `loss_scaler`. What you need is just letting `loss_scaler` to handle all the optimizers by `add_optimizer`, and letting `loss_scaler` do `zero_grad()` and `step()` instead.
+
+If you are not using the fused optimizer in BMTrain, you can train without `loss_scaler`. The code will be changed as below:
+
+```python
 for iteration in range(1000):
     # ... load data for each rank ...
 
@@ -295,8 +339,7 @@ for iteration in range(1000):
     
     global_loss = bmtrain.sum_loss(loss).item() # sum the loss across all ranks
 
-    # loss scale and backward
-    loss = optimizer.loss_scale(loss)
+    # backward
     loss.backward()
 
     # optimizer step
@@ -305,11 +348,7 @@ for iteration in range(1000):
     # ... save checkpoint or print logs ...
 ```
 
-The training loop part will be slightly longer, but just like a normal training loop, you don't need to adapt much to distributed training.
-
-You can follow the comments in the code to get an idea of what each section of code is doing.
-
-The only additional note is `optimizer.loss_scale`, *loss scale* is the technique that widely used in mixed precision training to prevent gradient underflow. If you are not using the fused optimizer in BMTrain, you can remove this statement.
+Note that `bmtrain.optim_step` should be used instead of directly calling `optimizer.step()` and `lr_scheduler.step()`.
 
 <div id="performance"></div>
 

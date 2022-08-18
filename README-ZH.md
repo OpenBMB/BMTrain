@@ -273,6 +273,50 @@ BMTrain 支持**所有** PyTorch 原生的优化器和损失函数，同时你�
 ### 第 4 部分: 训练
 
 ```python
+# 新建损失缩放器实例
+loss_scaler = bmtrain.optim.LossScaler()
+# 将所有的 optimzer 及(可选)其对应的 lr_scheduler 收入损失缩放器管理。
+loss_scaler.add_optimizer(optimizer, lr_scheduler)
+# 可以再次调用 add_optimizer 加入其他优化器
+
+for iteration in range(1000):
+    # ... 为每个rank加载数据 ...
+
+    # 梯度清零
+    loss_scaler.zero_grad() # 为每个 optimizer 调用 zero_grad
+
+    # 前向传播
+    pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
+    logits = model(
+        enc_input,
+        pos,
+        pos < enc_length[:, None]
+    )
+    batch, seq_len, vocab_out_size = logits.size()
+
+    loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
+    
+    global_loss = bmtrain.sum_loss(loss).item() # 聚合所有rank上的损失
+
+    # 损失缩放和反向传播
+    loss = loss_scaler(loss)
+    loss.backward()
+
+    # 更新参数
+    loss_scaler.step()
+
+    # ... 保存checkpoint、打印日志 ...
+```
+
+这部分代码略有些长，但写起来就像常见的训练代码一样，你不需要为分布式训练调整太多的代码。
+
+你可以根据代码中的注释来了解各部分代码的作用。
+
+唯一需要说明的是 `loss_scaler`，**损失缩放**是混合精度训练中的一项常用技术，需要在反向传播前通过 `loss_scaler(loss)` 对 `loss` 进行放缩，用于避免梯度下溢。在使用损失所放后，优化器的 `step()` 等步骤需要有一些细节上的调整。我们在 `loss_scaler` 帮你实现了这些细节, 你只需要通过 `add_optimizer` 将优化器和学习率调整策略收入 `loss_scaler` 管理，并由 `loss_scaler` 代为执行 `zero_grad()` 和 `step()` 操作。
+
+如果你没有使用 BMTrain 中的融合优化器，你可以不用 `loss_scaler`, 相应的代码修改为:
+
+```python
 for iteration in range(1000):
     # ... 为每个rank加载数据 ...
 
@@ -292,8 +336,7 @@ for iteration in range(1000):
     
     global_loss = bmtrain.sum_loss(loss).item() # 聚合所有rank上的损失
 
-    # 损失缩放和反向传播
-    loss = optimizer.loss_scale(loss)
+    # 反向传播
     loss.backward()
 
     # 更新参数
@@ -302,11 +345,7 @@ for iteration in range(1000):
     # ... 保存checkpoint、打印日志 ...
 ```
 
-这部分代码略有些长，但写起来就像常见的训练代码一样，你不需要为分布式训练调整太多的代码。
-
-你可以根据代码中的注释来了解各部分代码的作用。
-
-唯一需要说明的是 `optimizer.loss_scale`，损失缩放是混合精度训练中的一项常用技术，用于避免梯度下溢。如果你没有使用 BMTrain 中的融合优化器，你可以删除这行代码。
+需要说明的是最后更新参数时，需要使用 `bmtrain.optim_step`, 而不能直接使用 `optimizer.step()` 和 `lr_scheduler.step()`。
 
 <div id="性能"></div>
 
