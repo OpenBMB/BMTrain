@@ -3,6 +3,7 @@
 
 ncclInt8       = 0
 ncclChar       = 0
+ncclBool       = 0
 ncclUint8      = 1
 ncclInt32      = 2
 ncclInt        = 2
@@ -15,7 +16,6 @@ ncclFloat32    = 7
 ncclFloat      = 7
 ncclFloat64    = 8
 ncclDouble     = 8
-
 
 ### ncclRedOp_t
 

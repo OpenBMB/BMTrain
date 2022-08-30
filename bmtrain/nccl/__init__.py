@@ -38,7 +38,8 @@ def dtype2nccl(dtype : torch.dtype) -> int:
         torch.float32 : ncclFloat32,
         torch.float : ncclFloat,
         torch.float64 : ncclFloat64,
-        torch.double : ncclDouble
+        torch.double : ncclDouble,
+        torch.bool : ncclBool
     }
     if dtype not in MAP:
         raise TypeError("Unsupport dtype %s" % dtype)
@@ -83,9 +84,21 @@ def commDestroy(comm : NCCLCommunicator):
     """
     C.ncclCommDestroy(comm.ptr)
     comm._destroy_ptr()
+def commCount(comm : NCCLCommunicator):
+    """NCCL API: `ncclCommCount <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclcommcount>`_
 
+    Args:
+        comm (NCCLCommunicator): NCCL communicator.
+    """
+    return C.ncclCommCount(comm.ptr)
 ### collective
+def commRank(comm : NCCLCommunicator):
+    """NCCL API: `ncclCommUserRank <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclCommUserRank>`_
 
+    Args:
+        comm (NCCLCommunicator): NCCL communicator.
+    """
+    return C.ncclCommUserRank(comm.ptr)
 def allReduce(
         src : torch.storage._StorageBase,
         dst : torch.storage._StorageBase,
@@ -124,7 +137,45 @@ def allReduce(
         comm.ptr,
         torch.cuda.current_stream().cuda_stream
     )
+def send(src : torch.storage._StorageBase,
+         peer : int,
+         comm : NCCLCommunicator
+    ):
+    """NCCL API: `ncclsend <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/p2p.html#ncclsend>`_
 
+        Args:
+            src (torch.storage._StorageBase): Source buffer.
+            peer (int): rank peer needs to call ncclRecv
+            comm (NCCLCommunicator): NCCL communicator.
+    """
+
+    sendbuff = src.data_ptr()
+    count = src.size()
+    datatype = dtype2nccl(src.dtype)
+    C.ncclSend(
+        sendbuff,
+        count,
+        datatype,
+        peer,
+        comm.ptr,
+        torch.cuda.current_stream().cuda_stream
+    )
+def recv(dst : torch.storage._StorageBase,
+         peer : int,
+         comm : NCCLCommunicator
+        ):
+    recvbuff = dst.data_ptr()
+    count = dst.size()
+    datatype = dtype2nccl(dst.dtype)
+    C.ncclRecv(
+        recvbuff,
+        count,
+        datatype,
+        peer,
+        comm.ptr,
+        torch.cuda.current_stream().cuda_stream
+    )
+    
 def broadcast(
         src : torch.storage._StorageBase,
         dst : torch.storage._StorageBase,
@@ -221,7 +272,6 @@ def allGather(
     recvbuff = dst.data_ptr()
     sendcount = src.size()
     datatype = dtype2nccl(src.dtype)
-
     assert dst.size() % sendcount == 0, "Buffer size not aligned"
     C.ncclAllGather(
         sendbuff, 
