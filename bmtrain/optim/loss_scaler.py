@@ -51,7 +51,7 @@ class LossScaler:
     def add_optimizer(
         self,
         optimizer: torch.optim.Optimizer,
-        lr_scheduler: Optional[WarmupLRScheduler],
+        lr_scheduler: Optional[WarmupLRScheduler] = None,
     ):
         """Add optimizer and (optional) its corresponding lr_scheduler into loss_scaler.
         All optimizers in the same loss_scaler share the same loss scale.
@@ -61,8 +61,7 @@ class LossScaler:
             lr_scheduler (Optional[WarmupLRScheduler]): A warmup lr scheduler, e.g. bmt.lr_scheduler.Noam
         """
         self.optimizers.append(optimizer)
-        if lr_scheduler is not None:
-            self.lr_schedulers.append(lr_scheduler)
+        self.lr_schedulers.append(lr_scheduler)
 
     def __call__(self, loss : torch.Tensor) -> torch.Tensor:
         """
