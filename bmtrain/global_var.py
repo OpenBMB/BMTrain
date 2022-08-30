@@ -6,13 +6,15 @@ class ConfigMap(TypedDict):
     world_size : int
     local_size : int
     zero_level : int
+    pipe_size : int
+    num_micro_batches : int
     calc_stream : torch.cuda.Stream
     load_stream : torch.cuda.Stream
     load_event : torch.cuda.Event
     barrier_stream : torch.cuda.Stream
     loss_scale_factor : float
     loss_scale_steps : int
-
+    topology : 'topology'
     gradient_inspect : bool
     initialized : bool
 

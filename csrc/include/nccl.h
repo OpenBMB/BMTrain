@@ -351,6 +351,7 @@ ncclResult_t pncclGroupStart();
 ncclResult_t  ncclGroupEnd();
 ncclResult_t pncclGroupEnd();
 
+
 #ifdef __cplusplus
 } // end extern "C"
 #endif
