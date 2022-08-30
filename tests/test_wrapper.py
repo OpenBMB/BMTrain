@@ -216,8 +216,11 @@ def main():
             break
     
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2, scale=2**20)
+    optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
+
+    loss_scaler = bmt.optim.LossScaler(loss_scale=2**20)
+    loss_scaler.add_optimizer(optimizer, lr_scheduler)
 
     bmt.synchronize()
     
@@ -227,7 +230,7 @@ def main():
     for iteration in range(1000):
         # load data
         st = time.time()
-        optimizer.zero_grad()
+        loss_scaler.zero_grad()
 
         with bmt.inspect.inspect_tensor() as inspector:
             pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
@@ -242,7 +245,7 @@ def main():
         
             global_loss = bmt.sum_loss(loss).item()
 
-            loss = optimizer.loss_scale(loss)
+            loss = loss_scaler(loss)
             loss.backward()
         
         # print inspected tensors in the forward & backward pass
@@ -260,7 +263,7 @@ def main():
             )
         
 
-        bmt.optim_step(optimizer, lr_scheduler)
+        loss_scaler.step()
 
         # record time and loss
         iteration_time = time.time() - st
@@ -275,7 +278,7 @@ def main():
                 global_loss,
                 avg_loss_recorder.value,
                 lr_scheduler.current_lr,
-                optimizer.scale,
+                loss_scaler.loss_scale,
                 avg_time_recorder.value
             )
         )
