@@ -1,15 +1,19 @@
+from utils import *
+
 import bmtrain as bmt
 import torch
 
-def main():
-    bmt.init_distributed()
+def test_main():
     x = torch.full((1,), bmt.rank() + 1, dtype=torch.half, device="cuda").requires_grad_(True)
     y = bmt.distributed.all_reduce(x, "prod").view(-1)
-    bmt.print_rank(y)
     loss = (y * y).sum() / 2
     loss.backward()
-    print(x.grad)
-
+    ref = y
+    for i in range(bmt.world_size()):
+        if i != bmt.rank(): ref *= i+1
+    assert_eq(x.grad, ref)
 
 if __name__ == "__main__":
-    main()
+    bmt.init_distributed()
+
+    test_main()

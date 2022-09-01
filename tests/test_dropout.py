@@ -1,3 +1,5 @@
+from utils import *
+
 import torch
 import bmtrain as bmt
 
@@ -8,7 +10,6 @@ class InnerModule(bmt.DistributedModule):
         self.drop = torch.nn.Dropout(p=0.5)
     
     def forward(self, x):
-        bmt.print_rank(x)
         return self.drop(x)
 
 class OutterModule(bmt.DistributedModule):
@@ -21,17 +22,22 @@ class OutterModule(bmt.DistributedModule):
         ])
     
     def forward(self, x):
-        bmt.print_rank(self.training)
         return self.blk(x)
 
-def main():
-    bmt.init_distributed()
-
+def test_main():
     model = OutterModule()
 
-    x = torch.ones(32, device="cuda")
-    y = model(x)
-    bmt.print_rank(y)
+    for _ in range(5):
+        model.train()
+        x = torch.ones(32, device="cuda")
+        y = model(x)
+        assert_neq(x.numel()-y.nonzero().size(0), 0)
+
+        model.eval()
+        x = torch.ones(32, device="cuda")
+        y = model(x)
+        assert_eq(x.numel()-y.nonzero().size(0), 0)
 
 if __name__ == "__main__":
-    main()
+    bmt.init_distributed()
+    test_main()
