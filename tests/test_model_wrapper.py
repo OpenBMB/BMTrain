@@ -210,6 +210,9 @@ def test_main():
     pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
     logits = model(enc_input, pos, pos < enc_length[:, None])
     bmt_logits = bmt_model(enc_input, pos, pos < enc_length[:, None])
+    print(logits)
+    bmt.synchronize()
+    print(bmt_logits)
     assert_eq((logits==bmt_logits).all(), True)
 
 if __name__ == '__main__':

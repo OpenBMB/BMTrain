@@ -3,12 +3,15 @@ from tqdm import tqdm
 
 
 tq = tqdm([
+    ("requires_grad", 1),
+    ("has_inf_nan", 1),
+    ("dropout", 1),
+    ("loss_func", 1),
+
+    ("middle_hidden", 4),
     ("model_wrapper", 4),
-    # ("send_recv", 4),
-    # ("has_inf_nan", 1),
-    # ("dropout", 1),
-    # ("nccl_backward", 4),
-    # ("loss_func", 1)
+    ("send_recv", 4),
+    ("nccl_backward", 4),
 ])
 
 for t, num_gpu in tq:
@@ -17,4 +20,4 @@ for t, num_gpu in tq:
     command = f"{PREFIX} test_{t}.py {SUFFIX}"
     completedProc = subprocess.run(command, shell=True)
     assert completedProc.returncode == 0, f"test {t} failed, see test_log.txt for more details."
-    print(f"finish testing {t}")       
+    print(f"finish testing {t}")

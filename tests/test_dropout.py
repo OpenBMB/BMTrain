@@ -31,11 +31,13 @@ def test_main():
         model.train()
         x = torch.ones(32, device="cuda")
         y = model(x)
+        print(y)
         assert_neq(x.numel()-y.nonzero().size(0), 0)
 
         model.eval()
         x = torch.ones(32, device="cuda")
         y = model(x)
+        print(y)
         assert_eq(x.numel()-y.nonzero().size(0), 0)
 
 if __name__ == "__main__":
