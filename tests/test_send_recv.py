@@ -1,27 +1,19 @@
-import bmtrain as bmt
+from utils import *
+
 import torch
+import bmtrain as bmt
 from bmtrain.global_var import config
-from bmtrain.pipe_comm import send_activations, recv_activations, gather_input
-from bmtrain import nccl
-from torch.distributed.distributed_c10d import recv
-from time import sleep
-def test_send_tensor():
-    bmt.init_distributed()
-    current_stream = torch.cuda.current_stream()
-    groups = [0,2]
-    rank = config['rank']
-def test_gather_input():
-    bmt.init_distributed(pipe_size=2)
-    if config['topology'].get_group_id("pipe") == 0:
-        a = torch.ones((2,1))
+
+def test_send_recv():
+    if config["topology"].stage_id == 0:
+        a = torch.ones((2,1)) * (config["zero_rank"]+1)
+        bmt.distributed.send_activations(a.cuda(), 1, config["pipe_comm"])
     else:
-        a = torch.zeros((2,1))
-    res = gather_input(a.cuda(),config['pipe_comm'])
-    if config['topology'].get_group_rank("pipe") == 0:
-        print(res)
-        
-def main():
-    test_send_tensor()
+        ref = torch.ones((2,1)) * (config["zero_rank"]+1)
+        a = bmt.distributed.recv_activations(0, config["pipe_comm"])
+        assert_eq((a == ref.cuda()).all(), True)
 
 if __name__ == '__main__':
-    main()
+    bmt.init_distributed(pipe_size=2)
+
+    test_send_recv()

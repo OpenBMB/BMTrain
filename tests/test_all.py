@@ -3,7 +3,10 @@ from tqdm import tqdm
 
 
 tq = tqdm([
-    ("dropout", 1),
+    ("model_wrapper", 4),
+    # ("send_recv", 4),
+    # ("has_inf_nan", 1),
+    # ("dropout", 1),
     # ("nccl_backward", 4),
     # ("loss_func", 1)
 ])

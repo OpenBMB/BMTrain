@@ -1,3 +1,5 @@
+from utils import *
+
 from typing import Optional
 import torch
 import math
@@ -169,11 +171,7 @@ class GPT(torch.nn.Module):
 
         return logits
 
-def main():
-    bmt.init_distributed(
-        seed=0,
-    )
-
+def test_main():
     model = GPT(
         num_layers=8,
         vocab_size=10240, 
@@ -186,16 +184,10 @@ def main():
         dtype=torch.half
     )
 
-    model.load_state_dict(torch.load("../example/ckpt-0.pt"))
+    bmt_model = bmt.BMTrainModelWrapper(model)
+    model = model.cuda()
 
-    model = bmt.BMTrainModelWrapper(model)
-
-    bmt.print_rank("Model memory")
-    bmt.print_rank(torch.cuda.memory_summary())
-    bmt.synchronize()
-
-    # data
-    # generate dummy data for each rank
+    # use the break if i == bmt.rank() to generate different data on different rank
     torch.manual_seed(1234)
     batch_size = 2
     seq_len = 512
@@ -214,80 +206,13 @@ def main():
 
         if i == bmt.rank():
             break
-    
-    loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
-    lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 
-    loss_scaler = bmt.optim.LossScaler(loss_scale=2**20)
-    loss_scaler.add_optimizer(optimizer, lr_scheduler)
-
-    bmt.synchronize()
-    
-    avg_time_recorder = bmt.utils.AverageRecorder()
-    avg_loss_recorder = bmt.utils.AverageRecorder()
-
-    for iteration in range(1000):
-        # load data
-        st = time.time()
-        loss_scaler.zero_grad()
-
-        with bmt.inspect.inspect_tensor() as inspector:
-            pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
-            logits = model(
-                enc_input,
-                pos,
-                pos < enc_length[:, None]
-            )
-            batch, seq_len, vocab_out_size = logits.size()
-
-            loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
-        
-            global_loss = bmt.sum_loss(loss).item()
-
-            loss = loss_scaler(loss)
-            loss.backward()
-        
-        # print inspected tensors in the forward & backward pass
-        # print parameters of the model
-        if iteration % 100 == 0:
-            bmt.print_rank(
-                bmt.inspect.format_summary(
-                    inspector.get_summary()
-                )
-            )
-            bmt.print_rank(
-                bmt.inspect.format_summary(
-                    bmt.inspect.inspect_model(model, "*")
-                )
-            )
-        
-
-        loss_scaler.step()
-
-        # record time and loss
-        iteration_time = time.time() - st
-
-        avg_time_recorder.record(iteration_time)
-        avg_loss_recorder.record(global_loss)
-
-        # print time and loss
-        bmt.print_rank(
-            "| Iter: {:6d} | loss: {:.4f} average_loss: {:.4f} | lr: {:.4e} scale: {:10.4f} | time: {:.4f}".format(
-                iteration,
-                global_loss,
-                avg_loss_recorder.value,
-                lr_scheduler.current_lr,
-                loss_scaler.loss_scale,
-                avg_time_recorder.value
-            )
-        )
-
-        # save model
-        if iteration % 1000 == 0:
-            bmt.save(model, "ckpt-%d.pt" % iteration)
-    
-    bmt.save(model, "checkpoint.pt")
+    pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
+    logits = model(enc_input, pos, pos < enc_length[:, None])
+    bmt_logits = bmt_model(enc_input, pos, pos < enc_length[:, None])
+    assert_eq((logits==bmt_logits).all(), True)
 
 if __name__ == '__main__':
-    main()
+    bmt.init_distributed(seed=0)
+
+    test_main()
