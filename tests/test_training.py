@@ -236,14 +236,17 @@ def sub_train_torch(model, loss_func_cls, optimizer_cls):
         loss = optim_manager.loss_scale * loss
         loss.backward()
 
+        grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=10.0)
+
         optim_manager.step()
 
-        bmt.print_rank("| Iter: {:6d} | loss: {:.4f} {:.4f} | lr: {:.4e} scale: {:10.4f}".format(
+        bmt.print_rank("| Iter: {:6d} | loss: {:.4f} {:.4f} | lr: {:.4e} scale: {:10.4f} | grad_norm: {:.4f} |".format(
             iter,
             global_loss,
             loss,
             lr_scheduler.current_lr,
             optim_manager.loss_scale,
+            grad_norm,
         ))
         logs.append(global_loss)
 
@@ -294,14 +297,17 @@ def sub_train(model, loss_func_cls, optimizer_cls):
 
         optim_manager.backward(loss)
 
+        grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=10.0)
+
         optim_manager.step()
 
-        bmt.print_rank("| Iter: {:6d} | loss: {:.4f} {:.4f} | lr: {:.4e} scale: {:10.4f}".format(
+        bmt.print_rank("| Iter: {:6d} | loss: {:.4f} {:.4f} | lr: {:.4e} scale: {:10.4f} | grad_norm: {:.4f} |".format(
             iter,
             global_loss,
             loss,
             lr_scheduler.current_lr,
             optim_manager.loss_scale,
+            grad_norm,
         ))
         logs.append(global_loss)
 
