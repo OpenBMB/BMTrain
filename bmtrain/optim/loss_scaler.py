@@ -70,7 +70,7 @@ class LossScaler:
         Args:
             loss (torch.Tensor): loss
         """
-        return loss * (self.loss_scale * config["pipe_size"] / config['world_size'])
+        return loss * (self.loss_scale / config['world_size'])
 
     def zero_grad(self):
         """
@@ -146,7 +146,7 @@ class LossScaler:
             >>> loss_scaler.clip_grad_norm(optimizer.param_groups, max_norm=1.0, norm_type=2)
 
         """
-        scale = self.loss_scale * config['pipe_size'] / config['world_size']
+        scale = self.loss_scale / config['world_size']
         grads = []
         parameters = [p for group in param_groups for p in group['params']]
         for p in parameters:
