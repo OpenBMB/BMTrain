@@ -276,19 +276,16 @@ In addition, BMTrain also provides the common LRScheduler in the `bmtrain.lr_sch
 ### Part 4: Training Loop
 
 ```python
-# create a new instance of loss scaler
-loss_scaler = bmtrain.optim.LossScaler()
-# let loss_scaler handle all the optimizer and (optional) their corresponding lr_scheduler
-loss_scaler.add_optimizer(optimizer, lr_scheduler)
+# create a new instance of optimizer manager
+optim_manager = bmtrain.optim.OptimManager()
+# let optim_manager handle all the optimizer and (optional) their corresponding lr_scheduler
+optim_manager.add_optimizer(optimizer, lr_scheduler)
 # add_optimizer can be called multiple times to add other optimizers.
 
 for iteration in range(1000):
     # ... load data for each rank ...
 
-    # zero grad
-    loss_scaler.zero_grad() # calling zero_grad for each optimizer
-
-    # forward
+    # forward pass and calculate loss
     pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
     logits = model(
         enc_input,
@@ -299,14 +296,19 @@ for iteration in range(1000):
 
     loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
     
-    global_loss = bmtrain.sum_loss(loss).item() # sum the loss across all ranks
+    global_loss = bmtrain.sum_loss(loss).item() # sum the loss across all ranks. This is only used for the training log
+
+    # zero grad
+    optim_manager.zero_grad() # calling zero_grad for each optimizer
+
+    # clip grad norm
+    grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=1.0)
 
     # loss scale and backward
-    loss = loss_scaler(loss)
-    loss.backward()
+    optim_manager.backward()
 
     # optimizer step
-    loss_scaler.step()
+    optim_manager.step()
 
     # ... save checkpoint or print logs ...
 ```
@@ -315,9 +317,12 @@ The training loop part will be slightly longer, but just like a normal training 
 
 You can follow the comments in the code to get an idea of what each section of code is doing.
 
-The only additional note is `loss_scaler`, *loss scale* is the technique widely used in mixed precision training to prevent gradient underflow by adding `loss_scaler(loss)` to scale the `loss` before backward. When using loss scaling, some details in optimizers should be adjusted. We have implemented all those details needed in `loss_scaler`. What you need is just letting `loss_scaler` to handle all the optimizers by `add_optimizer`, and letting `loss_scaler` do `zero_grad()` and `step()` instead.
+The only additional note is `optimizer`. After using BMTrain, some details in optimizers should be adjusted. We have implemented all those details needed in `optim_manager`. What you need is just letting `optim_manager` to handle all the optimizers by `add_optimizer`, and letting `optim_manager` do `zero_grad()`, `backward()`, `clip_grad_norm()` and `step()` instead.
 
-If you are not using the fused optimizer in BMTrain, you can train without `loss_scaler`. The code will be changed as below:
+If you are not using the mixed-precision training, you can train without `loss_scale`. Just set `loss_scale` to None in the `__init__` function of `OptimManager(loss_scale=None)`, which is also the default.
+
+If you are using mixed-precision training, *loss scale* is the technique widely used in mixed precision training to prevent gradient underflow. By using `optim_manager.backward(loss)` to scale the `loss` before backward and set `loss_scale` to some floating number in the `__init__` function of `OptimManager`。The `loss_scale` would be adjusted adaptively based on the gradient during training.
+
 
 ```python
 for iteration in range(1000):

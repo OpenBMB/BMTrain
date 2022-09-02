@@ -273,19 +273,16 @@ BMTrain 支持**所有** PyTorch 原生的优化器和损失函数，同时你�
 ### 第 4 部分: 训练
 
 ```python
-# 新建损失缩放器实例
-loss_scaler = bmtrain.optim.LossScaler()
-# 将所有的 optimzer 及(可选)其对应的 lr_scheduler 收入损失缩放器管理。
-loss_scaler.add_optimizer(optimizer, lr_scheduler)
+# 新建优化器管理器实例
+optim_manager = bmtrain.optim.OptimManager(loss_scale=1024)
+# 将所有的 optimzer 及(可选)其对应的 lr_scheduler 收入优化器管理器管理。
+optim_manager.add_optimizer(optimizer, lr_scheduler)
 # 可以再次调用 add_optimizer 加入其他优化器
 
 for iteration in range(1000):
     # ... 为每个rank加载数据 ...
 
-    # 梯度清零
-    loss_scaler.zero_grad() # 为每个 optimizer 调用 zero_grad
-
-    # 前向传播
+    # 前向传播并计算梯度
     pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
     logits = model(
         enc_input,
@@ -296,14 +293,19 @@ for iteration in range(1000):
 
     loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
     
-    global_loss = bmtrain.sum_loss(loss).item() # 聚合所有rank上的损失
+    global_loss = bmtrain.sum_loss(loss).item() # 聚合所有rank上的损失, 仅用于输出训练日志
+
+    # 梯度清零
+    optim_manager.zero_grad() # 为每个 optimizer 调用 zero_grad
 
     # 损失缩放和反向传播
-    loss = loss_scaler(loss)
-    loss.backward()
+    optim_manager.backward(loss)
+
+    # 梯度裁剪
+    grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=1.0)
 
     # 更新参数
-    loss_scaler.step()
+    optim_manager.step()
 
     # ... 保存checkpoint、打印日志 ...
 ```
@@ -312,40 +314,11 @@ for iteration in range(1000):
 
 你可以根据代码中的注释来了解各部分代码的作用。
 
-唯一需要说明的是 `loss_scaler`，**损失缩放**是混合精度训练中的一项常用技术，需要在反向传播前通过 `loss_scaler(loss)` 对 `loss` 进行放缩，用于避免梯度下溢。在使用损失所放后，优化器的 `step()` 等步骤需要有一些细节上的调整。我们在 `loss_scaler` 帮你实现了这些细节, 你只需要通过 `add_optimizer` 将优化器和学习率调整策略收入 `loss_scaler` 管理，并由 `loss_scaler` 代为执行 `zero_grad()` 和 `step()` 操作。
+唯一需要说明的是 `optim_manager`。在使用 BMTrain 后，优化器的部分相关操作需要有一些细节上的调整。我们在 `optim_manager` 帮你实现了这些细节, 你只需要通过 `add_optimizer` 将优化器和学习率调整策略收入 `optim_manager` 管理，并由 `optim_manger` 代为执行 `zero_grad()`, `backward()`, `clip_grad_norm()` 和 `step()` 等操作。
 
-如果你没有使用 BMTrain 中的融合优化器，你可以不用 `loss_scaler`, 相应的代码修改为:
+如果你没有使用混合精度训练，你可以不用损失缩放，只需要将 `OptimManger(loss_scale=None)` 构造函数中 `loss_scale` 置为 None 即可, 这也是 `OptimManager` 的默认构造参数。
 
-```python
-for iteration in range(1000):
-    # ... 为每个rank加载数据 ...
-
-    # 梯度清零
-    optimizer.zero_grad()
-
-    # 前向传播
-    pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
-    logits = model(
-        enc_input,
-        pos,
-        pos < enc_length[:, None]
-    )
-    batch, seq_len, vocab_out_size = logits.size()
-
-    loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
-    
-    global_loss = bmtrain.sum_loss(loss).item() # 聚合所有rank上的损失
-
-    # 反向传播
-    loss.backward()
-
-    # 更新参数
-    bmtrain.optim_step(optimizer, lr_scheduler)
-
-    # ... 保存checkpoint、打印日志 ...
-```
-
-需要说明的是最后更新参数时，需要使用 `bmtrain.optim_step`, 而不能直接使用 `optimizer.step()` 和 `lr_scheduler.step()`。
+如果你使用了混合精度训练，**损失缩放**是混合精度训练中的一项常用技术，我们在 `optim_manager.backward(loss)` 帮你对 `loss` 进行了放缩，用于避免梯度下溢。只需要将 `OptimManger` 构造函数中 `loss_scale` 置为一个浮点数即可。 `loss_scale` 会在训练过程中根据梯度进行自适应的调整。
 
 <div id="性能"></div>
 

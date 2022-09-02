@@ -27,20 +27,37 @@ def grad_rescale(param_groups, scale):
             if p.grad is not None and p.requires_grad:
                 p.grad /= scale
 
-class LossScaler:
-    """Loss scaler for mix-precision training
+class OptimManager:
+    """wait cuda stream. Optional: add loss scaler for mix-precision training
 
     Args:
-        loss_scale (float): The initial loss scale.
+        loss_scale (float): The initial loss scale. Default to None for not using loss scaling.
         loss_scale_factor (float): The loss scale factor.
         loss_scale_steps (int): The loss scale steps.
+
+    Examples:
+        >>> optim_manager = bmt.optim.OptimManager(loss_scale=1024)
+        >>> optim_manager.add_optimizer(optimizer1)
+        >>> optim_manager.add_optimizer(optimizer2, lr_scheduler2)
+        >>> for data in dataset:
+        >>>     # forward pass and calculate loss
+        >>>     optim_manager.zero_grad()
+        >>>     optim_manager.backward(loss)
+        >>>     optim_manager.clip_grad_norm(optimizer1.param_groups, max_norm=1.0, norm_type=2)
+        >>>     optim_manager.clip_grad_norm(optimizer2.param_groups, max_norm=2.0, norm_type=2)
+        >>>     optim_manager.step()
     """
     def __init__(self,
-        loss_scale : float = 1,
+        loss_scale : Optional[float] = None,
         loss_scale_factor : float = 2,
         loss_scale_steps : int = 1024,
     ):
-        self.loss_scale = loss_scale
+        if loss_scale is not None:
+            self.loss_scale = loss_scale
+            self.loss_scale_enabled = True
+        else:
+            self.loss_scale = 1
+            self.loss_scale_enabled = False
         self.steps_since_last_scale = 0
         self.loss_scale_factor = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
         self.loss_scale_steps = loss_scale_steps
@@ -53,8 +70,8 @@ class LossScaler:
         optimizer: torch.optim.Optimizer,
         lr_scheduler: Optional[WarmupLRScheduler] = None,
     ):
-        """Add optimizer and (optional) its corresponding lr_scheduler into loss_scaler.
-        All optimizers in the same loss_scaler share the same loss scale.
+        """Add optimizer and (optional) its corresponding lr_scheduler into optim_manager.
+        All optimizers in the same optim_manager share the same loss scale.
 
         Args:
             optim (torch.optim.Optimizer): A pytorch optimizer, e.g. torch.optim.Adam, torch.optim.SGD or bmtrain.optim.AdamOffloadOptimizer
@@ -63,14 +80,21 @@ class LossScaler:
         self.optimizers.append(optimizer)
         self.lr_schedulers.append(lr_scheduler)
 
-    def __call__(self, loss : torch.Tensor) -> torch.Tensor:
+    def loss_scale(self, loss : torch.Tensor) -> torch.Tensor:
+        return loss * (self.loss_scale / config['world_size']) # loss scale
+
+    def backward(self, loss : torch.Tensor):
         """
         Backward with loss scale.
 
         Args:
             loss (torch.Tensor): loss
         """
-        return loss * (self.loss_scale / config['world_size'])
+        loss = self.loss_scale(loss)
+        loss.backward()
+        # some reduce ops of distributed parameter were launched on load stream
+        current_stream = torch.cuda.current_stream()
+        current_stream.wait_stream(config['load_stream'])
 
     def zero_grad(self):
         """
@@ -88,11 +112,7 @@ class LossScaler:
 
         This function can also handle gradient overflow by reducing the loss scale when it occurs.
         """
-        current_stream =  torch.cuda.current_stream()
-        # some reduce ops of distributed parameter were launched on load stream
-        current_stream.wait_stream(config['load_stream'])
-
-        if self.loss_scale > 1:
+        if self.loss_scale_enabled and self.loss_scale > 1:
             has_overflow = False
             for optimizer in self.optimizers:
                 try:
@@ -110,17 +130,20 @@ class LossScaler:
             if hasattr(optimizer, "_bmtrain_optimizer") and optimizer._bmtrain_optimizer:
                 optimizer.step(scale=self.loss_scale)
             else:
-                grad_rescale(optimizer.param_groups, self.loss_scale)
+                if self.loss_scale_enabled:
+                    grad_rescale(optimizer.param_groups, self.loss_scale)
                 optimizer.step()
 
             if lr_scheduler is not None:
                 lr_scheduler.step()
 
-        self.steps_since_last_scale += 1
+        if self.loss_scale_enabled:
+            self.steps_since_last_scale += 1
 
-        if self.steps_since_last_scale >= self.loss_scale_steps:
-            self._justify_scale(self.loss_scale * self.loss_scale_factor)
+            if self.steps_since_last_scale >= self.loss_scale_steps:
+                self._justify_scale(self.loss_scale * self.loss_scale_factor)
 
+        current_stream = torch.cuda.current_stream()
         config['load_stream'].wait_stream(current_stream)
 
     def clip_grad_norm(self, param_groups, max_norm, norm_type=2, eps=1e-6):
@@ -136,17 +159,8 @@ class LossScaler:
 
         Returns:
             Total norm of the parameters (viewed as a single vector).
-
-        Examples:
-            >>> optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters())
-            >>> loss_scaler = bmt.optim.LossScaler()
-            >>> loss_scaler.add_optimizer(optimizer)
-            >>> # ...
-            >>> # backward_step()
-            >>> loss_scaler.clip_grad_norm(optimizer.param_groups, max_norm=1.0, norm_type=2)
-
         """
-        scale = self.loss_scale / config['world_size']
+        scale = self.loss_scale
         grads = []
         parameters = [p for group in param_groups for p in group['params']]
         for p in parameters:
