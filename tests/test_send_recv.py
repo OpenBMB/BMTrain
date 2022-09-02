@@ -14,7 +14,7 @@ def test_send_recv():
         ref = torch.ones((2,1)) * (config["zero_rank"]+1)
         a = bmt.distributed.recv_activations(0, config["pipe_comm"])
         print(f"recv {a}")
-        assert_eq((a == ref.cuda()).all(), True)
+        assert_all_eq(a, ref.cuda())
 
 if __name__ == '__main__':
     bmt.init_distributed(pipe_size=2)

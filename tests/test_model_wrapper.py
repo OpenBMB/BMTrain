@@ -213,7 +213,7 @@ def test_main():
     print(logits)
     bmt.synchronize()
     print(bmt_logits)
-    assert_eq((logits==bmt_logits).all(), True)
+    assert_all_eq(logits, bmt_logits)
 
 if __name__ == '__main__':
     bmt.init_distributed(seed=0)
