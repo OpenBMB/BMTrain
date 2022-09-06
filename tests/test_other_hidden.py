@@ -117,7 +117,7 @@ def manual_seed(seed=33):
     except ModuleNotFoundError:
         pass
 
-def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_middle=False, mix_test=False):
+def sub_run(name, cls, num_layer, dim, batch, seq_len, only_pre=False, only_post=False, mix_test=False):
     manual_seed()
 
     pre = Linear(dim, dim)
@@ -125,7 +125,7 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mid
     ms = [Linear(dim, dim) for i in range(num_layer)]
 
     inp = torch.randn((batch, seq_len, dim)).cuda()
-    last_weight = torch.randn((batch, seq_len, dim)).cuda()
+    last_weight = torch.randn(pre.weight.shape).cuda()*10
     middle_weight = [
         torch.randn((batch, seq_len, dim)).cuda()
         for i in range(len(ms))
@@ -138,31 +138,22 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mid
     m = cls(pre, [m for m in ms], post)
 
     ret = ""
-    if only_last:
-        logits = m(inp)
-        loss = (logits * last_weight).sum()
+    if only_pre:
+        loss = (pre.weight * last_weight).sum()
         loss.backward()
         ret += f"========================only last========================\n"
         ret += bmt.inspect.format_summary(
             bmt.inspect.inspect_model(m, '*')
         )
-    if only_middle:
-        logits, hidden_states = m(inp, return_hidden_states=True)
-        loss = sum([
-            (hidden_state * middle_weight[i]).sum()
-            for i, hidden_state in enumerate(hidden_states)
-        ])
+    if only_post:
+        loss = (post.weight * last_weight).sum()
         loss.backward()
         ret += f"========================only middle========================\n"
         ret += bmt.inspect.format_summary(
             bmt.inspect.inspect_model(m, '*')
         )
     if mix_test:
-        logits, hidden_states = m(inp, return_hidden_states=True)
-        loss = sum([
-            (hidden_state * middle_weight[i]).sum()
-            for i, hidden_state in enumerate(hidden_states)
-        ]) + (logits * last_weight).sum()
+        loss = (pre.weight * last_weight).sum() + (post.weight * last_weight).sum()
         loss.backward()
         ret += f"========================mix========================\n"
         ret += bmt.inspect.format_summary(
@@ -172,9 +163,9 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mid
 
 def run(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
     ret = ""
-    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_last=True)
+    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_pre=True)
     bmt.synchronize()
-    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_middle=True)
+    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_post=True)
     bmt.synchronize()
     ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, mix_test=True)
     bmt.synchronize()
@@ -193,6 +184,5 @@ def test_main():
             assert_eq(r, r2)
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=4)
-
+    bmt.init_distributed(pipe_size=1)
     test_main()
