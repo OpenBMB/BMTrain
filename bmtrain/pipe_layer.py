@@ -14,16 +14,18 @@ from .block_layer import CheckpointBlockContext, CheckpointBlock, round_up, _get
 
 class OpMicroForward(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', layers_dict, save_list, hidden_state, *args):
+    def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', micro_idx, block_ctx_list, layers_dict, save_list, hidden_state, *args):
         with PipeContext(self, hidden_state) as pipe_input:
             hidden_state = pipe_input[0].detach()
             tensors = [arg if torch.is_tensor(arg) else None for arg in args]
             others = [arg if not torch.is_tensor(arg) else None for arg in args]
             ctx.nontensor_inputs = others
             ctx.self = self
+            ctx.micro_idx = micro_idx
+            ctx.block_ctx_list = block_ctx_list
+            ctx.layers_dict = layers_dict
             ctx.save_list = copy.deepcopy(save_list)
             ctx.num_save_needed = save_list[-1][1]+1
-            ctx.layers_dict = layers_dict
             layer_inputs = []
             layer_inspector = []
             cuda_rng_state = []
@@ -32,12 +34,10 @@ class OpMicroForward(torch.autograd.Function):
                     if save_list[idx][0] == idx:
                         layer_inputs.append(hidden_state.detach())
                     cuda_rng_state.append( torch.cuda.get_rng_state() )
-                    if not ctx.layers_dict[idx]:
-                        block_ctx = CheckpointBlockContext(self._modules[str(layer_id)], ctx.layers_dict[idx], 1, pipe=True)
-                    else:
-                        block_ctx = CheckpointBlockContext(self._modules[str(layer_id)], ctx.layers_dict[idx], 2, pipe=True)
                     # gather parameter on load stream
-                    block_ctx.enter()
+                    if ctx.micro_idx == 0:
+                        block_ctx_list[idx] = CheckpointBlockContext(self._modules[str(layer_id)], ctx.layers_dict[idx], 1, pipe=True)
+                        block_ctx_list[idx].enter()
                     # call inner module directly
                     with ScopedTensorInspectorContext() as inspector:
                         hidden_state = self._modules[str(layer_id)]._module._call_impl(hidden_state, *args)
@@ -51,7 +51,8 @@ class OpMicroForward(torch.autograd.Function):
                         }
                         debug.append("_inspect_hidden_states", it)
                     layer_inspector.append(inspector.hidden_states)
-                    block_ctx.exit()
+                    if ctx.micro_idx == config["micros"]-1:
+                        block_ctx_list[idx].exit()
             
             ctx.layer_inspector = layer_inspector
             ctx.cuda_rng_state = cuda_rng_state
@@ -109,11 +110,13 @@ class OpMicroForward(torch.autograd.Function):
                     for idx,layer_id in list(enumerate(ctx.self.layer_ids))[::-1]:
                         torch.cuda.set_rng_state(ctx.cuda_rng_state[idx])
                         ipt = layer_inputs[ctx.save_list[idx][1]].requires_grad_()
-                        block_ctx = CheckpointBlockContext(ctx.self._modules[str(layer_id)], ctx.layers_dict[idx], 2, pipe=True)
-                        block_ctx.enter()
-                        exit_prev(prev_ctx, prev_grad)
-                        prev_ctx = block_ctx
-                        prev_grad = True
+                        if ctx.micro_idx == 0:
+                            ctx.block_ctx_list[idx] = CheckpointBlockContext(ctx.self._modules[str(layer_id)], ctx.layers_dict[idx], 2, pipe=True)
+                            ctx.block_ctx_list[idx].enter()
+                        if ctx.micro_idx == config["micros"]-1:
+                            exit_prev(prev_ctx, prev_grad)
+                            prev_ctx = ctx.block_ctx_list[idx]
+                            prev_grad = True
 
                         with ScopedTensorInspectorContext() as inspector:
                             output = ctx.self._modules[str(layer_id)]._module._call_impl(ipt, *all_inputs)
@@ -135,7 +138,8 @@ class OpMicroForward(torch.autograd.Function):
                         grad_hidden_state = ipt.grad
                         if grad_middle is not None:
                             grad_hidden_state = grad_hidden_state + grad_middle[idx]
-                    exit_prev(prev_ctx, prev_grad)
+                    if ctx.micro_idx == config["micros"]-1:
+                        exit_prev(prev_ctx, prev_grad)
 
             pipe_input[0] = grad_hidden_state
         grads = []
@@ -144,7 +148,7 @@ class OpMicroForward(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None, None, None, pipe_input[0]) + tuple(grads)
+        return (None, None, None, None, None, None, pipe_input[0]) + tuple(grads)
 
 class OpPipeTransformerBlockList(torch.autograd.Function):
     @staticmethod
@@ -152,6 +156,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
         num_micros = config["micros"]
         ctx.self = self
         ctx.num_micros = num_micros
+        block_ctx = [None for _ in range(len(self))]
         layers_dict = [{} for _ in range(len(self))]
         args_list = [[] for _ in range(num_micros)]
         batch_related = args[-1]
@@ -189,7 +194,7 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
             hidden_state_list = hidden_state_list.chunk(num_micros, dim=0)
             for micro_idx, (hidden_state, arg) in enumerate(zip(hidden_state_list, args_list)):
                 placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-                output, middle = OpMicroForward.apply(placeholder, self, layers_dict, save_list, hidden_state, *arg)
+                output, middle = OpMicroForward.apply(placeholder, self, micro_idx, block_ctx, layers_dict, save_list, hidden_state, *arg)
                 outputs.append(output)
                 if self.return_hidden_states:
                     middles.append(middle)
