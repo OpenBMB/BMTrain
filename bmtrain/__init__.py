@@ -8,7 +8,6 @@ from .utils import print_block, print_dict, print_rank, see_memory
 from .synchronize import synchronize, sum_loss, wait_loader, gather_result
 from .checkpointing import checkpoint
 from .block_layer import CheckpointBlock, TransformerBlockList
-from .backward import optim_step
 from .wrapper import BMTrainModelWrapper
 from .pipe_layer import PipelineTransformerBlockList
 from . import debug

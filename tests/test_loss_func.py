@@ -1,8 +1,9 @@
+from utils import *
+
 import torch
 import bmtrain as bmt
 import torch
 import random
-import time
 import copy
 
 def run(x, tgt, loss_func, bigmodel=None, scale=32768, use_float=False):
@@ -13,28 +14,23 @@ def run(x, tgt, loss_func, bigmodel=None, scale=32768, use_float=False):
         if bigmodel is not None:
             bigmodel = bigmodel.float()
     x = x.requires_grad_()
-    # print(torch.cuda.memory_summary())
     if bigmodel is None:
         loss = loss_func(x, tgt)
     else:
         t = bigmodel(x)
         loss = loss_func(t, tgt)
-        # loss = loss_func(bigmodel(x), tgt)
-    # print(torch.cuda.memory_summary())
     (loss * scale).backward()
-    # print(torch.cuda.memory_summary())
     return loss, x.grad
 
 def check(x, tgt, loss_func1, loss_func2, bigmodel=None):
     loss_1, grad_1 = run(x, tgt, loss_func1, bigmodel=bigmodel)
     loss_2, grad_2 = run(x, tgt, loss_func2, bigmodel=bigmodel, use_float=True)
-    assert(grad_1.isnan().sum()==0)
-    assert(grad_2.isnan().sum()==0)
-    print((loss_1 - loss_2).abs().item())
-    print((grad_1 - grad_2).abs().max().item())
-    print()
+    assert_eq(grad_1.isnan().sum(), 0)
+    assert_eq(grad_2.isnan().sum(), 0)
+    assert_lt((loss_1 - loss_2).abs().item(), 1e-5)
+    assert_lt((grad_1 - grad_2).abs().max().item(), 1e-2)
 
-def simple_test():
+def test_simple():
     loss_func1 = bmt.loss.FusedCrossEntropy()
     loss_func2 = torch.nn.CrossEntropyLoss()
 
@@ -83,24 +79,7 @@ def test_inplace():
         tgt = torch.randint(0, C, (N,)).cuda().long()
         check(x, tgt, loss_func1, loss_func2, bigmodel=bigmodel)
 
-
-def benchmark_memory():
-    N = 32 * 512
-    C = 50000
-
-    bigmodel = torch.nn.Linear(1, C).cuda().half()
-    x = torch.randn(N, 1).cuda().half()
-    tgt = torch.randint(0, C, (N,)).cuda().long()
-
-    # loss_func = bmt.loss.FusedCrossEntropy(inplace=True)
-    loss_func = bmt.loss.FusedCrossEntropy(inplace=False)
-    # loss_func = torch.nn.CrossEntropyLoss()
-
-    loss, grad = run(x, tgt, loss_func, bigmodel=bigmodel)
-    print(loss, grad)
-
 if __name__ == "__main__":
     test_other()
     test_inplace()
-    simple_test()
-    # benchmark_memory()
+    test_simple()

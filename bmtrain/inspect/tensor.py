@@ -129,9 +129,9 @@ class InspectTensor:
                     nccl.allReduce(
                         info.storage(),
                         info.storage(),
-                        "avg",
+                        "sum",
                         comm
-                    )
+                    ) / nccl.commCount(comm)
                     x_mean = info[0].cpu().item()
                     x_std = math.sqrt(info[1].cpu().item())
                     grad_mean = None
@@ -146,9 +146,9 @@ class InspectTensor:
                     nccl.allReduce(
                         info.storage(),
                         info.storage(),
-                        "avg",
+                        "sum",
                         comm
-                    )
+                    ) / nccl.commCount(comm)
                     x_mean = info[0].cpu().item()
                     x_std = math.sqrt(info[1].cpu().item())
                     grad_mean = info[2].cpu().item()

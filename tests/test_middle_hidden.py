@@ -1,3 +1,5 @@
+from utils import *
+
 import bmtrain as bmt
 import random
 import torch
@@ -115,7 +117,7 @@ def manual_seed(seed=33):
     except ModuleNotFoundError:
         pass
 
-def sub_test(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_middle=False, mix_test=False):
+def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_middle=False, mix_test=False):
     manual_seed()
 
     pre = Linear(dim, dim)
@@ -135,15 +137,14 @@ def sub_test(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mi
         bmt.init_parameters(m)
     m = cls(pre, [m for m in ms], post)
 
+    ret = ""
     if only_last:
         logits = m(inp)
         loss = (logits * last_weight).sum()
         loss.backward()
-        bmt.print_rank(f"========================{name}:only last========================")
-        bmt.print_rank(
-            bmt.inspect.format_summary(
-                bmt.inspect.inspect_model(m, '*')
-            )
+        ret += f"========================only last========================\n"
+        ret += bmt.inspect.format_summary(
+            bmt.inspect.inspect_model(m, '*')
         )
     if only_middle:
         logits, hidden_states = m(inp, return_hidden_states=True)
@@ -152,11 +153,9 @@ def sub_test(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mi
             for i, hidden_state in enumerate(hidden_states)
         ])
         loss.backward()
-        bmt.print_rank(f"========================{name}:only middle========================")
-        bmt.print_rank(
-            bmt.inspect.format_summary(
-                bmt.inspect.inspect_model(m, '*')
-            )
+        ret += f"========================only middle========================\n"
+        ret += bmt.inspect.format_summary(
+            bmt.inspect.inspect_model(m, '*')
         )
     if mix_test:
         logits, hidden_states = m(inp, return_hidden_states=True)
@@ -165,24 +164,33 @@ def sub_test(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mi
             for i, hidden_state in enumerate(hidden_states)
         ]) + (logits * last_weight).sum()
         loss.backward()
-        bmt.print_rank(f"========================{name}:mix========================")
-        bmt.print_rank(
-            bmt.inspect.format_summary(
-                bmt.inspect.inspect_model(m, '*')
-            )
+        ret += f"========================mix========================\n"
+        ret += bmt.inspect.format_summary(
+            bmt.inspect.inspect_model(m, '*')
         )
+    return ret.replace("None  ", "0.0000") + "\n" # replace for matching None grad with zero_grad
 
-def test(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
-    sub_test(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_last=True)
+def run(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
+    ret = ""
+    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_last=True)
     bmt.synchronize()
-    sub_test(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_middle=True)
+    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_middle=True)
     bmt.synchronize()
-    sub_test(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, mix_test=True)
+    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, mix_test=True)
     bmt.synchronize()
+    return ret
 
-bmt.init_distributed(pipe_size=4)
+def test_main():
+    ret = []
+    ret.append( run("normal", Model_NORMAL) )
+    ret.append( run("block", Model_BLOCK) )
+    ret.append( run("zero", Model_ZERO) )
+    ret.append( run("pipe", Model_PIPE) )
+    for r in ret:
+        bmt.prnit_rank(r)
+    for r in ret:
+        for r2 in ret:
+            assert_eq(r, r2)
 
-test("normal", Model_NORMAL)
-test("block", Model_BLOCK)
-test("zero", Model_ZERO)
-test("pipe", Model_PIPE)
+if __name__ == "__main__":
+    bmt.init_distributed(pipe_size=4)
