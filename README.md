@@ -277,7 +277,7 @@ In addition, BMTrain also provides the common LRScheduler in the `bmtrain.lr_sch
 
 ```python
 # create a new instance of optimizer manager
-optim_manager = bmtrain.optim.OptimManager()
+optim_manager = bmtrain.optim.OptimManager(loss_scale=1024)
 # let optim_manager handle all the optimizer and (optional) their corresponding lr_scheduler
 optim_manager.add_optimizer(optimizer, lr_scheduler)
 # add_optimizer can be called multiple times to add other optimizers.
@@ -301,11 +301,11 @@ for iteration in range(1000):
     # zero grad
     optim_manager.zero_grad() # calling zero_grad for each optimizer
 
-    # clip grad norm
-    grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=1.0)
-
     # loss scale and backward
     optim_manager.backward()
+
+    # clip grad norm
+    grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=1.0)
 
     # optimizer step
     optim_manager.step()
@@ -322,38 +322,6 @@ The only additional note is `optimizer`. After using BMTrain, some details in op
 If you are not using the mixed-precision training, you can train without `loss_scale`. Just set `loss_scale` to None in the `__init__` function of `OptimManager(loss_scale=None)`, which is also the default.
 
 If you are using mixed-precision training, *loss scale* is the technique widely used in mixed precision training to prevent gradient underflow. By using `optim_manager.backward(loss)` to scale the `loss` before backward and set `loss_scale` to some floating number in the `__init__` function of `OptimManager`。The `loss_scale` would be adjusted adaptively based on the gradient during training.
-
-
-```python
-for iteration in range(1000):
-    # ... load data for each rank ...
-
-    # zero grad
-    optimizer.zero_grad()
-
-    # forward
-    pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
-    logits = model(
-        enc_input,
-        pos,
-        pos < enc_length[:, None]
-    )
-    batch, seq_len, vocab_out_size = logits.size()
-
-    loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
-    
-    global_loss = bmtrain.sum_loss(loss).item() # sum the loss across all ranks
-
-    # backward
-    loss.backward()
-
-    # optimizer step
-    bmtrain.optim_step(optimizer, lr_scheduler)
-
-    # ... save checkpoint or print logs ...
-```
-
-Note that `bmtrain.optim_step` should be used instead of directly calling `optimizer.step()` and `lr_scheduler.step()`.
 
 <div id="performance"></div>
 
