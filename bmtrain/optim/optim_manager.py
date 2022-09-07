@@ -80,7 +80,7 @@ class OptimManager:
         self.optimizers.append(optimizer)
         self.lr_schedulers.append(lr_scheduler)
 
-    def loss_scale(self, loss : torch.Tensor) -> torch.Tensor:
+    def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
         return loss * (self.loss_scale / config['world_size']) # loss scale
 
     def backward(self, loss : torch.Tensor):
@@ -90,7 +90,7 @@ class OptimManager:
         Args:
             loss (torch.Tensor): loss
         """
-        loss = self.loss_scale(loss)
+        loss = self.scale_loss(loss)
         loss.backward()
         # some reduce ops of distributed parameter were launched on load stream
         current_stream = torch.cuda.current_stream()

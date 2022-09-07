@@ -13,11 +13,12 @@ tq = tqdm([
     ("loss_func", 1),
 
     ("middle_hidden", 4),
+    ("other_hidden", 4),
     ("model_wrapper", 4),
     ("send_recv", 4),
     ("nccl_backward", 4),
 
-    ("trainging", 4),
+    ("training", 4),
 ])
 
 for t, num_gpu in tq:

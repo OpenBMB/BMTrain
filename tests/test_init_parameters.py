@@ -208,6 +208,7 @@ def test_main():
 
     for i in range(10):
         ret[i] = ( ret[i][0].view(-1), ret[i][1].view(-1) )
+        print(ret[i])
     for i in range(10):
         for j in range(10):
             assert_all_eq(ret[i][0], ret[j][0])
