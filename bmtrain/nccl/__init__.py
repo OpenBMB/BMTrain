@@ -35,6 +35,7 @@ def dtype2nccl(dtype : torch.dtype) -> int:
         torch.int64 : ncclInt64,
         torch.float16 : ncclFloat16,
         torch.half : ncclHalf,
+        torch.bfloat16 : ncclBFloat16,
         torch.float32 : ncclFloat32,
         torch.float : ncclFloat,
         torch.float64 : ncclFloat64,
