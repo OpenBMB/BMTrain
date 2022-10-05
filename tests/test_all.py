@@ -14,7 +14,10 @@ tq = tqdm([
 
     ("middle_hidden", 4),
     ("other_hidden", 4),
+    ("inspector_hidden", 2),
+
     ("model_wrapper", 4),
+
     ("send_recv", 4),
     ("nccl_backward", 4),
 
