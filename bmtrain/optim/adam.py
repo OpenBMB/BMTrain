@@ -110,7 +110,8 @@ class AdamOptimizer(torch.optim.Optimizer):
                             [state['exp_avg']],
                             [state["exp_avg_sq"]],
                             [],
-                            [state["step"]],
+                            [state["step"]] if int(torch.__version__.split('.')[1]) < 12
+                                else [torch.tensor(state["step"])],
                             amsgrad=False,
                             beta1=group['betas'][0],
                             beta2=group['betas'][1],
