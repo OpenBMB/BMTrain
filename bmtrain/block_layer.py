@@ -49,6 +49,8 @@ class OpCheckpointBlock(torch.autograd.Function):
 
         if not isinstance(outputs, list) and not isinstance(outputs, tuple):
             outputs = [outputs]
+        else:
+            outputs = list(outputs)
         return tuple([len(outputs)] + outputs + [hidden_state["tensor"] for hidden_state in inspector.hidden_states])
 
     @staticmethod
