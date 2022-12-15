@@ -29,8 +29,8 @@ class OpMicroForward(torch.autograd.Function):
             layer_inputs = []
             layer_inspector = []
             cuda_rng_state = []
-            with torch.no_grad():
-                for idx,layer_id in enumerate(self.layer_ids):
+            for idx,layer_id in enumerate(self.layer_ids):
+                with torch.no_grad():
                     if save_list[idx][0] == idx:
                         layer_inputs.append(hidden_state.detach())
                     cuda_rng_state.append( torch.cuda.get_rng_state() )
@@ -41,18 +41,17 @@ class OpMicroForward(torch.autograd.Function):
                     # call inner module directly
                     with ScopedTensorInspectorContext() as inspector:
                         hidden_state = self._modules[str(layer_id)]._module._call_impl(hidden_state, *args)
-                    for ith, it in enumerate(inspector.hidden_states):
-                        it["shape"] = ((it["shape"][0] // config['pipe_size'],) + it["shape"][1:])
-                        it["inside_pipe"] = {
-                            "stage_id": self.stage_id,
-                            "stages": self.stages,
-                            "st": (layer_id==self.layer_ids[0] and ith==0),
-                            "ed": (layer_id==self.layer_ids[-1] and ith==len(inspector.hidden_states)-1),
-                        }
-                        debug.append("_inspect_hidden_states", it)
-                    layer_inspector.append(inspector.hidden_states)
                     if ctx.micro_idx == config["micros"]-1:
                         block_ctx_list[idx].exit()
+                for ith, it in enumerate(inspector.hidden_states):
+                    it["inside_pipe"] = {
+                        "stage_id": self.stage_id,
+                        "stages": self.stages,
+                        "st": (layer_id==self.layer_ids[0] and ith==0),
+                        "ed": (layer_id==self.layer_ids[-1] and ith==len(inspector.hidden_states)-1),
+                    }
+                    debug.append("_inspect_hidden_states", it)
+                layer_inspector.append(inspector.hidden_states)
             
             ctx.layer_inspector = layer_inspector
             ctx.cuda_rng_state = cuda_rng_state
@@ -64,12 +63,12 @@ class OpMicroForward(torch.autograd.Function):
             for mid in middle_hiddens:
                 mid.requires_grad_()
             middle_hiddens = torch.stack(middle_hiddens, dim=0)
-            return pipe_input[0], middle_hiddens
         else:
-            return pipe_input[0], None
+            middle_hiddens = None
+        return tuple([pipe_input[0], middle_hiddens] + [hidden_state["tensor"] for hidden_states in ctx.layer_inspector for hidden_state in hidden_states])
 
     @staticmethod
-    def backward(ctx, grad_hidden_state : torch.Tensor, grad_middle : torch.Tensor):
+    def backward(ctx, grad_hidden_state : torch.Tensor, grad_middle : torch.Tensor, *grad_inspector):
         def exit_prev(prev_ctx, prev_grad):
             if prev_ctx is not None:
                 if prev_grad:
@@ -107,7 +106,7 @@ class OpMicroForward(torch.autograd.Function):
                     # overlap load and scatter here
                     prev_ctx = None
                     prev_grad = False
-                    for idx,layer_id in list(enumerate(ctx.self.layer_ids))[::-1]:
+                    for idx, layer_id in list(enumerate(ctx.self.layer_ids))[::-1]:
                         torch.cuda.set_rng_state(ctx.cuda_rng_state[idx])
                         ipt = layer_inputs[ctx.save_list[idx][1]].requires_grad_()
                         if ctx.micro_idx == 0:
@@ -123,23 +122,26 @@ class OpMicroForward(torch.autograd.Function):
 
                         assert len(ctx.layer_inspector[idx]) == len(inspector.hidden_states), "Backward step changed"
                         for j, it in enumerate(inspector.hidden_states):
-                            it["shape"] = ((it["shape"][0] // config['pipe_size'],) + it["shape"][1:])
                             assert it["name"] == ctx.layer_inspector[idx][j]["name"], "Backward step changed"
                             assert it["shape"] == ctx.layer_inspector[idx][j]["shape"], "Backward step changed"
                             assert it["group"] == ctx.layer_inspector[idx][j]["group"], "Backward step changed"
                             
                             # change the tensor in placeholder
-                            ctx.layer_inspector[idx][j]["requires_grad"] = it["requires_grad"]
                             ctx.layer_inspector[idx][j]["tensor"] = it["tensor"]
+                            ctx.layer_inspector[idx][j]["requires_grad"] = it["requires_grad"]
                         torch.autograd.backward(
-                            [output],
-                            [grad_hidden_state]
+                            [output] + [hidden_state["tensor"] for hidden_state in inspector.hidden_states],
+                            [grad_hidden_state] + list(grad_inspector[-len(inspector.hidden_states):]),
                         )
+                        grad_inspector = grad_inspector[:-len(inspector.hidden_states)]
                         grad_hidden_state = ipt.grad
                         if grad_middle is not None:
                             grad_hidden_state = grad_hidden_state + grad_middle[idx]
                     if ctx.micro_idx == config["micros"]-1:
                         exit_prev(prev_ctx, prev_grad)
+                for inspector_hiddens in ctx.layer_inspector:
+                    for it in inspector_hiddens:
+                        debug.append("_inspect_hidden_states", it)
 
             pipe_input[0] = grad_hidden_state
         grads = []
@@ -166,6 +168,9 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
         batch_size = hidden_state.shape[0]
         assert (batch_size * config["pipe_size"]) % num_micros == 0, f'The batch size {(batch_size * config["pipe_size"])} must be divisible by the number of micro_batch {num_micros}'
         input_requires_grad = []
+        inspector_hiddens = []
+        ctx.inspector_hiddens_sep = [0]
+        ctx.micro_inspector = []
         with torch.enable_grad():
             for arg in args:
                 if torch.is_tensor(arg):
@@ -194,10 +199,18 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
             hidden_state_list = hidden_state_list.chunk(num_micros, dim=0)
             for micro_idx, (hidden_state, arg) in enumerate(zip(hidden_state_list, args_list)):
                 placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-                output, middle = OpMicroForward.apply(placeholder, self, micro_idx, block_ctx, layers_dict, save_list, hidden_state, *arg)
+                with ScopedTensorInspectorContext() as inspector:
+                    micro_outputs = OpMicroForward.apply(placeholder, self, micro_idx, block_ctx, layers_dict, save_list, hidden_state, *arg)
+                output, middle = micro_outputs[:2]
                 outputs.append(output)
                 if self.return_hidden_states:
                     middles.append(middle)
+                for it in inspector.hidden_states:
+                    inspector_hiddens.append(it["tensor"])
+                    it["tensor"] = it["tensor"].clone()
+                    debug.append("_inspect_hidden_states", it)
+                ctx.inspector_hiddens_sep.append(len(inspector_hiddens))
+                ctx.micro_inspector.append(inspector.hidden_states)
         if len(batch_related) == 0:
             ctx.batch_related = batch_related_rule
         else:
@@ -229,13 +242,16 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                     middle_hidden = middle_hidden[self.stage_id].clone()
                     middle_hiddens.append(middle_hidden)
                 middle_hiddens = torch.cat(middle_hiddens, dim=0)
-            return last_hidden, middle_hiddens
         else:
-            return last_hidden, None
+            middle_hiddens = None
+
+        ctx.save_for_backward(*inspector_hiddens)
+        return tuple([last_hidden, middle_hiddens] + [it["tensor"] for inspector_hiddens in ctx.micro_inspector for it in inspector_hiddens])
 
 
     @staticmethod
-    def backward(ctx, grad_hidden_state : torch.Tensor, grad_middle : torch.Tensor):
+    def backward(ctx, grad_hidden_state : torch.Tensor, grad_middle : torch.Tensor, *grad_inspectors):
+        inspector_hiddens = ctx.saved_tensors
         ipt = ctx.hidden_state_list
         args_list = ctx.args_list
         input_requires_grad = ctx.input_requires_grad
@@ -248,23 +264,28 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
                 if ctx.self.stage_id == stage_id:
                     grad_middle_state_list = grad_middle_state
 
-            for m in range(ctx.num_micros):
-                output = ctx.output_list[m]
-                middle = ctx.middle_list[m]
-                grad_hidden_state = grad_hidden_state_list[m]
-                grad_middle_state = grad_middle_state_list[m]
+        for m in range(ctx.num_micros):
+            outputs = [ctx.output_list[m]]
+            grad_outputs = [grad_hidden_state_list[m]]
+            if ctx.self.return_hidden_states:
+                outputs.append(ctx.middle_list[m])
+                grad_outputs.append(grad_middle_state_list[m])
+            outputs += list(inspector_hiddens[ctx.inspector_hiddens_sep[m]:ctx.inspector_hiddens_sep[m+1]])
+            grad_outputs += list(grad_inspectors[ctx.inspector_hiddens_sep[m]:ctx.inspector_hiddens_sep[m+1]])
+            with ScopedTensorInspectorContext() as inspector:
                 torch.autograd.backward(
-                    [output, middle],
-                    [grad_hidden_state, grad_middle_state],
+                    outputs,
+                    grad_outputs,
                 )
-        else:
-            for m in range(ctx.num_micros):
-                output = ctx.output_list[m]
-                grad_hidden_state = grad_hidden_state_list[m]
-                torch.autograd.backward(
-                    [output],
-                    [grad_hidden_state],
-                )
+            for j, it in enumerate(inspector.hidden_states):
+                assert it["name"] == ctx.micro_inspector[m][j]["name"], "Backward step changed"
+                assert it["shape"] == ctx.micro_inspector[m][j]["shape"], "Backward step changed"
+                assert it["group"] == ctx.micro_inspector[m][j]["group"], "Backward step changed"
+                
+                # change the tensor in placeholder
+                ctx.micro_inspector[m][j]["tensor"] = it["tensor"]
+                ctx.micro_inspector[m][j]["requires_grad"] = it["requires_grad"]
+
         grads = []
         for idx,requires_grad in enumerate(input_requires_grad):
             if requires_grad:
@@ -342,7 +363,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
         placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
         args = list(args)
         args.append(batch_related)
-        hidden_state, middle_states = OpPipeTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)
+        outputs = OpPipeTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)
+        hidden_state, middle_states = outputs[:2]
         if return_hidden_states:
             return hidden_state, middle_states
         else:
