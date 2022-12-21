@@ -13,7 +13,9 @@ class AdamOptimizer(torch.optim.Optimizer):
     """
     Adam optimizer
     """
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, scale=1, hold_steps=0):
+    _bmtrain_optimizer = True
+
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, hold_steps=0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -29,32 +31,19 @@ class AdamOptimizer(torch.optim.Optimizer):
         super().__init__(params, defaults)
 
         self.load_stream = torch.cuda.Stream()
-        self._scale = scale
-        self._steps_since_last_scale = 0
         self._hold_steps = hold_steps
 
-    @property
-    def scale(self):
-        return self._scale
-
-    @property
-    def steps_since_last_scale(self):
-        return self._steps_since_last_scale
-
-    @torch.no_grad()
-    def justify_scale(self, scale):
-        delta = scale / self._scale
-        self._scale = scale
+    def _on_justify_scale(self, old_scale, new_scale):
+        delta = new_scale / old_scale
         for group in self.param_groups:
             for p in group['params']:
                 state = self.state[p]
                 if len(state) > 0:
                     state['exp_avg'] *= delta
                     state['exp_avg_sq'] *= delta
-        self._steps_since_last_scale = 0
 
     @torch.no_grad()
-    def step(self, closure=None):
+    def step(self, closure=None, scale=1):
         """Performs a single optimization step.
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
@@ -66,21 +55,6 @@ class AdamOptimizer(torch.optim.Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-
-        # check overflow
-        has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None and p.dtype == torch.half:
-                    C.f_has_inf_nan(p.grad, has_inf_or_nan)
-
-        if "comm" in config:
-            nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
-
-        if has_inf_or_nan > 0:
-            raise OverflowError("Gradient overflow")
-
-        self._steps_since_last_scale += 1
 
         # update parameters
         for group in self.param_groups:
@@ -122,7 +96,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                             group['betas'][0], group['betas'][1],
                             group['eps'],
                             0.0 if state["step"] <= self._hold_steps else group['lr'],
-                            self._scale,
+                            scale,
                             group['weight_decay'],
                             state['step']
                         )
@@ -132,11 +106,12 @@ class AdamOptimizer(torch.optim.Optimizer):
                             other_kwargs['maximize'] = False
                         F.adam(
                             [p],
-                            [grad / self._scale],
+                            [grad / scale],
                             [state['exp_avg']],
                             [state["exp_avg_sq"]],
                             [],
-                            [state["step"]],
+                            [state["step"]] if int(torch.__version__.split('.')[1]) < 12
+                                else [torch.tensor(state["step"])],
                             amsgrad=False,
                             beta1=group['betas'][0],
                             beta2=group['betas'][1],
@@ -147,12 +122,6 @@ class AdamOptimizer(torch.optim.Optimizer):
                         )
 
         return loss
-
-    def loss_scale(self, loss : torch.Tensor) -> torch.Tensor:
-        """
-        Backward with loss scale.
-        """
-        return loss * (self.scale * config['pipe_size'] / config['world_size'])
 
     def load_state_dict(self, state_dict: dict) -> None:
         r"""Loads the optimizer state.

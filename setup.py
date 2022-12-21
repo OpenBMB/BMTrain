@@ -73,7 +73,7 @@ else:
 
 setup(
     name='bmtrain',
-    version='0.1.8',
+    version='0.2.0',
     author="Guoyang Zeng",
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",

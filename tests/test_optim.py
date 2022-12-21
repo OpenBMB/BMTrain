@@ -25,8 +25,8 @@ def main():
     model2.load_state_dict(state_dict)
     model3.load_state_dict(state_dict)
 
-    model1 = model1.cuda().half()
-    model2 = model2.cuda().half()
+    model1 = model1.cuda()
+    model2 = model2.cuda()
     model3 = model3.cuda()
     
     opt1 = bmt.optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)

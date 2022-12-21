@@ -29,6 +29,18 @@ class Linear(bmt.DistributedModule):
         ret = F.linear(input, self.weight, self.bias)
         return ret
 
+class L2(bmt.DistributedModule):
+    def __init__(self, dim : int):
+        super().__init__()
+        self.m1 = Linear(dim, dim)
+        self.m2 = Linear(dim, dim)
+
+    def forward(self, x):
+        x = self.m1(x)
+        bmt.inspect.record_tensor(x, "hidden")
+        x = self.m2(x)
+        return x
+
 class Model_ZERO(torch.nn.Module):
     def __init__(self, pre, ms, post) -> None:
         super().__init__()
@@ -117,12 +129,12 @@ def manual_seed(seed=33):
     except ModuleNotFoundError:
         pass
 
-def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_middle=False, mix_test=False):
+def sub_run(name, cls, num_layer, dim, batch, seq_len):
     manual_seed()
 
     pre = Linear(dim, dim)
     post = Linear(dim, dim)
-    ms = [Linear(dim, dim) for i in range(num_layer)]
+    ms = [L2(dim) for i in range(num_layer)]
 
     inp = torch.randn((batch, seq_len, dim)).cuda()
     last_weight = torch.randn((batch, seq_len, dim)).cuda()
@@ -136,63 +148,83 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mid
     for m in ms:
         bmt.init_parameters(m)
     m = cls(pre, [m for m in ms], post)
-
     ret = ""
-    if only_last:
+    with bmt.inspect.inspect_tensor() as inspector:
         logits = m(inp)
-        loss = (logits * last_weight).sum()
+
+    ret += bmt.inspect.format_summary(
+        inspector.get_summary()
+    ) + "\n"
+
+    loss = 0
+    for i in range(len(ms)):
+        loss = loss + (inspector.summary[i]['tensor'] * middle_weight[i]).sum()
+
+    with bmt.inspect.inspect_tensor():
         loss.backward()
-        ret += f"========================only last========================\n"
-        ret += bmt.inspect.format_summary(
-            bmt.inspect.inspect_model(m, '*')
-        )
-    if only_middle:
-        logits, hidden_states = m(inp, return_hidden_states=True)
-        loss = sum([
-            (hidden_state * middle_weight[i]).sum()
-            for i, hidden_state in enumerate(hidden_states)
-        ])
+
+    ret += bmt.inspect.format_summary(
+        bmt.inspect.inspect_model(m, '*')
+    ) + "\n"
+    ret += bmt.inspect.format_summary(
+        inspector.get_summary()
+    ) + "\n"
+
+    with bmt.inspect.inspect_tensor() as inspector:
+        logits = m(inp)
+
+    ret += bmt.inspect.format_summary(
+        inspector.get_summary()
+    ) + "\n"
+
+    loss = (logits * last_weight).sum()
+
+    with bmt.inspect.inspect_tensor():
         loss.backward()
-        ret += f"========================only middle========================\n"
-        ret += bmt.inspect.format_summary(
-            bmt.inspect.inspect_model(m, '*')
-        )
-    if mix_test:
-        logits, hidden_states = m(inp, return_hidden_states=True)
-        loss = sum([
-            (hidden_state * middle_weight[i]).sum()
-            for i, hidden_state in enumerate(hidden_states)
-        ]) + (logits * last_weight).sum()
-        loss.backward()
-        ret += f"========================mix========================\n"
-        ret += bmt.inspect.format_summary(
-            bmt.inspect.inspect_model(m, '*')
-        )
+
+    ret += bmt.inspect.format_summary(
+        bmt.inspect.inspect_model(m, '*')
+    ) + "\n"
+    ret += bmt.inspect.format_summary(
+        inspector.get_summary()
+    ) + "\n"
+
     return ret.replace("None  ", "0.0000") + "\n" # replace for matching None grad with zero_grad
 
 def run(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
     ret = ""
-    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_last=True)
-    bmt.synchronize()
-    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_middle=True)
-    bmt.synchronize()
-    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, mix_test=True)
+    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len)
     bmt.synchronize()
     return ret
 
 def test_main():
-    ret = []
-    ret.append( run("normal", Model_NORMAL) )
-    ret.append( run("block", Model_BLOCK) )
-    ret.append( run("zero", Model_ZERO) )
-    ret.append( run("pipe", Model_PIPE) )
-    for r in ret:
+    ret = {}
+    ret["normal"] = run("normal", Model_NORMAL)
+    ret["block"] = run("block", Model_BLOCK)
+    ret["zero"] = run("zero", Model_ZERO)
+    ret["pipe"] = run("pipe", Model_PIPE)
+    for k, r in ret.items():
+        bmt.print_rank(f"============={k}============")
         bmt.print_rank(r)
-    for r in ret:
-        for r2 in ret:
-            assert_eq(r, r2)
+    for r in ret.values():
+        for r2 in ret.values():
+            lines, lines2 = r.split('\n'), r2.split('\n')
+            assert len(lines) == len(lines2)
+            for line, line2 in zip(lines, lines2):
+                words, words2 = line.split(), line2.split()
+                assert len(words) == len(words2)
+                for w, w2 in zip(words, words2):
+                    try:
+                        if isinstance(eval(w), float):
+                            is_float = True
+                    except:
+                        is_float = False
+                    if is_float:
+                        assert_lt(abs(float(w)-float(w2)), 0.00011)
+                    else:
+                        assert_eq(w, w2)
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=4)
+    bmt.init_distributed(pipe_size=2)
 
     test_main()

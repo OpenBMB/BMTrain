@@ -1,3 +1,5 @@
+from utils import *
+
 import torch
 import bmtrain.optim._cuda as G
 import random
@@ -5,7 +7,7 @@ import random
 def check(x, v):
     out = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
     G.f_has_inf_nan(x, out)
-    assert(out.item() == v)
+    assert_eq(out.item(), v)
 
 def test_main():
     for i in list(range(1, 100)) + [1000]*10 + [10000]*10 + [100000]*10 + [1000000]*10:

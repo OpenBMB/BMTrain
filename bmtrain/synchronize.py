@@ -31,7 +31,7 @@ def sum_loss(loss : torch.Tensor):
     This is a helper function to reduce the loss across all workers.
     """
     warnings.warn("bmtrain.sum_loss is deprecated and will be removed in later version. Use bmtrain.distributed.all_reduce instead.", DeprecationWarning)
-    return distributed.all_reduce(loss, "avg")
+    return distributed.all_reduce(loss, "sum") / config['world_size']
 
 def gather_result(result: torch.Tensor):
     warnings.warn("bmtrain.gather_result is deprecated and will be removed in later version. Use bmtrain.distributed.all_gather instead.", DeprecationWarning)
