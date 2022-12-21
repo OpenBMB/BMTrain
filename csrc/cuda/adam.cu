@@ -26,7 +26,7 @@ __global__ void adam_fp32_accum(
         float local_m = beta1 * __half2float(m[col]) + (1 - beta1) * local_g;       // real_m * scale
         float local_v = beta2 * v[col] + (1 - beta2) * local_g * local_g / scale;   // real_v * scale
         float local_p = param[col];
-        local_p = local_p - lr * local_m / bias_correction1 / (sqrtf(local_v * scale / bias_correction2) + eps) - lr * weight_decay * local_p;
+        local_p = local_p - lr * local_m / bias_correction1 / (sqrtf(local_v * scale / bias_correction2) + eps * scale) - lr * weight_decay * local_p;
 
         param_h[col] = __float2half(local_p);
         param[col] = local_p;

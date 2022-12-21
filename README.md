@@ -28,6 +28,7 @@
 </div>
 
 ## What's New
+- 2022/12/15 **BMTrain** [0.2.0](https://github.com/OpenBMB/BMTrain/releases/tag/0.2.0) released. See the [update log](docs/UPDATE_0.2.0.md).
 - 2022/06/14 **BMTrain** [0.1.7](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.7) released. ZeRO-2 optimization is supported!
 - 2022/03/30 **BMTrain** [0.1.2](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.2) released. Adapted to [OpenPrompt](https://github.com/thunlp/OpenPrompt)and [OpenDelta](https://github.com/thunlp/OpenDelta).
 - 2022/03/16 **BMTrain** [0.1.1](https://github.com/OpenBMB/BMTrain/releases/tag/0.1.1) has publicly released the first stable version, which fixes many bugs that were in the beta version.
@@ -265,7 +266,7 @@ bmtrain.init_parameters(model) # or loading checkpoint use `bmtrain.load`
 
 ```python
 loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-optimizer = bmtrain.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2, scale=2**20)
+optimizer = bmtrain.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
 lr_scheduler = bmtrain.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 ```
 
@@ -276,13 +277,16 @@ In addition, BMTrain also provides the common LRScheduler in the `bmtrain.lr_sch
 ### Part 4: Training Loop
 
 ```python
+# create a new instance of optimizer manager
+optim_manager = bmtrain.optim.OptimManager(loss_scale=1024)
+# let optim_manager handle all the optimizer and (optional) their corresponding lr_scheduler
+optim_manager.add_optimizer(optimizer, lr_scheduler)
+# add_optimizer can be called multiple times to add other optimizers.
+
 for iteration in range(1000):
     # ... load data for each rank ...
 
-    # zero grad
-    optimizer.zero_grad()
-
-    # forward
+    # forward pass and calculate loss
     pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
     logits = model(
         enc_input,
@@ -293,14 +297,19 @@ for iteration in range(1000):
 
     loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
     
-    global_loss = bmtrain.sum_loss(loss).item() # sum the loss across all ranks
+    global_loss = bmtrain.sum_loss(loss).item() # sum the loss across all ranks. This is only used for the training log
+
+    # zero grad
+    optim_manager.zero_grad() # calling zero_grad for each optimizer
 
     # loss scale and backward
-    loss = optimizer.loss_scale(loss)
-    loss.backward()
+    optim_manager.backward()
+
+    # clip grad norm
+    grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=1.0)
 
     # optimizer step
-    bmtrain.optim_step(optimizer, lr_scheduler)
+    optim_manager.step()
 
     # ... save checkpoint or print logs ...
 ```
@@ -309,7 +318,11 @@ The training loop part will be slightly longer, but just like a normal training 
 
 You can follow the comments in the code to get an idea of what each section of code is doing.
 
-The only additional note is `optimizer.loss_scale`, *loss scale* is the technique that widely used in mixed precision training to prevent gradient underflow. If you are not using the fused optimizer in BMTrain, you can remove this statement.
+The only additional note is `optimizer`. After using BMTrain, some details in optimizers should be adjusted. We have implemented all those details needed in `optim_manager`. What you need is just letting `optim_manager` to handle all the optimizers by `add_optimizer`, and letting `optim_manager` do `zero_grad()`, `backward()`, `clip_grad_norm()` and `step()` instead.
+
+If you are not using the mixed-precision training, you can train without `loss_scale`. Just set `loss_scale` to None in the `__init__` function of `OptimManager(loss_scale=None)`, which is also the default.
+
+If you are using mixed-precision training, *loss scale* is the technique widely used in mixed precision training to prevent gradient underflow. By using `optim_manager.backward(loss)` to scale the `loss` before backward and set `loss_scale` to some floating number in the `__init__` function of `OptimManager`。The `loss_scale` would be adjusted adaptively based on the gradient during training.
 
 <div id="performance"></div>
 

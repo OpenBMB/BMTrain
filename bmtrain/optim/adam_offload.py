@@ -14,7 +14,9 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
     """
     Adam optimizer
     """
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, scale=1, hold_steps=0):
+    _bmtrain_optimizer = True
+
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, hold_steps=0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -29,26 +31,11 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super().__init__(params, defaults)
 
-        self._scale = scale
-        self._steps_since_last_scale = 0
         self._hold_steps = hold_steps
         self._events = {}
 
-    @property
-    def scale(self):
-        return self._scale
-
-    @property
-    def steps_since_last_scale(self):
-        return self._steps_since_last_scale
-
     @torch.no_grad()
-    def justify_scale(self, scale):
-        self._scale = scale
-        self._steps_since_last_scale = 0
-
-    @torch.no_grad()
-    def step(self, closure=None):
+    def step(self, closure=None, scale=1):
         """Performs a single optimization step.
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
@@ -60,19 +47,6 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-
-        # check overflow
-        has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None and p.dtype == torch.half:
-                    G.f_has_inf_nan(p.grad, has_inf_or_nan)
-
-        if "comm" in config:
-            nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
-
-        if has_inf_or_nan > 0:
-            raise OverflowError("Gradient overflow")
 
         # parameters to be updated
         update_params = []
@@ -141,14 +115,14 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     state["exp_avg_sq"].view(-1),
                     beta1, beta2,
                     eps,  0.0 if state["step"] <= self._hold_steps else lr,
-                    self._scale,
+                    scale,
                     weight_decay,
                     state["step"]
                 )
                 # transfer parameters back to device asynchronously
                 param.copy_(state["_param_fp16"], non_blocking=True)
             else:
-                state["_grad_fp32"].mul_(1.0 / self._scale)
+                state["_grad_fp32"].mul_(1.0 / scale)
                 if ('maximize' in group) and (group['maximize'] is True):
                     grad = -state["_grad_fp32"]
                 else:
@@ -162,7 +136,8 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     [state["exp_avg"]],
                     [state["exp_avg_sq"]],
                     [],
-                    [state["step"]],
+                    [state["step"]] if int(torch.__version__.split('.')[1]) < 12
+                        else [torch.tensor(state["step"])],
                     amsgrad=False,
                     beta1=beta1,
                     beta2=beta2,
@@ -174,15 +149,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 # transfer parameters back to device asynchronously
                 param.copy_(state["_param_fp32"], non_blocking=True)
 
-        self._steps_since_last_scale += 1
-
         return loss
-
-    def loss_scale(self, loss : torch.Tensor) -> torch.Tensor:
-        """
-        Backward with loss scale.
-        """
-        return loss * (self.scale * config['pipe_size'] / config['world_size'])
 
     def load_state_dict(self, state_dict: dict) -> None:
         r"""Loads the optimizer state.
