@@ -38,7 +38,7 @@ def run(m, a, b):
     sm = bmt.inspect.format_summary(
             bmt.inspect.inspect_model(m, '*')
         )
-    return a.weight.grad is None, a.bias.grad is None, sm
+    return sm
 
 def test_main():
     a = Linear(256, 256)
@@ -47,24 +47,20 @@ def test_main():
     bmt.init_parameters(m)
 
     a.bias.requires_grad_(False)
-    awg, abg, sm1 = run(m, a, b)
-    print(awg, abg, sm1)
-    assert_eq((awg, abg), (False, True))
+    sm1 = run(m, a, b)
+    print(sm1)
     assert_eq(sm1.split('\n')[2].split()[-2:], ["0.0000", "0.0000"])
 
     a.weight.requires_grad_(False)
     a.bias.requires_grad_(True)
-    awg, abg, sm2 = run(m, a, b)
-    print(awg, abg, sm2)
-    assert_eq((awg, abg), (False, False))
+    sm2 = run(m, a, b)
+    print(sm2)
     assert_eq(sm1.split('\n')[1], sm2.split('\n')[1])
     assert_neq(sm1.split('\n')[2], sm2.split('\n')[2])
 
     a.weight.requires_grad_(True)
     a.bias.requires_grad_(False)
-    awg, abg, sm3 = run(m, a, b)
-    print(awg, abg, sm3)
-    assert_eq((awg, abg), (False, False))
+    sm3 = run(m, a, b)
     assert_neq(sm2.split('\n')[1], sm3.split('\n')[1])
     assert_eq(sm2.split('\n')[2], sm3.split('\n')[2])
 
@@ -75,29 +71,26 @@ def test_main_pipe():
     bmt.init_parameters(m)
 
     a.bias.requires_grad_(False)
-    awg, abg, sm1 = run(m, a, b)
-    print(awg, abg, sm1)
-    assert_eq((awg, abg), (False, True))
+    sm1 = run(m, a, b)
+    print(sm1)
     assert_eq(sm1.split('\n')[2].split()[-2:], ["0.0000", "0.0000"])
 
     a.weight.requires_grad_(False)
     a.bias.requires_grad_(True)
-    awg, abg, sm2 = run(m, a, b)
-    print(awg, abg, sm2)
-    assert_eq((awg, abg), (False, False))
+    sm2 = run(m, a, b)
+    print(sm2)
     assert_eq(sm1.split('\n')[1], sm2.split('\n')[1])
     assert_neq(sm1.split('\n')[2], sm2.split('\n')[2])
 
     a.weight.requires_grad_(True)
     a.bias.requires_grad_(False)
-    awg, abg, sm3 = run(m, a, b)
-    print(awg, abg, sm3)
-    assert_eq((awg, abg), (False, False))
+    sm3 = run(m, a, b)
+    print(sm3)
     assert_neq(sm2.split('\n')[1], sm3.split('\n')[1])
     assert_eq(sm2.split('\n')[2], sm3.split('\n')[2])
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=1)
+    bmt.init_distributed(pipe_size=2)
 
     test_main()
     test_main_pipe()

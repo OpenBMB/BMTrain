@@ -189,7 +189,7 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len):
         inspector.get_summary()
     ) + "\n"
 
-    return ret.replace("None  ", "0.0000") + "\n" # replace for matching None grad with zero_grad
+    return ret + "\n" # replace for matching None grad with zero_grad
 
 def run(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
     ret = ""
@@ -215,8 +215,7 @@ def test_main():
                 assert len(words) == len(words2)
                 for w, w2 in zip(words, words2):
                     try:
-                        if isinstance(eval(w), float):
-                            is_float = True
+                        is_float = isinstance(eval(w), float)
                     except:
                         is_float = False
                     if is_float:
