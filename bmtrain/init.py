@@ -39,11 +39,13 @@ def init_distributed(
     """
     torch.backends.cudnn.enabled = False
 
-    local_rank = int(os.environ["LOCAL_RANK"])
-    rank = int(os.environ["RANK"])
-    world_size = int(os.environ["WORLD_SIZE"])
-    local_size = int(os.environ["LOCAL_WORLD_SIZE"])
-    master = os.environ["MASTER_ADDR"] + ":" + os.environ["MASTER_PORT"]
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    rank = int(os.environ.get("RANK", "0"))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    local_size = int(os.environ.get("LOCAL_WORLD_SIZE","1"))
+    addr = os.environ.get("MASTER_ADDR", "localhost")
+    port = os.environ.get("MASTER_PORT", "10010")
+    master = addr+":"+port
     timeout = datetime.timedelta(seconds=1800)
     rendezvous_iterator = dist.rendezvous(
         init_method, rank, world_size, timeout=timeout
