@@ -40,7 +40,7 @@ for iteration in range(1000):
     
     # ...
     # loss scale and backward
-    optim_manager.backward()
+    optim_manager.backward(loss)
 
     # optimizer step
     optim_manager.step()
