@@ -49,9 +49,11 @@ class OpCheckpointBlock(torch.autograd.Function):
 
         if not isinstance(outputs, list) and not isinstance(outputs, tuple):
             outputs = [outputs]
+            len_outputs = 0
         else:
             outputs = list(outputs)
-        return tuple([len(outputs)] + outputs + [hidden_state["tensor"] for hidden_state in inspector.hidden_states])
+            len_outputs = len(outputs)
+        return tuple([len_outputs] + outputs + [hidden_state["tensor"] for hidden_state in inspector.hidden_states])
 
     @staticmethod
     def backward(ctx, _, *grads):
@@ -453,7 +455,7 @@ class CheckpointBlock(torch.nn.Module):
             all_inputs.append(val)
         outputs = OpCheckpointBlock.apply(placeholder, self, True, len(args), *all_inputs)
         len_output = outputs[0]
-        return outputs[1:1+len_output] if len_output > 1 else outputs[1]
+        return outputs[1:1+len_output] if len_output > 0 else outputs[1]
 
     def __getattr__(self,name:str):
         if name=="_module":
