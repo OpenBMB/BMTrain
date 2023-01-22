@@ -100,8 +100,8 @@ def inspect_pipeline_transformer_block_list(pipe_model: PipelineTransformerBlock
                             "shape": tuple(shape),
                             "std": p.std().cpu().item(),
                             "mean": p.mean().cpu().item(),
-                            "grad_std": None,
-                            "grad_mean": None,
+                            "grad_std": 0.,
+                            "grad_mean": 0.,
                             "max": p.max().cpu().item(),
                             "min": p.min().cpu().item(),
                         }
@@ -180,8 +180,8 @@ def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix :
                     "shape": tuple(shape),
                     "std": p.std().cpu().item(),
                     "mean": p.mean().cpu().item(),
-                    "grad_std": None,
-                    "grad_mean": None,
+                    "grad_std": 0.,
+                    "grad_mean": 0.,
                     "max": p.max().cpu().item(),
                     "min": p.min().cpu().item(),
                 })
@@ -236,8 +236,8 @@ def inspect_model(model : torch.nn.Module, param_name : str, prefix : str = ''):
                     stats["grad_std"] = g.std().cpu().item()
                     stats["grad_mean"] = g.mean().cpu().item()
                 else:
-                    stats["grad_std"] = None
-                    stats["grad_mean"] = None
+                    stats["grad_std"] = 0.
+                    stats["grad_mean"] = 0.
                 ret.append(stats)
         for name, module in model._modules.items():
             ret.extend(inspect_model(module, param_name, prefix + name + '.'))

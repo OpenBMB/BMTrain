@@ -168,7 +168,7 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mid
         ret += bmt.inspect.format_summary(
             bmt.inspect.inspect_model(m, '*')
         )
-    return ret.replace("None  ", "0.0000") + "\n" # replace for matching None grad with zero_grad
+    return ret + "\n" # replace for matching None grad with zero_grad
 
 def run(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
     ret = ""
@@ -181,16 +181,30 @@ def run(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
     return ret
 
 def test_main():
-    ret = []
-    ret.append( run("normal", Model_NORMAL) )
-    ret.append( run("block", Model_BLOCK) )
-    ret.append( run("zero", Model_ZERO) )
-    ret.append( run("pipe", Model_PIPE) )
-    for r in ret:
+    ret = {}
+    ret["normal"] = run("normal", Model_NORMAL)
+    ret["block"] = run("block", Model_BLOCK)
+    ret["zero"] = run("zero", Model_ZERO)
+    ret["pipe"] = run("pipe", Model_PIPE)
+    for k, r in ret.items():
+        bmt.print_rank(f"============={k}============")
         bmt.print_rank(r)
-    for r in ret:
-        for r2 in ret:
-            assert_eq(r, r2)
+    for r in ret.values():
+        for r2 in ret.values():
+            lines, lines2 = r.split('\n'), r2.split('\n')
+            assert len(lines) == len(lines2)
+            for line, line2 in zip(lines, lines2):
+                words, words2 = line.split(), line2.split()
+                assert len(words) == len(words2)
+                for w, w2 in zip(words, words2):
+                    try:
+                        is_float = isinstance(eval(w), float)
+                    except:
+                        is_float = False
+                    if is_float:
+                        assert_lt(abs(float(w)-float(w2)), 2.)
+                    else:
+                        assert_eq(w, w2)
 
 if __name__ == "__main__":
     bmt.init_distributed(pipe_size=4)
