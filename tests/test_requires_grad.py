@@ -33,7 +33,7 @@ def run(m, a, b):
     logits = m(inp)
     loss = logits.sum()
     loss.backward()
-
+    bmt.synchronize()
     sm = bmt.inspect.format_summary(
             bmt.inspect.inspect_model(m, '*')
         )
