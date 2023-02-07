@@ -7,6 +7,7 @@ tq = tqdm([
     ("load_ckpt", 1),
     ("init_parameters", 1),
     ("init_parameters_multi_gpu", 4),
+    ("optim_state", 4),
 
     ("requires_grad", 1),
     ("requires_grad_multi_gpu", 2),

@@ -30,17 +30,17 @@ class AdamOptimizer(torch.optim.Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super().__init__(params, defaults)
 
-        self.load_stream = torch.cuda.Stream()
         self._hold_steps = hold_steps
 
     def _on_justify_scale(self, old_scale, new_scale):
         delta = new_scale / old_scale
         for group in self.param_groups:
             for p in group['params']:
-                state = self.state[p]
-                if len(state) > 0:
-                    state['exp_avg'] *= delta
-                    state['exp_avg_sq'] *= delta
+                if p in self.state:
+                    state = self.state[p]
+                    if len(state) > 0:
+                        state['exp_avg'] *= delta
+                        state['exp_avg_sq'] *= delta
 
     @torch.no_grad()
     def step(self, closure=None, scale=1):
