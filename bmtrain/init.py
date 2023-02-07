@@ -43,8 +43,12 @@ def init_distributed(
     rank = int(os.environ.get("RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     local_size = int(os.environ.get("LOCAL_WORLD_SIZE","1"))
-    addr = os.environ.get("MASTER_ADDR", "localhost")
-    port = os.environ.get("MASTER_PORT", "10010")
+    if "MASTER_ADDR" not in os.environ:
+        os.environ["MASTER_ADDR"]="localhost"
+    if "MASTER_PORT" not in os.environ:
+        os.environ["MASTER_PORT"]="10010"
+    addr = os.environ["MASTER_ADDR"]
+    port = os.environ["MASTER_PORT"]
     master = addr+":"+port
     timeout = datetime.timedelta(seconds=1800)
     rendezvous_iterator = dist.rendezvous(
