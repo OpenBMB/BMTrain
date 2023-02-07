@@ -760,7 +760,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                                 ctx.save_list[j+1][0] = j+1
                 
                     torch.cuda.set_rng_state(ctx.cuda_rng_state[i])
-                    ipt = layer_inputs[ctx.save_list[i][1]].requires_grad_()
+                    ipt = layer_inputs[ctx.save_list[i][1]].detach().requires_grad_()
                     if config['zero_level'] == 2:
                         flag = 2
                     else:
