@@ -529,6 +529,39 @@ class CheckpointBlock(torch.nn.Module):
             elif strict:
                 missing_keys.append(key)
 
+        for name, param in self.named_parameters():
+            if isinstance(param, DistributedParameter) and not param._in_checkpoint_block:
+                key = prefix + name
+                all_keys.append(key)
+                if key in state_dict:
+                    input_param = state_dict[key]
+                    is_param_lazy = torch.nn.parameter.is_lazy(param)
+                    # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
+                    if not is_param_lazy and len(param.shape) == 0 and len(input_param.shape) == 1:
+                        input_param = input_param[0]
+
+                    if not is_param_lazy and not isinstance(param, DistributedParameter) and input_param.shape != param.shape:
+                        # local shape should match the one in checkpoint
+                        error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
+                                        'the shape in current model is {}.'
+                                        .format(key, input_param.shape, param.shape))
+                        continue
+                    if not is_param_lazy and isinstance(param, DistributedParameter) and input_param.shape != param._original_shape:
+                        error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
+                                        'the shape in current model is {}.'
+                                        .format(key, input_param.shape, param.shape))
+                    try:
+                        with torch.no_grad():
+                            param._copy_data(input_param)
+                    except Exception as ex:
+                        error_msgs.append('While copying the parameter named "{}", '
+                                        'whose dimensions in the model are {} and '
+                                        'whose dimensions in the checkpoint are {}, '
+                                        'an exception occurred : {}.'
+                                        .format(key, param.size(), input_param.size(), ex.args))
+                elif strict:
+                    missing_keys.append(key)
+
         if strict:
             all_keys = set(all_keys)
             for key in state_dict.keys():
