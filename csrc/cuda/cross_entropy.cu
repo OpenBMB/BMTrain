@@ -4,7 +4,7 @@
 #include "reduce.cuh"
 
 namespace {
-// blocks <m>,      threads<1024>
+// blocks <m>,      threads<256>
 __global__ void cross_entropy_forward(
     int64_t n,
     const half *input,      // (m, n)
@@ -41,7 +41,7 @@ __global__ void cross_entropy_forward(
     }
 }
 
-// blocks <m>,      threads<1024>
+// blocks <m>,      threads<256>
 __global__ void cross_entropy_backward(
     int64_t n,
     const float *grad_output,   // (m)
@@ -67,7 +67,7 @@ __global__ void cross_entropy_backward(
     }
 }
 
-// blocks <m>,      threads<1024>
+// blocks <m>,      threads<256>
 __global__ void cross_entropy_forward_inplace(
     int64_t n,
     half *x,                // (m, n)
@@ -104,7 +104,7 @@ __global__ void cross_entropy_forward_inplace(
     }
 }
 
-// blocks <m>,      threads<1024>
+// blocks <m>,      threads<256>
 __global__ void cross_entropy_backward_inplace(
     int64_t n,
     const float *grad_output,   // (m)
@@ -144,7 +144,7 @@ void cross_entropy_forward_launcher(
     auto target_ptr = target.data_ptr<int32_t>();
     auto softmax_ptr = reinterpret_cast<half*>(softmax.data_ptr<at::Half>());
     auto output_ptr = output.data_ptr<float>();
-    int32_t threads = 1024;
+    int32_t threads = 256;
     auto stream = at::cuda::getCurrentCUDAStream();
     cross_entropy_forward<<<m, threads, 0, stream.stream()>>>(n, input_ptr, target_ptr, softmax_ptr, output_ptr, ignore_index);
 }
@@ -161,7 +161,7 @@ void cross_entropy_backward_launcher(
     auto target_ptr = target.data_ptr<int32_t>();
     auto softmax_ptr = reinterpret_cast<half*>(softmax.data_ptr<at::Half>());
     auto input_ptr = reinterpret_cast<half*>(grad_input.data_ptr<at::Half>());
-    int32_t threads = 1024;
+    int32_t threads = 256;
     auto stream = at::cuda::getCurrentCUDAStream();
     cross_entropy_backward<<<m, threads, 0, stream.stream()>>>(n, output_ptr, target_ptr, softmax_ptr, input_ptr, ignore_index);
 }
@@ -176,7 +176,7 @@ void cross_entropy_forward_inplace_launcher(
     auto x_ptr = reinterpret_cast<half*>(x.data_ptr<at::Half>());
     auto target_ptr = target.data_ptr<int32_t>();
     auto output_ptr = output.data_ptr<float>();
-    int32_t threads = 1024;
+    int32_t threads = 256;
     auto stream = at::cuda::getCurrentCUDAStream();
     cross_entropy_forward_inplace<<<m, threads, 0, stream.stream()>>>(n, x_ptr, target_ptr, output_ptr, ignore_index);
 }
@@ -191,7 +191,7 @@ void cross_entropy_backward_inplace_launcher(
     auto output_ptr = grad_output.data_ptr<float>();
     auto target_ptr = target.data_ptr<int32_t>();
     auto x_ptr = reinterpret_cast<half*>(x.data_ptr<at::Half>());
-    int32_t threads = 1024;
+    int32_t threads = 256;
     auto stream = at::cuda::getCurrentCUDAStream();
     cross_entropy_backward_inplace<<<m, threads, 0, stream.stream()>>>(n, output_ptr, target_ptr, x_ptr, ignore_index);
 }

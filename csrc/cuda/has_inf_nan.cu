@@ -78,10 +78,10 @@ void has_nan_inf_launcher(
     auto mid_ptr = mid.data_ptr<uint8_t>();
     auto stream = at::cuda::getCurrentCUDAStream();
 
-    int32_t threads = 1024;
+    int32_t threads = 256;
     dim3 block_size = dim3(threads, 1, 1);
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
-    dim3 clamp_grid_size = dim3(min((n + threads - 1) / threads, 1024), 1, 1);
+    dim3 clamp_grid_size = dim3(min((n + threads - 1) / threads, 256), 1, 1);
     
     bmt_has_nan_inf_1<<<clamp_grid_size, block_size, 0, stream.stream()>>>(n, g_ptr, mid_ptr);
     bmt_has_nan_inf_2<<<1, block_size, 0, stream.stream()>>>(mid_ptr, out.data_ptr<uint8_t>());

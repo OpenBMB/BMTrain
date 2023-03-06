@@ -3,7 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 namespace {
-// blocks <n // 1024>,      threads<min(n, 1024)>
+// blocks <n // 256>,      threads<min(n, 256)>
 __global__ void adam_fp32_accum(
     int32_t n,
     const half *g,        // (n)
@@ -56,7 +56,7 @@ void adam_launcher(
     auto v_ptr = v_fp32.data_ptr<float>();
     auto param_ptr = param_fp32.data_ptr<float>();
     auto param_h_ptr = reinterpret_cast<half*>(param_fp16.data_ptr<at::Half>());
-    int32_t threads = 1024;
+    int32_t threads = 256;
     dim3 block_size = dim3(threads, 1, 1);
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
     auto stream = at::cuda::getCurrentCUDAStream();

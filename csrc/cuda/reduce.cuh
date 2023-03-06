@@ -3,7 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 namespace {
-const int WARP_SZ = 32;
+const int WARP_SZ = 16;
 
 // blocks <block_size>,      threads<1024>
 __device__ float block_reduce_sum(float val) {
