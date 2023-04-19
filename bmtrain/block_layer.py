@@ -783,11 +783,17 @@ class OpTransformerBlockList(torch.autograd.Function):
                         # change the tensor in placeholder
                         ctx.layer_inspector[i][j]["tensor"] = it["tensor"]
                         ctx.layer_inspector[i][j]["requires_grad"] = it["requires_grad"]
-                    torch.autograd.backward(
-                        [output] + [hidden_state["tensor"] for hidden_state in inspector.hidden_states],
-                        (grad_hidden_state,) + grad_inspectors[-len(inspector.hidden_states):],
-                    )
-                    grad_inspectors = grad_inspectors[:-len(inspector.hidden_states)]
+                    if len(inspector.hidden_states) > 0:
+                        torch.autograd.backward(
+                            [output] + [hidden_state["tensor"] for hidden_state in inspector.hidden_states],
+                            (grad_hidden_state,) + grad_inspectors[-len(inspector.hidden_states):],
+                        )
+                        grad_inspectors = grad_inspectors[:-len(inspector.hidden_states)]
+                    else:
+                        torch.autograd.backward(
+                            [output],
+                            (grad_hidden_state,),
+                        )
                     grad_hidden_state = ipt.grad
                     if grad_middle is not None:
                         grad_hidden_state = grad_hidden_state + grad_middle[i]
