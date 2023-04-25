@@ -32,6 +32,7 @@ def main():
         time_2 = time.time()
         time_lists.append(time_2 - time_1)
     statsd.gauges('calc_time', sum(time_lists) / len(time_lists))
+    print (sum(time_lists) / len(time_lists), rank_name)
 
 if __name__ == '__main__':
     main()
