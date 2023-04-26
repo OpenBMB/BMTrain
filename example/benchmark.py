@@ -5,15 +5,8 @@ from statsd import get_statsd
 import os
 
 def main():
-    node_name = os.getenv("NODE_NAME", "jeeves-hpc-gpu00")
     rank_name = (int)(os.getenv("RANK", "0")) // 8
-    project_name = os.getenv("PROJECT_NAME", "no-project-name")
-    log_name = "job-status.{}.{}.{}.step".format(
-        project_name,
-        rank_name,
-        node_name,
-    )
-    statsd = get_statsd(log_name)
+    statsd = get_statsd()
 
     bmt.init_distributed()
     for i in range(10):
@@ -31,7 +24,7 @@ def main():
         torch.cuda.synchronize() 
         time_2 = time.time()
         time_lists.append(time_2 - time_1)
-    statsd.gauges('calc_time', sum(time_lists) / len(time_lists))
+    statsd.gauges('calc_time', sum(time_lists) / len(time_lists), repeat=10)
     print (sum(time_lists) / len(time_lists), rank_name)
 
 if __name__ == '__main__':
