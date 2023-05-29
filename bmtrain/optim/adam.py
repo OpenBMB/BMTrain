@@ -4,7 +4,7 @@ import torch.optim._functional as F
 from . import _cuda as C
 from .. import nccl
 import inspect
-
+from ..utils import check_torch_version
 from copy import deepcopy
 from itertools import chain
 from collections import defaultdict
@@ -110,7 +110,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                             [state['exp_avg']],
                             [state["exp_avg_sq"]],
                             [],
-                            [state["step"]] if int(torch.__version__.split('.')[1]) < 12
+                            [state["step"]] if check_torch_version("1.12.0") < 0 
                                 else [torch.tensor(state["step"])],
                             amsgrad=False,
                             beta1=group['betas'][0],
