@@ -617,7 +617,7 @@ class CheckpointBlock(torch.nn.Module):
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, (offset_end - offset_st,))[:]
                 del tmp_tensor
         
-    def _named_members(self, get_members_fn, prefix='', recurse=True):
+    def _named_members(self, get_members_fn, prefix='', recurse=True, remove_duplicate=True):
         r"""Helper method for yielding various names + members of modules."""
         return self._module._named_members(get_members_fn, prefix, recurse)
         

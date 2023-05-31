@@ -149,11 +149,13 @@ class topology:
         self.prev_rank = self.stage_id-1 if self.stage_id > 0 else -1
         self.tails = self.pp_group[self.pipe_idx, self.stage_id:].tolist()
         self.heads = self.pp_group[self.pipe_idx, :self.stage_id + 1].tolist()
+
     def get_group_id(self,group_name):
         if group_name == "pipe":
             return self.pipe_idx
         elif group_name == "zero":
             return self.zero_idx
+        
     def get_group_rank(self,group_name):
         if group_name == "pipe":
             return self.stage_id
