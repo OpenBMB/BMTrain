@@ -1,7 +1,9 @@
+#include <cstdint>
+#include <string>
+#include <pybind11/pybind11.h>
 
-#include <torch/extension.h>
+namespace py = pybind11;
 #include "include/nccl.h"
-#include <ATen/cuda/CUDAContext.h>
 
 void checkNCCLStatus(ncclResult_t result) {
     if (result == ncclSuccess) return;

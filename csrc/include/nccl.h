@@ -14,11 +14,11 @@
 #endif
 
 #define NCCL_MAJOR 2
-#define NCCL_MINOR 11
-#define NCCL_PATCH 4
+#define NCCL_MINOR 14
+#define NCCL_PATCH 3
 #define NCCL_SUFFIX ""
 
-#define NCCL_VERSION_CODE 21104
+#define NCCL_VERSION_CODE 21403
 #define NCCL_VERSION(X,Y,Z) (((X) <= 2 && (Y) <= 8) ? (X) * 1000 + (Y) * 100 + (Z) : (X) * 10000 + (Y) * 100 + (Z))
 
 #ifdef __cplusplus
@@ -38,7 +38,29 @@ typedef enum { ncclSuccess                 =  0,
                ncclInternalError           =  3,
                ncclInvalidArgument         =  4,
                ncclInvalidUsage            =  5,
-               ncclNumResults              =  6 } ncclResult_t;
+               ncclRemoteError             =  6,
+               ncclInProgress              =  7,
+               ncclNumResults              =  8 } ncclResult_t;
+
+/* Communicator configuration. Users can assign value to attributes to specify the
+ * behavior of a communicator. */
+typedef struct ncclConfig_v21400 {
+  /* attributes that users should never touch. */
+  size_t size;
+  unsigned int magic;
+  unsigned int version;
+  /* attributes that users are able to customize. */
+  int blocking;
+} ncclConfig_t;
+
+/* Config initializer must be assigned to initialize config structure when it is created.
+ * Not initialized config will result in NCCL error. */
+#define NCCL_CONFIG_INITIALIZER {                                       \
+  sizeof(ncclConfig_t), /* size */                                      \
+  0xcafebeef,           /* magic */                                     \
+  NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */       \
+  1                     /* blocking */                                  \
+}
 
 /* Return the NCCL_VERSION_CODE of the NCCL library in the supplied integer.
  * This integer is coded with the MAJOR, MINOR and PATCH level of the
@@ -52,6 +74,11 @@ ncclResult_t pncclGetVersion(int *version);
  * communicator before calling ncclCommInitRank. */
 ncclResult_t  ncclGetUniqueId(ncclUniqueId* uniqueId);
 ncclResult_t pncclGetUniqueId(ncclUniqueId* uniqueId);
+
+/* Create a new communicator (multi thread/process version) with a configuration
+ * set by users. */
+ncclResult_t  ncclCommInitRankConfig(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank, ncclConfig_t* config);
+ncclResult_t pncclCommInitRankConfig(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank, ncclConfig_t* config);
 
 /* Creates a new communicator (multi thread/process version).
  * rank must be between 0 and nranks-1 and unique within a communicator clique.
@@ -71,8 +98,15 @@ ncclResult_t pncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueId commId
 ncclResult_t  ncclCommInitAll(ncclComm_t* comm, int ndev, const int* devlist);
 ncclResult_t pncclCommInitAll(ncclComm_t* comm, int ndev, const int* devlist);
 
-/* Frees resources associated with communicator object, but waits for any operations
- * that might still be running on the device. */
+/* Finalize a communicator. ncclCommFinalize flushes all issued communications,
+ * and marks communicator state as ncclInProgress. The state will change to ncclSuccess
+ * when the communicator is globally quiescent and related resources are freed; then,
+ * calling ncclCommDestroy can locally free the rest of the resources (e.g. communicator
+ * itself) without blocking. */
+ncclResult_t  ncclCommFinalize(ncclComm_t comm);
+ncclResult_t pncclCommFinalize(ncclComm_t comm);
+
+/* Frees local resources associated with communicator object. */
 ncclResult_t  ncclCommDestroy(ncclComm_t comm);
 ncclResult_t pncclCommDestroy(ncclComm_t comm);
 
@@ -81,9 +115,15 @@ ncclResult_t pncclCommDestroy(ncclComm_t comm);
 ncclResult_t  ncclCommAbort(ncclComm_t comm);
 ncclResult_t pncclCommAbort(ncclComm_t comm);
 
-/* Returns a human-readable error message. */
+/* Returns a string for each error code. */
 const char*  ncclGetErrorString(ncclResult_t result);
 const char* pncclGetErrorString(ncclResult_t result);
+
+/* Returns a human-readable message of the last error that occurred.
+ * comm is currently unused and can be set to NULL
+ */
+const char*  ncclGetLastError(ncclComm_t comm);
+const char* pncclGetError(ncclComm_t comm);
 
 /* Checks whether the comm has encountered any asynchronous errors */
 ncclResult_t  ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
@@ -350,7 +390,6 @@ ncclResult_t pncclGroupStart();
  */
 ncclResult_t  ncclGroupEnd();
 ncclResult_t pncclGroupEnd();
-
 
 #ifdef __cplusplus
 } // end extern "C"
