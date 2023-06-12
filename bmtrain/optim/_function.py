@@ -54,7 +54,7 @@ def adam(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.Tenso
     assert param_fp32.dtype == torch.float32, "param_fp32 must be float32 tensor"
     assert param_fp16.dtype == torch.float16, "param_fp16 must be float16 tensor"
     assert g_fp16.dtype == torch.float16, "g_fp16 must be float16 tensor"
-    assert m_fp16.dtype == torch.float32, "m_fp32 must be float32 tensor"
+    assert m_fp16.dtype == torch.float16, "m_fp16 must be float16 tensor"
     assert v_fp32.dtype == torch.float32, "v_fp32 must be float32 tensor"
     assert param_fp32.numel() == param_fp16.numel(), "param_fp32 and param_fp16 must have the same number of elements"
     assert param_fp32.numel() == g_fp16.numel(), "param_fp32 and g_fp16 must have the same number of elements"

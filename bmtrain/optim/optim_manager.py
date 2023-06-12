@@ -1,7 +1,6 @@
 from typing import Optional, Union, List, Dict, Tuple
 import torch
-
-from .. import C 
+from ..loss._function import has_inf_nan
 from ..utils import print_rank
 from ..lr_scheduler.warmup import WarmupLRScheduler
 from .. import nccl
@@ -13,7 +12,7 @@ def check_overflow(param_groups):
     for group in param_groups:
         for p in group['params']:
             if p.grad is not None and p.dtype == torch.half: # TODO support other types
-                C.f_has_inf_nan(p.grad, has_inf_or_nan)
+                has_inf_nan(p.grad, has_inf_or_nan)
 
     if "comm" in config:
         nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
@@ -81,6 +80,7 @@ class OptimManager:
         self.lr_schedulers.append(lr_scheduler)
 
     def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
+
         return loss * (self.loss_scale / config['world_size']) # loss scale
 
     def backward(self, loss : torch.Tensor):
@@ -128,6 +128,7 @@ class OptimManager:
                 
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
             if hasattr(optimizer, "_bmtrain_optimizer") and optimizer._bmtrain_optimizer:
+                print("BMTrain optimizer step")
                 optimizer.step(scale=self.loss_scale)
             else:
                 if self.loss_scale_enabled:
