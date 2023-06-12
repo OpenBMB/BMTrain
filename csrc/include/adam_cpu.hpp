@@ -1,8 +1,11 @@
-#include <torch/extension.h>
-#include <ATen/ParallelOpenMP.h>
-#include <immintrin.h>
 #include <emmintrin.h>
+#include <immintrin.h>
+#include <cmath>
+#include <cstdint>
 
+#include <pybind11/pybind11.h>
+
+#include<cuda_fp16.h>
 #define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
 
 #if defined(__AVX512F__)
@@ -14,14 +17,118 @@
 
 #pragma message "Using AVX256"
 #define __AVX256__ 1
+#endif
+#include <vector>
+#include <thread>
+#include <algorithm>
 
+inline float fp32_from_bits(uint32_t w) {
+    union {
+        uint32_t as_bits;
+        float as_value;
+    } fp32 = {w};
+    return fp32.as_value;
+}
+
+inline uint32_t fp32_to_bits(float f) {
+    union {
+        float as_value;
+        uint32_t as_bits;
+    } fp32 = {f};
+    return fp32.as_bits;
+}
+
+template <class F>
+inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F& f) {
+    // Number of iterations
+    int64_t numiter = end - begin;
+    
+    // Number of threads to use
+    int64_t num_threads = std::max(numiter / grain_size, static_cast<int64_t>(1));
+
+    // Check if parallel execution is feasible
+    if (num_threads > 1) {
+        std::vector<std::thread> threads(num_threads);
+        for (int64_t t = 0; t < num_threads; ++t) {
+            threads[t] = std::thread([&, t]() {
+                int64_t start = begin + t * grain_size;
+                int64_t end = std::min(begin + (t + 1) * grain_size, end);
+                f(start, end);
+            });
+        }
+        // Join all threads
+        for (auto& thread : threads) {
+            thread.join();
+        }
+    } else {
+        // If not feasible, perform the operation serially
+        f(begin, end);
+    }
+}
+
+
+inline uint16_t fp16_ieee_from_fp32_value(float f) {
+    // const float scale_to_inf = 0x1.0p+112f;
+    // const float scale_to_zero = 0x1.0p-110f;
+    uint32_t scale_to_inf_bits = (uint32_t) 239 << 23;
+    uint32_t scale_to_zero_bits = (uint32_t) 17 << 23;
+    float scale_to_inf_val, scale_to_zero_val;
+    std::memcpy(&scale_to_inf_val, &scale_to_inf_bits, sizeof(scale_to_inf_val));
+    std::memcpy(&scale_to_zero_val, &scale_to_zero_bits, sizeof(scale_to_zero_val));
+    const float scale_to_inf = scale_to_inf_val;
+    const float scale_to_zero = scale_to_zero_val;
+
+#if defined(_MSC_VER) && _MSC_VER == 1916
+          float base = ((signbit(f) != 0 ? -f : f) * scale_to_inf) * scale_to_zero;
+#else
+          float base = (fabsf(f) * scale_to_inf) * scale_to_zero;
 #endif
 
+          const uint32_t w = (uint32_t)fp32_to_bits(f);
+          const uint32_t shl1_w = w + w;
+          const uint32_t sign = w & UINT32_C(0x80000000);
+          uint32_t bias = shl1_w & UINT32_C(0xFF000000);
+          if (bias < UINT32_C(0x71000000)) {
+                  bias = UINT32_C(0x71000000);
+          }
+
+          base = fp32_from_bits((bias >> 1) + UINT32_C(0x07800000)) + base;
+          const uint32_t bits = (uint32_t)fp32_to_bits(base);
+          const uint32_t exp_bits = (bits >> 13) & UINT32_C(0x00007C00);
+          const uint32_t mantissa_bits = bits & UINT32_C(0x00000FFF);
+          const uint32_t nonsign = exp_bits + mantissa_bits;
+          return static_cast<uint16_t>(
+            (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign)
+          );
+  }
+
+inline float fp16_ieee_to_fp32_value(uint16_t h) {
+
+  const uint32_t w = (uint32_t)h << 16;
+  const uint32_t sign = w & UINT32_C(0x80000000);
+  const uint32_t two_w = w + w;
+
+  const uint32_t exp_offset = UINT32_C(0xE0) << 23;
+  const float exp_scale = 0x1.0p-112f;
+  const float normalized_value =
+      fp32_from_bits((two_w >> 4) + exp_offset) * exp_scale;
+
+  const uint32_t magic_mask = UINT32_C(126) << 23;
+  const float magic_bias = 0.5f;
+  const float denormalized_value =
+      fp32_from_bits((two_w >> 17) | magic_mask) - magic_bias;
+
+  const uint32_t denormalized_cutoff = UINT32_C(1) << 27;
+  const uint32_t result =
+      sign | (two_w < denormalized_cutoff ? fp32_to_bits(denormalized_value)
+                                          : fp32_to_bits(normalized_value));
+  return  fp32_from_bits(result);
+}
 void adam_cpu_launcher(
     int n,
     float* param_fp32,
-    at::Half* param_fp16,
-    at::Half* g_fp16,
+    u_int16_t* param_fp16,
+    u_int16_t* g_fp16,
     float* m_fp32,
     float* v_fp32,
     float beta1, float beta2, 
@@ -59,7 +166,7 @@ void adam_cpu_launcher(
     int64_t span = 1;
 #endif
 
-    at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+    parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
         for (int64_t j = start; j < end; j += span) {
 #if defined(__AVX256__) or defined(__AVX512__)
             if (j + span > end) {
@@ -68,7 +175,7 @@ void adam_cpu_launcher(
 #endif
                 // No AVX or n is not alinged
                 for (int64_t i = j; i < end; i++) {
-                    float g = c10::detail::fp16_ieee_to_fp32_value(g_fp16[i].x) / scale;
+                    float g = fp16_ieee_to_fp32_value(g_fp16[i]) / scale;
                     float m = m_fp32[i];
                     float v = v_fp32[i];
                     float p = param_fp32[i];
@@ -76,7 +183,7 @@ void adam_cpu_launcher(
                     v = beta2 * v + (1 - beta2) * g * g;
                     p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
                     param_fp32[i] = p;
-                    param_fp16[i] = at::Half(p);
+                    param_fp16[i] = fp16_ieee_from_fp32_value(p);
                     m_fp32[i] = m;
                     v_fp32[i] = v;
                 }
@@ -133,57 +240,4 @@ void adam_cpu_launcher(
     });
 }
 
-void F_adam_cpu(
-    const torch::Tensor &param_fp32, 
-    const torch::Tensor &param_fp16, 
-    const torch::Tensor &g_fp16, 
-    const torch::Tensor &m_fp32, 
-    const torch::Tensor &v_fp32, 
-    float beta1, float beta2, 
-    float eps, float lr, 
-    float scale, 
-    float weight_decay,
-    int64_t step
-) {
-    CHECK_CONTIGUOUS(param_fp32);
-    CHECK_CONTIGUOUS(param_fp16);
-    CHECK_CONTIGUOUS(g_fp16);
-    CHECK_CONTIGUOUS(m_fp32);
-    CHECK_CONTIGUOUS(v_fp32);
-    AT_ASSERTM(param_fp32.dtype() == torch::kFloat, "param_fp32 must be a float tensor");
-    AT_ASSERTM(param_fp16.dtype() == torch::kHalf, "param_fp16 must be a half tensor");
-    AT_ASSERTM(g_fp16.dtype() == torch::kHalf, "g_fp16 must be a half tensor");
-    AT_ASSERTM(m_fp32.dtype() == torch::kFloat, "m_fp32 must be a float tensor");
-    AT_ASSERTM(v_fp32.dtype() == torch::kFloat, "v_fp32 must be a float tensor");
-    AT_ASSERTM(param_fp32.is_cpu(), "param_fp32 must be a cpu tensor");
-    AT_ASSERTM(param_fp16.is_cpu(), "param_fp16 must be a cpu tensor");
-    AT_ASSERTM(g_fp16.is_cpu(), "g_fp16 must be a cpu tensor");
-    AT_ASSERTM(m_fp32.is_cpu(), "m_fp32 must be a cpu tensor");
-    AT_ASSERTM(v_fp32.is_cpu(), "v_fp32 must be a cpu tensor");
-    AT_ASSERTM(param_fp32.numel() == param_fp16.numel(), "param_fp32 and param_fp16 must have the same number of elements");
-    AT_ASSERTM(param_fp32.numel() == g_fp16.numel(), "param_fp32 and g_fp16 must have the same number of elements");
-    AT_ASSERTM(param_fp32.numel() == m_fp32.numel(), "param_fp32 and m_fp32 must have the same number of elements");
-    AT_ASSERTM(param_fp32.numel() == v_fp32.numel(), "param_fp32 and v_fp32 must have the same number of elements");
 
-    float bias_correction1 = 1 - powf(beta1, step);
-    float bias_correction2 = 1 - powf(beta2, step);
-
-    adam_cpu_launcher(
-        param_fp32.numel(),
-        param_fp32.data_ptr<float>(),
-        param_fp16.data_ptr<at::Half>(),
-        g_fp16.data_ptr<at::Half>(),
-        m_fp32.data_ptr<float>(),
-        v_fp32.data_ptr<float>(),
-        beta1, beta2, 
-        eps, lr, 
-        scale, 
-        weight_decay,
-        bias_correction1,
-        bias_correction2
-    );
-} 
-
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("f_adam_cpu", &F_adam_cpu, "adam function cpu");
-}

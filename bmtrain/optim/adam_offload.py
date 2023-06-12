@@ -1,9 +1,7 @@
 import torch
 from ..global_var import config
-from . import _cpu as C
-from . import _cuda as G
+from . import _function as F
 from .. import nccl
-import torch.optim._functional as F
 import inspect
 from ..utils import check_torch_version
 from copy import deepcopy
@@ -107,7 +105,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     grad = -state["_grad_fp16"]
                 else:
                     grad = state["_grad_fp16"]
-                C.f_adam_cpu(
+                F.adam_cpu(
                     state["_param_fp32"].view(-1),
                     state["_param_fp16"].view(-1),
                     grad.view(-1),
@@ -128,9 +126,9 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 else:
                     grad = state["_grad_fp32"]
                 other_kwargs = {}
-                if 'maximize' in inspect.signature(F.adam).parameters:
+                if 'maximize' in inspect.signature(torch.optim._functional.adam).parameters:
                     other_kwargs['maximize'] = False
-                F.adam(
+                torch.optim._functional.adam(
                     [state["_param_fp32"]],
                     [grad],
                     [state["exp_avg"]],

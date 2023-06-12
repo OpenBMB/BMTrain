@@ -1,7 +1,8 @@
 import torch
 from ..global_var import config
-import torch.optim._functional as F
-from . import _cuda as C
+from . import _function as F
+import torch.optim._functional
+from .. import  C
 from .. import nccl
 import inspect
 from ..utils import check_torch_version
@@ -87,7 +88,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                         grad = p.grad
                         
                     if p.dtype == torch.half:
-                        C.f_adam(
+                        F.adam(
                             state["_param_fp32"],    # fp32
                             p,                      # fp16
                             grad,                 # fp16
@@ -102,9 +103,9 @@ class AdamOptimizer(torch.optim.Optimizer):
                         )
                     else:
                         other_kwargs = {}
-                        if 'maximize' in inspect.signature(F.adam).parameters:
+                        if 'maximize' in inspect.signature(torch.optim._functional.adam).parameters:
                             other_kwargs['maximize'] = False
-                        F.adam(
+                        torch.optim._functional.adam(
                             [p],
                             [grad / scale],
                             [state['exp_avg']],

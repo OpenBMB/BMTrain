@@ -1,6 +1,5 @@
 #include <cuda_fp16.h>
-#include <torch/extension.h>
-#include <ATen/cuda/CUDAContext.h>
+#include <cstdint>
 
 namespace{
 __inline__ __device__ bool isnan_(half v) {
@@ -68,21 +67,21 @@ __global__ void bmt_has_nan_inf_2(
 }
 
 void has_nan_inf_launcher(
-    const torch::Tensor &g_fp16,
-    torch::Tensor mid,
-    torch::Tensor out
+    int32_t n,
+    std::uintptr_t g_fp16,
+    std::uintptr_t mid,
+    std::uintptr_t out,
+    std::uintptr_t stream
 ) {
-    int n = g_fp16.numel();
     if (n <= 0) return;
-    auto g_ptr = reinterpret_cast<half*>(g_fp16.data_ptr<at::Half>());
-    auto mid_ptr = mid.data_ptr<uint8_t>();
-    auto stream = at::cuda::getCurrentCUDAStream();
-
+    auto g_ptr = reinterpret_cast<half*>(g_fp16);
+    auto mid_ptr = reinterpret_cast<uint8_t*>(mid);
+    auto out_ptr = reinterpret_cast<uint8_t*>(out);
     int32_t threads = 1024;
     dim3 block_size = dim3(threads, 1, 1);
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
     dim3 clamp_grid_size = dim3(min((n + threads - 1) / threads, 1024), 1, 1);
     
-    bmt_has_nan_inf_1<<<clamp_grid_size, block_size, 0, stream.stream()>>>(n, g_ptr, mid_ptr);
-    bmt_has_nan_inf_2<<<1, block_size, 0, stream.stream()>>>(mid_ptr, out.data_ptr<uint8_t>());
+    bmt_has_nan_inf_1<<<clamp_grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, mid_ptr);
+    bmt_has_nan_inf_2<<<1, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(mid_ptr, out_ptr);
 }

@@ -1,6 +1,4 @@
 #include <cuda_fp16.h>
-#include <torch/extension.h>
-#include <ATen/cuda/CUDAContext.h>
 
 namespace {
 const int WARP_SZ = 32;

@@ -9,6 +9,7 @@ from .parameter import DistributedParameter, OpAllGather
 from .checkpointing import ScopedTensorInspectorContext
 from . import debug
 import copy
+import inspect
 
 
 # the flag is used to control the zero level , 0 means normal zero3 , 1 means forward without release parameter ,2 means backward without gather parameter
@@ -617,10 +618,14 @@ class CheckpointBlock(torch.nn.Module):
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, (offset_end - offset_st,))[:]
                 del tmp_tensor
         
-    def _named_members(self, get_members_fn, prefix='', recurse=True, remove_duplicate=True):
+    def _named_members(self, get_members_fn, prefix='', recurse=True, **kwargs):
         r"""Helper method for yielding various names + members of modules."""
-        return self._module._named_members(get_members_fn, prefix, recurse)
         
+        #compitibity with torch 2.0
+        if "remove_duplicate" in inspect.signature(torch.nn.Module._named_members).parameters and "remove_duplicate" not in kwargs:
+            kwargs['remove_duplicate'] = True
+        return self._module._named_members(get_members_fn, prefix, recurse, **kwargs)
+    
     def named_modules(self, memo = None, prefix: str = '', remove_duplicate: bool = True):
         r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.

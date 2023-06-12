@@ -1,7 +1,7 @@
 from typing import Optional, Union, List, Dict, Tuple
 import torch
 
-from . import _cuda as G
+from .. import C 
 from ..utils import print_rank
 from ..lr_scheduler.warmup import WarmupLRScheduler
 from .. import nccl
@@ -13,7 +13,7 @@ def check_overflow(param_groups):
     for group in param_groups:
         for p in group['params']:
             if p.grad is not None and p.dtype == torch.half: # TODO support other types
-                G.f_has_inf_nan(p.grad, has_inf_or_nan)
+                C.f_has_inf_nan(p.grad, has_inf_or_nan)
 
     if "comm" in config:
         nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
