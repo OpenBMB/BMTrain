@@ -101,7 +101,7 @@ class OptimManager:
         This is a helper function to call optimizer.zero_grad()
         """
         for optimizer in self.optimizers:
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=False)
 
     def step(self):
         """
@@ -122,10 +122,10 @@ class OptimManager:
                     break
             if has_overflow:
                 print_rank("Gradient overflow, change scale from %lf to %lf" % (self.loss_scale, self.loss_scale / self.loss_scale_factor))
-                self._justify_scale(self.loss_scale / self.loss_scale_factor)
-                self.zero_grad()
+                with torch.no_grad():
+                    self._justify_scale(self.loss_scale / self.loss_scale_factor)
+                    self.zero_grad()
                 return
-                
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
             if hasattr(optimizer, "_bmtrain_optimizer") and optimizer._bmtrain_optimizer:
                 print("BMTrain optimizer step")

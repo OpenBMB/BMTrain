@@ -251,3 +251,8 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
             'state': packed_state,
             'param_groups': param_groups,
         }
+            
+    #TODO zero_grad(set_to_none=True) makes optimizer crashed, maybe the reason of grad accu
+    def zero_grad(self, set_to_none: bool = False):
+        super().zero_grad(set_to_none=set_to_none)
+
