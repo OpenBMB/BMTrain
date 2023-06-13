@@ -26,7 +26,6 @@ def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.T
     assert param_fp32.numel() == v_fp32.numel(), "param_fp32 and v_fp32 must have the same number of elements"
     bias_correction1 = 1 - beta1 ** step
     bias_correction2 = 1 - beta2 ** step
-    stream = torch.cuda.current_stream().cuda_stream
     C.adam_cpu_launcher(
                     param_fp32.numel(),
                     param_fp32.data_ptr(),
@@ -40,7 +39,6 @@ def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.T
                     weight_decay,
                     bias_correction1,
                     bias_correction2,
-                    stream
                 )
 
 def adam(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.Tensor, m_fp16: torch.Tensor,
