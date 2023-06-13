@@ -128,7 +128,6 @@ class OptimManager:
                 return
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
             if hasattr(optimizer, "_bmtrain_optimizer") and optimizer._bmtrain_optimizer:
-                print("BMTrain optimizer step")
                 optimizer.step(scale=self.loss_scale)
             else:
                 if self.loss_scale_enabled:
