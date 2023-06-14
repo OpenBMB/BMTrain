@@ -10,16 +10,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.6', '3.7', '3.8', '3.9']
+        python-version: ['36', '37', '38', '39']
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set Up the Python
       uses: actions/setup-python@v2
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: 3.9
 
     - name: Install twine
       run: python -m pip install twine
@@ -36,7 +36,6 @@ jobs:
     - name: Run Docker image and execute script
       run: |
         version=${{ matrix.python-version }}
-        version=${version//./}
         alias python=/opt/python/cp${version}*/bin/python
         alias pip=/opt/python/cp${version}*/bin/pip
         docker run -v ${{ github.workspace }}:/workspace/BMTrain maydomine/bmtrain-manylinux:cu110 /bin/bash -c "pip install pybind11; pip install numpy;python setup.py bdist_wheel -d ./dist/;python setup.py sdist -d ./dist/"
