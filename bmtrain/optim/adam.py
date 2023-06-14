@@ -1,10 +1,11 @@
 import torch
 from ..global_var import config
-import torch.optim._functional as F
-from . import _cuda as C
+from . import _function as F
+import torch.optim._functional
+from .. import  C
 from .. import nccl
 import inspect
-
+from ..utils import check_torch_version
 from copy import deepcopy
 from itertools import chain
 from collections import defaultdict
@@ -30,17 +31,17 @@ class AdamOptimizer(torch.optim.Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super().__init__(params, defaults)
 
-        self.load_stream = torch.cuda.Stream()
         self._hold_steps = hold_steps
 
     def _on_justify_scale(self, old_scale, new_scale):
         delta = new_scale / old_scale
         for group in self.param_groups:
             for p in group['params']:
-                state = self.state[p]
-                if len(state) > 0:
-                    state['exp_avg'] *= delta
-                    state['exp_avg_sq'] *= delta
+                if p in self.state:
+                    state = self.state[p]
+                    if len(state) > 0:
+                        state['exp_avg'] *= delta
+                        state['exp_avg_sq'] *= delta
 
     @torch.no_grad()
     def step(self, closure=None, scale=1):
@@ -87,7 +88,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                         grad = p.grad
                         
                     if p.dtype == torch.half:
-                        C.f_adam(
+                        F.adam(
                             state["_param_fp32"],    # fp32
                             p,                      # fp16
                             grad,                 # fp16
@@ -102,15 +103,15 @@ class AdamOptimizer(torch.optim.Optimizer):
                         )
                     else:
                         other_kwargs = {}
-                        if 'maximize' in inspect.signature(F.adam).parameters:
+                        if 'maximize' in inspect.signature(torch.optim._functional.adam).parameters:
                             other_kwargs['maximize'] = False
-                        F.adam(
+                        torch.optim._functional.adam(
                             [p],
                             [grad / scale],
                             [state['exp_avg']],
                             [state["exp_avg_sq"]],
                             [],
-                            [state["step"]] if int(torch.__version__.split('.')[1]) < 12
+                            [state["step"]] if check_torch_version("1.12.0") < 0 
                                 else [torch.tensor(state["step"])],
                             amsgrad=False,
                             beta1=group['betas'][0],
@@ -177,3 +178,7 @@ class AdamOptimizer(torch.optim.Optimizer):
         param_groups = [
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
+
+    #TODO zero_grad(set_to_none=True) makes optimizer crashed, maybe the reason of grad accu
+    def zero_grad(self, set_to_none: bool = False):
+        super().zero_grad(set_to_none=set_to_none)

@@ -303,7 +303,7 @@ for iteration in range(1000):
     optim_manager.zero_grad() # calling zero_grad for each optimizer
 
     # loss scale and backward
-    optim_manager.backward()
+    optim_manager.backward(loss)
 
     # clip grad norm
     grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=1.0)

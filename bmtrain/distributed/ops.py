@@ -20,22 +20,29 @@ DTYPE_LIST = [
 def send_activations(hidden_state, next_rank, comm):
     send_meta(hidden_state, next_rank, comm)
     ncclSend(hidden_state.storage(), next_rank, comm)
+
 def recv_activations(prev_rank, comm):
     dtype, shape = recv_meta(prev_rank, comm)
     hidden_state = torch.empty(shape, dtype=dtype, device="cuda")
     ncclRecv(hidden_state.storage(), prev_rank, comm)
     return hidden_state
+
 def send_meta(x, next_rank, comm):
-    meta = [len(x.size()), DTYPE_LIST.index(x.dtype)] + list(x.size())
-    meta_data = torch.tensor(data=meta, device=x.device, dtype=torch.long)
+    meta_data = torch.tensor(data=[0]*50, device="cuda", dtype=torch.int)
+    meta_data[0] = len(x.size())
+    meta_data[1] = DTYPE_LIST.index(x.dtype)
+    meta_data[2:len(x.size())+2] = torch.tensor(x.size(), device="cuda", dtype=torch.int)
+    meta_data = meta_data.contiguous()
     ncclSend(meta_data.storage(), next_rank, comm)
+
 def recv_meta(prev_rank, comm):
-    meta_data = torch.tensor(data=[0]*50, device="cuda", dtype=torch.long)
+    meta_data = torch.tensor(data=[0]*50, device="cuda", dtype=torch.int)
     ncclRecv(meta_data.storage(), prev_rank, comm)
     n_dims = meta_data[0].item()
     dtype = DTYPE_LIST[meta_data[1].item()]
     shape = meta_data[2:n_dims+2].tolist()
     return dtype,shape
+
 class OpBroadcast(torch.autograd.Function):
     @staticmethod
     def forward(ctx, src, root, comm = None):

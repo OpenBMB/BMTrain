@@ -37,6 +37,17 @@ class L2(bmt.DistributedModule):
 
     def forward(self, x):
         x = self.m1(x)
+        x = self.m2(x)
+        return x
+
+class L2_record(bmt.DistributedModule):
+    def __init__(self, dim : int):
+        super().__init__()
+        self.m1 = Linear(dim, dim)
+        self.m2 = Linear(dim, dim)
+
+    def forward(self, x):
+        x = self.m1(x)
         bmt.inspect.record_tensor(x, "hidden")
         x = self.m2(x)
         return x
@@ -134,13 +145,13 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len):
 
     pre = Linear(dim, dim)
     post = Linear(dim, dim)
-    ms = [L2(dim) for i in range(num_layer)]
+    ms = [L2_record(dim) if i%2==0 else L2(dim) for i in range(num_layer)]
 
     inp = torch.randn((batch, seq_len, dim)).cuda()
     last_weight = torch.randn((batch, seq_len, dim)).cuda()
     middle_weight = [
         torch.randn((batch, seq_len, dim)).cuda()
-        for i in range(len(ms))
+        for i in range(len(ms)//2)
     ]
 
     bmt.init_parameters(pre)
@@ -157,7 +168,7 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len):
     ) + "\n"
 
     loss = 0
-    for i in range(len(ms)):
+    for i in range(len(ms)//2):
         loss = loss + (inspector.summary[i]['tensor'] * middle_weight[i]).sum()
 
     with bmt.inspect.inspect_tensor():
@@ -189,7 +200,7 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len):
         inspector.get_summary()
     ) + "\n"
 
-    return ret.replace("None  ", "0.0000") + "\n" # replace for matching None grad with zero_grad
+    return ret + "\n" # replace for matching None grad with zero_grad
 
 def run(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
     ret = ""
@@ -215,8 +226,7 @@ def test_main():
                 assert len(words) == len(words2)
                 for w, w2 in zip(words, words2):
                     try:
-                        if isinstance(eval(w), float):
-                            is_float = True
+                        is_float = isinstance(eval(w), float)
                     except:
                         is_float = False
                     if is_float:

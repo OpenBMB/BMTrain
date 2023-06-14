@@ -43,8 +43,12 @@ def init_distributed(
     rank = int(os.environ.get("RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     local_size = int(os.environ.get("LOCAL_WORLD_SIZE","1"))
-    addr = os.environ.get("MASTER_ADDR", "localhost")
-    port = os.environ.get("MASTER_PORT", "10010")
+    if "MASTER_ADDR" not in os.environ:
+        os.environ["MASTER_ADDR"]="localhost"
+    if "MASTER_PORT" not in os.environ:
+        os.environ["MASTER_PORT"]="10010"
+    addr = os.environ["MASTER_ADDR"]
+    port = os.environ["MASTER_PORT"]
     master = addr+":"+port
     timeout = datetime.timedelta(seconds=1800)
     rendezvous_iterator = dist.rendezvous(
@@ -145,11 +149,13 @@ class topology:
         self.prev_rank = self.stage_id-1 if self.stage_id > 0 else -1
         self.tails = self.pp_group[self.pipe_idx, self.stage_id:].tolist()
         self.heads = self.pp_group[self.pipe_idx, :self.stage_id + 1].tolist()
+
     def get_group_id(self,group_name):
         if group_name == "pipe":
             return self.pipe_idx
         elif group_name == "zero":
             return self.zero_idx
+        
     def get_group_rank(self,group_name):
         if group_name == "pipe":
             return self.stage_id

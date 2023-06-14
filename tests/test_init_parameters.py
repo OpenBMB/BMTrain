@@ -168,10 +168,12 @@ def test_main():
     manual_seed(33)
     m[2] = Linear_BMTInitializer(*shape)
     bmt.init_parameters(m[2])
+    bmt.synchronize()
     ret[2] = (m[2].weight.data, m[2].bias.data)
 
     manual_seed(33)
     m[3] = Linear_ManualInitBefore(*shape)
+    bmt.synchronize()
     ret[3] = (m[3].weight.data, m[3].bias.data)
 
     # manual_seed(33)
@@ -211,6 +213,7 @@ def test_main():
         print(ret[i])
     for i in range(10):
         for j in range(10):
+            print(i, j)
             assert_all_eq(ret[i][0], ret[j][0])
             assert_all_eq(ret[i][1], ret[j][1])
 

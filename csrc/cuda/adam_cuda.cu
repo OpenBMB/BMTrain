@@ -1,6 +1,5 @@
 #include <cuda_fp16.h>
-#include <torch/extension.h>
-#include <ATen/cuda/CUDAContext.h>
+#include <cstdint>
 
 namespace {
 // blocks <n // 1024>,      threads<min(n, 1024)>
@@ -37,28 +36,28 @@ __global__ void adam_fp32_accum(
 }
 
 void adam_launcher(
-    const torch::Tensor &param_fp32,
-    const torch::Tensor &param_fp16,
-    const torch::Tensor &g_fp16,
-    const torch::Tensor &m_fp16,
-    const torch::Tensor &v_fp32,
+    int n,
+    std::uintptr_t param_fp32,
+    std::uintptr_t param_fp16,
+    std::uintptr_t g_fp16,
+    std::uintptr_t m_fp16,
+    std::uintptr_t v_fp32,
     float beta1, float beta2,
     float eps, float lr,
     float scale,
     float weight_decay,
     float bias_correction1,
-    float bias_correction2
+    float bias_correction2,
+    uintptr_t stream
 ) {
-    int32_t n = param_fp32.numel();
     if (n <= 0) return;
-    auto g_ptr = reinterpret_cast<half*>(g_fp16.data_ptr<at::Half>());
-    auto m_ptr = reinterpret_cast<half*>(m_fp16.data_ptr<at::Half>());
-    auto v_ptr = v_fp32.data_ptr<float>();
-    auto param_ptr = param_fp32.data_ptr<float>();
-    auto param_h_ptr = reinterpret_cast<half*>(param_fp16.data_ptr<at::Half>());
+    auto g_ptr = reinterpret_cast<half*>(g_fp16);
+    auto m_ptr = reinterpret_cast<half*>(m_fp16);
+    auto param_h_ptr = reinterpret_cast<half*>(param_fp16);
+    auto param_fp32_ptr = reinterpret_cast<float*>(param_fp32);
+    auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
     int32_t threads = 1024;
     dim3 block_size = dim3(threads, 1, 1);
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
-    auto stream = at::cuda::getCurrentCUDAStream();
-    adam_fp32_accum<<<grid_size, block_size, 0, stream.stream()>>>(n, g_ptr, m_ptr, v_ptr, param_ptr, param_h_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
+    adam_fp32_accum<<<grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, m_ptr, v_fp32_ptr, param_fp32_ptr, param_h_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
 }

@@ -3,15 +3,19 @@ from tqdm import tqdm
 
 
 tq = tqdm([
+    ("different_output_shape", 1),
     ("load_ckpt", 1),
     ("init_parameters", 1),
     ("init_parameters_multi_gpu", 4),
+    ("optim_state", 4),
 
     ("requires_grad", 1),
+    ("requires_grad_multi_gpu", 2),
     ("has_inf_nan", 1),
     ("dropout", 1),
     ("loss_func", 1),
 
+    ("multi_return", 2),
     ("middle_hidden", 4),
     ("other_hidden", 4),
     ("inspector_hidden", 2),

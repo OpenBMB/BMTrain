@@ -159,7 +159,7 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_pre=False, only_post
         ret += bmt.inspect.format_summary(
             bmt.inspect.inspect_model(m, '*')
         )
-    return ret.replace("None  ", "0.0000") + "\n" # replace for matching None grad with zero_grad
+    return ret + "\n" # replace for matching None grad with zero_grad
 
 def run(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
     ret = ""

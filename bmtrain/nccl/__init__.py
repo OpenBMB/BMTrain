@@ -1,7 +1,7 @@
 
 from typing_extensions import Literal
 import torch
-from . import _C as C
+from .. import C
 from .enums import *
 
 class NCCLCommunicator:
