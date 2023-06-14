@@ -1,8 +1,6 @@
-import torch
 import os
 from setuptools.command.build_ext import build_ext
 from setuptools import  setup, find_packages, Extension
-from torch.utils.cpp_extension import BuildExtension
 import setuptools
 import warnings
 import sys
