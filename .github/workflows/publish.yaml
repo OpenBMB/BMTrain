@@ -38,7 +38,7 @@ jobs:
         version=${{ matrix.python-version }}
         alias python=/opt/python/cp${version}*/bin/python
         alias pip=/opt/python/cp${version}*/bin/pip
-        docker run -v ${{ github.workspace }}:/workspace/BMTrain maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain && python setup.py bdist_wheel -d ./dist/;python setup.py sdist -d ./dist/"
+        docker run -v ${{ github.workspace }}:/workspace/BMTrain maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain; python setup.py bdist_wheel -d ./dist/;python setup.py sdist -d ./dist/"
 
     - name: Publish to PyPI
       env:
