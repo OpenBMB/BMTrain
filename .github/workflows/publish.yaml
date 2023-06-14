@@ -36,7 +36,7 @@ jobs:
     - name: Run Docker image and execute script
       run: |
         version=${{ matrix.python-version }}
-        docker run -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:$PATH" -v ${{ github.workspace }}:/workspace/BMTrain maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./dist/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./dist/"
+        docker run -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:$PATH" -v ${{ github.workspace }}:/workspace/BMTrain -it maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./dist/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./dist/"
 
     - name: Publish to PyPI
       env:
