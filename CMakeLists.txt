@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CUDA_STANDARD 14)
 set(CMAKE_CUDA_STANDARD_REQUIRED True)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_62,code=sm_62 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_72,code=sm_72 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_86,code=sm_86")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_62,code=sm_62 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_72,code=sm_72 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80")
 set(CMAKE_BUILD_RPATH $ORIGIN)
 set(CMAKE_INSTALL_RPATH $ORIGIN)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/)
@@ -20,7 +20,8 @@ execute_process(COMMAND ${Python_EXECUTABLE} "-c"
     "import pybind11; print(pybind11.get_cmake_dir())"
     OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
     OUTPUT_STRIP_TRAILING_WHITESPACE)
-message (STATUS "PYBIND11_CMAKE_DIR: ${PYBIND11_CMAKE_DIR}")
+message (STATUS "PYBIND11_CMAKE_DIR: ${PYB
+IND11_CMAKE_DIR}")
 list(APPEND CMAKE_PREFIX_PATH ${PYBIND11_CMAKE_DIR})
 find_package(pybind11 REQUIRED)
 
@@ -66,7 +67,7 @@ target_include_directories(C PRIVATE ${NCCL_INCLUDE_DIRS})
 target_compile_definitions(C
     PRIVATE VERSION_INFO=${EXAMPLE_VERSION_INFO})
 
-set_target_properties(C PROPERTIES CUDA_ARCHITECTURES "61;62;70;72;75;80;86")
+set_target_properties(C PROPERTIES CUDA_ARCHITECTURES "61;62;70;72;75;80")
 
 target_include_directories(C
     PRIVATE "csrc/include"
