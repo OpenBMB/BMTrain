@@ -35,13 +35,11 @@ jobs:
 
     - name: Run Docker image and execute script
       run: |
-        docker run -v ${{ github.workspace }}:/workspace/BMTrain maydomine/bmtrain-manylinux:cu110 /bin/bash -c "chmod +x /workspace/BMTrain/build.sh; /workspace/BMTrain/build.sh"
-    - name: Remove dot from python version
-      id: py-version
-      run: echo "::set-output name=version::${{ replace(matrix.python-version, '.', '') }}"
-
-    - name: Build source distribution
-      run: docker run -v ${{ github.workspace }}:/workspace/BMTrain maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain; /opt/python/cp${{ steps.py-version.outputs.version }}*/bin/python setup.py sdist"
+        version=${{ matrix.python-version }}
+        version=${version//./}
+        alias python=/opt/python/cp${version}*/bin/python
+        alias pip=/opt/python/cp${version}*/bin/pip
+        docker run -v ${{ github.workspace }}:/workspace/BMTrain maydomine/bmtrain-manylinux:cu110 /bin/bash -c "pip install pybind11; pip install numpy;python setup.py bdist_wheel -d ./dist/;python setup.py sdist -d ./dist/"
 
     - name: Publish to PyPI
       env:
