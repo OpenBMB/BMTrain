@@ -4,7 +4,8 @@ on:
   push:
     branches:
       - release
-
+env:
+  version: 0.2.3
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -60,16 +61,17 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
       with:
-        tag_name: 0.2.3
-        release_name: 0.2.3
+        tag_name: ${{ env.version }}
+        release_name: ${{ env.version }}
         body: |
-          Release 0.2.3
+          Release ${{ env.version }}
           Brand-new BMTrain
 
     - name: Upload Distribution Files
       uses: softprops/action-gh-release@v1
       with:
         files: ./dist/*
+        tag: ${{ env.version }}
         prerelease: false
         release_tag: ${{ steps.create_release.outputs.tag }}
         github_token: ${{ secrets.GITHUB_TOKEN }}
