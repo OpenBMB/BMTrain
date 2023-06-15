@@ -3,7 +3,8 @@ name: Build and Publish to PyPI
 on:
   push:
     tags:
-    - "v*.*.*"
+      - "v*.*.*"
+      
 jobs:
   build:
     runs-on: ubuntu-latest
