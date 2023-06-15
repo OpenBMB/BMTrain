@@ -48,9 +48,6 @@ jobs:
       with:
         python-version: 3.9
 
-    - name: Install twine
-      run: python -m pip install twine
-
     - name: Download distribution files
       uses: actions/download-artifact@v2
       with:
@@ -63,11 +60,11 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
       with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
+        tag_name: 0.2.3
+        release_name: 0.2.3
         body: |
-          Release ${{ github.ref }}
-          This is the release description.
+          Release 0.2.3
+          Brand-new BMTrain
 
     - name: Upload Distribution Files
       uses: softprops/action-gh-release@v1
