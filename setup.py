@@ -97,13 +97,14 @@ ext_modules = [
 ]
 setup(
     name='bmtrain',
-    version='0.2.2',
+    version='0.2.3',
     author="Guoyang Zeng",
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",
     packages=find_packages(),
     install_requires=[
         "numpy",
+		"nvidia-nccl-cu11>=2.14.3"
     ],
     ext_modules=ext_modules,
     cmdclass={
