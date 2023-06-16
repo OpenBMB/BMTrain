@@ -3,7 +3,7 @@
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
-#include "nccl.h"
+#include <nccl.h>
 
 void checkNCCLStatus(ncclResult_t result) {
     if (result == ncclSuccess) return;

@@ -9,11 +9,30 @@ else()
 endif()
 
 # Compatible layer for CMake <3.12. NCCL_ROOT will be accounted in for searching paths and libraries for CMake >=3.12.
-list(APPEND CMAKE_PREFIX_PATH ${NCCL_ROOT})
+if(NOT NCCL_INCLUDE_DIR OR NOT NCCL_LIB_DIR)
+  execute_process(
+    COMMAND python -c "import nvidia.nccl;import os; print(os.path.dirname(nvidia.nccl.__file__))"
+    OUTPUT_VARIABLE NCCL_PIP_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  list(APPEND NCCL_ROOT $ENV{NCCL_PIP_DIR})
+  if(NOT NCCL_INCLUDE_DIR)
+    set(NCCL_INCLUDE_DIR "${NCCL_PIP_DIR}/include")
+  endif()
+  if(NOT NCCL_LIB_DIR)
+    set(NCCL_LIB_DIR "${NCCL_PIP_DIR}/lib")
+  endif()
+  find_library(NCCL_LIBRARIES
+  NAMES ${NCCL_LIBNAME}
+  HINTS ${NCCL_LIB_DIR})
+endif()
 
+list(APPEND CMAKE_PREFIX_PATH ${NCCL_ROOT})
 find_path(NCCL_INCLUDE_DIRS
   NAMES nccl.h
   HINTS ${NCCL_INCLUDE_DIR})
+
+
 
 if (USE_STATIC_NCCL)
   MESSAGE(STATUS "USE_STATIC_NCCL is set. Linking with static NCCL library.")
@@ -23,14 +42,20 @@ if (USE_STATIC_NCCL)
   endif()
 else()
   SET(NCCL_LIBNAME "nccl")
+  
   if (NCCL_VERSION)  # Prefer the versioned library if a specific NCCL version is specified
+    message(STATUS "NCCL version: ${NCCL_VERSION}")
     set(CMAKE_FIND_LIBRARY_SUFFIXES ".so.${NCCL_VERSION}" ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  else()
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".so.2" ${CMAKE_FIND_LIBRARY_SUFFIXES})
   endif()
+
 endif()
 
 find_library(NCCL_LIBRARIES
   NAMES ${NCCL_LIBNAME}
   HINTS ${NCCL_LIB_DIR})
+
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(NCCL DEFAULT_MSG NCCL_INCLUDE_DIRS NCCL_LIBRARIES)
