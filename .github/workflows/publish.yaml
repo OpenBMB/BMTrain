@@ -28,13 +28,15 @@ jobs:
     - name: Run Docker image and execute script
       run: |
         version=${{ matrix.python-version }}
-        docker run -e CUDACXX=/usr/local/cuda/bin/nvcc -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:/opt/rh/devtoolset-7/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-7/root/usr/lib64:/opt/rh/devtoolset-7/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./dist/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./dist/"
+        docker run -e CUDACXX=/usr/local/cuda/bin/nvcc -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:/opt/rh/devtoolset-7/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-7/root/usr/lib64:/opt/rh/devtoolset-7/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./dist/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./dist/;auditwheel repair --plat manylinux2014_x86_64 ./dist/bmtrain-0.2.2-cp${version}*.whl"
         
     - name: Archive distribution files
       uses: actions/upload-artifact@v2
       with:
         name: dist
-        path: dist
+        path: |
+          dist/*.tar.gz
+          dist/wheelhouse/*.whl
 
   publish:
     needs: build
