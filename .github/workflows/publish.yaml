@@ -36,7 +36,7 @@ jobs:
         name: dist
         path: |
           sdist/*.tar.gz
-          wheelhouse/*.whl
+          wheel/*.whl
 
   publish:
     needs: build
@@ -62,4 +62,4 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
       run: |
         cd dist
-        python -m twine upload --repository-url https://test.pypi.org/legacy/ sdist/*.tar.gz wheelhouse/*.whl
+        python -m twine upload --repository-url https://test.pypi.org/legacy/ sdist/*.tar.gz wheel/*.whl

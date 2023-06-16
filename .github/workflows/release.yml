@@ -36,7 +36,7 @@ jobs:
         name: dist
         path: |
           sdist/*.tar.gz
-          wheelhouse/*.whl
+          wheel/*.whl
 
   publish:
     needs: build
@@ -62,7 +62,7 @@ jobs:
         body_path: "Release.txt"
         files: ｜
           ./dist/sdist/*.tar.gz
-          ./dist/wheelhouse/*.whl
+          ./dist/wheel/*.whl
         prerelease: false
         token: ${{ secrets.RELEASE_TOKEN }}
         release_tag: ${{ steps.create_release.outputs.tag }}
