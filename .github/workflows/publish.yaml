@@ -28,23 +28,20 @@ jobs:
     - name: Run Docker image and execute script
       run: |
         version=${{ matrix.python-version }}
-        docker run -e CUDACXX=/usr/local/cuda/bin/nvcc -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:/opt/rh/devtoolset-7/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-7/root/usr/lib64:/opt/rh/devtoolset-7/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./dist/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./dist/;auditwheel repair --plat manylinux2014_x86_64 ./dist/bmtrain-0.2.2-cp${version}*.whl"
+        docker run -e CUDACXX=/usr/local/cuda/bin/nvcc -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:/opt/rh/devtoolset-7/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-7/root/usr/lib64:/opt/rh/devtoolset-7/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./wheel/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./sdist/;auditwheel repair --plat manylinux2014_x86_64 ./wheel/bmtrain-0.2.2-cp${version}*.whl"
         
     - name: Archive distribution files
       uses: actions/upload-artifact@v2
       with:
         name: dist
         path: |
-          dist/*.tar.gz
+          sdist/*.tar.gz
           wheelhouse/*.whl
 
   publish:
     needs: build
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
     - name: Set Up the Python
       uses: actions/setup-python@v2
       with:
@@ -65,4 +62,4 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
       run: |
         cd dist
-        python -m twine upload --repository-url https://test.pypi.org/legacy/ dist/*.tar.gz wheelhouse/*.whl
+        python -m twine upload --repository-url https://test.pypi.org/legacy/ sdist/*.tar.gz wheelhouse/*.whl
