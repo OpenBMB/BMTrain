@@ -106,6 +106,9 @@ setup(
         "numpy",
 		"nvidia-nccl-cu11>=2.14.3"
     ],
+    setup_requires=[
+        "nvidia-nccl-cu11>=2.14.3"
+    ],
     ext_modules=ext_modules,
     cmdclass={
         'build_ext': CMakeBuild
