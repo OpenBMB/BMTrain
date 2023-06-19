@@ -1,5 +1,3 @@
-#! /bin/bash
-GPUS_PER_NODE=8
-cd example
-
-torchrun --nnodes=${WORLD_SIZE} --nproc_per_node=${GPUS_PER_NODE} --rdzv_id=1 --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} benchmark.py
+export NCCL_P2P_DISABLE=1
+export CUDA_LAUNCH_BLOCKING=1
+torchrun --nnodes=1 --nproc_per_node=4 --rdzv_id=1 --rdzv_backend=c10d --rdzv_endpoint=localhost train.py

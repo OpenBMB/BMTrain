@@ -129,11 +129,17 @@ class OpMicroForward(torch.autograd.Function):
                             # change the tensor in placeholder
                             ctx.layer_inspector[idx][j]["tensor"] = it["tensor"]
                             ctx.layer_inspector[idx][j]["requires_grad"] = it["requires_grad"]
-                        torch.autograd.backward(
-                            [output] + [hidden_state["tensor"] for hidden_state in inspector.hidden_states],
-                            [grad_hidden_state] + list(grad_inspector[-len(inspector.hidden_states):]),
-                        )
-                        grad_inspector = grad_inspector[:-len(inspector.hidden_states)]
+                        if len(inspector.hidden_states) > 0:
+                            torch.autograd.backward(
+                                [output] + [hidden_state["tensor"] for hidden_state in inspector.hidden_states],
+                                [grad_hidden_state] + list(grad_inspector[-len(inspector.hidden_states):]),
+                            )
+                            grad_inspector = grad_inspector[:-len(inspector.hidden_states)]
+                        else:
+                            torch.autograd.backward(
+                                [output],
+                                [grad_hidden_state],
+                            )
                         grad_hidden_state = ipt.grad
                         if grad_middle is not None:
                             grad_hidden_state = grad_hidden_state + grad_middle[idx]

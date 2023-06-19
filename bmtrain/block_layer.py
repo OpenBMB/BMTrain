@@ -529,6 +529,39 @@ class CheckpointBlock(torch.nn.Module):
             elif strict:
                 missing_keys.append(key)
 
+        for name, param in self.named_parameters():
+            if isinstance(param, DistributedParameter) and not param._in_checkpoint_block:
+                key = prefix + name
+                all_keys.append(key)
+                if key in state_dict:
+                    input_param = state_dict[key]
+                    is_param_lazy = torch.nn.parameter.is_lazy(param)
+                    # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
+                    if not is_param_lazy and len(param.shape) == 0 and len(input_param.shape) == 1:
+                        input_param = input_param[0]
+
+                    if not is_param_lazy and not isinstance(param, DistributedParameter) and input_param.shape != param.shape:
+                        # local shape should match the one in checkpoint
+                        error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
+                                        'the shape in current model is {}.'
+                                        .format(key, input_param.shape, param.shape))
+                        continue
+                    if not is_param_lazy and isinstance(param, DistributedParameter) and input_param.shape != param._original_shape:
+                        error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
+                                        'the shape in current model is {}.'
+                                        .format(key, input_param.shape, param.shape))
+                    try:
+                        with torch.no_grad():
+                            param._copy_data(input_param)
+                    except Exception as ex:
+                        error_msgs.append('While copying the parameter named "{}", '
+                                        'whose dimensions in the model are {} and '
+                                        'whose dimensions in the checkpoint are {}, '
+                                        'an exception occurred : {}.'
+                                        .format(key, param.size(), input_param.size(), ex.args))
+                elif strict:
+                    missing_keys.append(key)
+
         if strict:
             all_keys = set(all_keys)
             for key in state_dict.keys():
@@ -647,29 +680,30 @@ class CheckpointBlock(torch.nn.Module):
         
 class OpTransformerBlockList(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, placeholder, self : 'TransformerBlockList', save_list, hidden_state, *args):
+    def forward(ctx, placeholder, self : 'TransformerBlockList', save_list, num_hidden, *args):
         tensors = []
         others = []
-        for arg in args:
+        for arg in args[num_hidden:]:
             if torch.is_tensor(arg):
                 tensors.append(arg)
                 others.append(None)
             else:
                 tensors.append(None)
                 others.append(arg)
+        hidden_states = args[:num_hidden]
     
         ctx.nontensor_inputs = others
         ctx.self = self
         ctx.save_list = copy.deepcopy(save_list)
         ctx.num_save_needed = save_list[-1][1]+1
-        ctx.layers_dict=[{} for _ in range(len(self))]
+        ctx.layers_dict = [{} for _ in range(len(self))]
         layer_inputs = []
         layer_inspector = []
         cuda_rng_state = []
         for i in range(len(self)):
             with torch.no_grad():
                 if save_list[i][0] == i:
-                    layer_inputs.append(hidden_state.detach())
+                    layer_inputs += [hidden_state.detach() for hidden_state in hidden_states]
                 cuda_rng_state.append( torch.cuda.get_rng_state() )
                 if config['zero_level']==2:
                     flag = 1
@@ -680,7 +714,9 @@ class OpTransformerBlockList(torch.autograd.Function):
                 block_ctx.enter()
                 # call inner module directly
                 with ScopedTensorInspectorContext() as inspector:
-                    hidden_state = self._modules[str(i)]._module._call_impl(hidden_state, *args)
+                    hidden_states = self._modules[str(i)]._module._call_impl(*hidden_states, *args[num_hidden:])
+                    if not isinstance(hidden_states, tuple):
+                        hidden_states = (hidden_states,)
                 block_ctx.exit()
             for it in inspector.hidden_states:
                 debug.append("_inspect_hidden_states", it)
@@ -688,6 +724,7 @@ class OpTransformerBlockList(torch.autograd.Function):
         
         ctx.layer_inspector = layer_inspector
         ctx.cuda_rng_state = cuda_rng_state
+        ctx.num_hidden = num_hidden
 
         ctx.save_for_backward(*layer_inputs, *tensors)
 
@@ -695,14 +732,20 @@ class OpTransformerBlockList(torch.autograd.Function):
             middle_hiddens = layer_inputs 
             for mid in middle_hiddens:
                 mid.requires_grad_()
-            middle_hiddens = torch.stack(middle_hiddens, dim=0)
+            middle_hiddens = [
+                torch.stack(middle_hiddens[i::num_hidden], dim=0)
+                for i in range(num_hidden)
+            ]
         else:
-            middle_hiddens = None
-        return tuple([hidden_state, middle_hiddens] + [it["tensor"] for inspector_hiddens in ctx.layer_inspector for it in inspector_hiddens])
+            middle_hiddens = [None] * num_hidden
+        return tuple(list(hidden_states) + middle_hiddens + [it["tensor"] for inspector_hiddens in ctx.layer_inspector for it in inspector_hiddens])
 
 
     @staticmethod
-    def backward(ctx, grad_hidden_state : torch.Tensor, grad_middle: List[torch.Tensor], *grad_inspectors):
+    def backward(ctx, *grads):
+        grad_hidden_states = grads[:ctx.num_hidden]
+        grad_middles = grads[ctx.num_hidden:2*ctx.num_hidden]
+        grad_inspectors = grads[2*ctx.num_hidden:]
         def exit_prev(prev_ctx, prev_grad):
             if prev_ctx is not None:
                 if prev_grad:
@@ -722,8 +765,8 @@ class OpTransformerBlockList(torch.autograd.Function):
         all_inputs = []
         input_requires_grad = []
         
-        layer_inputs = ctx.saved_tensors[:ctx.num_save_needed]
-        save_args = ctx.saved_tensors[ctx.num_save_needed:]
+        layer_inputs = ctx.saved_tensors[:ctx.num_save_needed * ctx.num_hidden]
+        save_args = ctx.saved_tensors[ctx.num_save_needed * ctx.num_hidden:]
         for tensor, other in zip(save_args, ctx.nontensor_inputs):
             if tensor is None:
                 all_inputs.append(other)
@@ -753,14 +796,23 @@ class OpTransformerBlockList(torch.autograd.Function):
                                 block_ctx = CheckpointBlockContext(ctx.self._modules[str(j)], ctx.layers_dict[j], flag)
                                 block_ctx.enter()
                                 exit_prev(prev_ctx, prev_grad)
-                                output = ctx.self._modules[str(j)]._module._call_impl(layer_inputs[ctx.save_list[j][1]], *all_inputs)
+                                outputs = ctx.self._modules[str(j)]._module._call_impl(
+                                    layer_inputs[ctx.save_list[j][1]*ctx.num_hidden: ctx.save_list[j][1]*ctx.num_hidden+ctx.num_hidden],
+                                    *all_inputs
+                                )
+                                if not isinstance(outputs, tuple):
+                                    outputs = (outputs,)
                                 prev_ctx = block_ctx
                                 prev_grad = False
-                                layer_inputs[ctx.save_list[j+1][1]].copy_(output)
+                                for k, output in enumerate(outputs):
+                                    layer_inputs[ctx.save_list[j+1][1]*ctx.num_hidden + k].copy_(output)
                                 ctx.save_list[j+1][0] = j+1
                 
                     torch.cuda.set_rng_state(ctx.cuda_rng_state[i])
-                    ipt = layer_inputs[ctx.save_list[i][1]].detach().requires_grad_()
+                    ipts = [
+                        layer_inputs[ctx.save_list[i][1]*ctx.num_hidden + k].detach().requires_grad_()
+                        for k in range(ctx.num_hidden)
+                    ]
                     if config['zero_level'] == 2:
                         flag = 2
                     else:
@@ -772,7 +824,9 @@ class OpTransformerBlockList(torch.autograd.Function):
                     prev_grad = True
 
                     with ScopedTensorInspectorContext() as inspector:
-                        output = ctx.self._modules[str(i)]._module._call_impl(ipt, *all_inputs)
+                        outputs = ctx.self._modules[str(i)]._module._call_impl(*ipts, *all_inputs)
+                        if not isinstance(outputs, tuple):
+                            outputs = (outputs,)
                     
                     assert len(ctx.layer_inspector[i]) == len(inspector.hidden_states), "Backward step changed"
                     for j, it in enumerate(inspector.hidden_states):
@@ -783,14 +837,22 @@ class OpTransformerBlockList(torch.autograd.Function):
                         # change the tensor in placeholder
                         ctx.layer_inspector[i][j]["tensor"] = it["tensor"]
                         ctx.layer_inspector[i][j]["requires_grad"] = it["requires_grad"]
-                    torch.autograd.backward(
-                        [output] + [hidden_state["tensor"] for hidden_state in inspector.hidden_states],
-                        (grad_hidden_state,) + grad_inspectors[-len(inspector.hidden_states):],
-                    )
-                    grad_inspectors = grad_inspectors[:-len(inspector.hidden_states)]
-                    grad_hidden_state = ipt.grad
-                    if grad_middle is not None:
-                        grad_hidden_state = grad_hidden_state + grad_middle[i]
+                    if len(inspector.hidden_states) > 0:
+                        torch.autograd.backward(
+                            list(outputs) + [hidden_state["tensor"] for hidden_state in inspector.hidden_states],
+                            grad_hidden_states + grad_inspectors[-len(inspector.hidden_states):],
+                        )
+                        grad_inspectors = grad_inspectors[:-len(inspector.hidden_states)]
+                    else:
+                        torch.autograd.backward(
+                            outputs,
+                            grad_hidden_states,
+                        )
+                    grad_hidden_states = [ipt.grad for ipt in ipts]
+                    for k in range(ctx.num_hidden):
+                        if grad_middles[k] is not None:
+                            grad_hidden_states[k] = grad_hidden_states[k] + grad_middles[k][i]
+                    grad_hidden_states = tuple(grad_hidden_states)
                 
                 exit_prev(prev_ctx, prev_grad)
 
@@ -800,7 +862,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None, None, grad_hidden_state) + tuple(grads)
+        return (None, None, None, None) + tuple(grad_hidden_states) + tuple(grads)
     
 class TransformerBlockList(torch.nn.Module):
     r"""
@@ -823,7 +885,7 @@ class TransformerBlockList(torch.nn.Module):
     """
     _modules: Dict[str, CheckpointBlock]
 
-    def __init__(self, modules: Iterable[CheckpointBlock], sqrt=False) -> None:
+    def __init__(self, modules: Iterable[CheckpointBlock], num_hidden=1, sqrt=False) -> None:
         super().__init__()
         
         self._modules = {}
@@ -832,6 +894,8 @@ class TransformerBlockList(torch.nn.Module):
                 module = CheckpointBlock(module)
             self._modules[str(i)] = module
             self.add_module(str(i), module)
+
+        self.num_hidden = num_hidden
 
         if sqrt:
             length = len(self)
@@ -862,12 +926,11 @@ class TransformerBlockList(torch.nn.Module):
     def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
         return self._modules[str(index)]
 
-    def forward(self, hidden_state, *args, return_hidden_states = False):
+    def forward(self, *args, return_hidden_states = False):
         self.return_hidden_states = return_hidden_states
         placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-        outputs = OpTransformerBlockList.apply(placeholder, self, self.save_list, hidden_state, *args)
-        last_hidden, middle_hiddens = outputs[:2]
+        outputs = OpTransformerBlockList.apply(placeholder, self, self.save_list, self.num_hidden, *args)
         if return_hidden_states:
-            return last_hidden, middle_hiddens
+            return tuple(outputs[:2*self.num_hidden])
         else:
-            return last_hidden
+            return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
