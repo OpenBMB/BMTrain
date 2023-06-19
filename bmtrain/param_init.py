@@ -43,6 +43,9 @@ def init_parameters(model : torch.nn.Module):
             module.init_parameters()
         else:
             init_distributed_parameter( iterate_parameters(module) )
+    
+    current_stream = torch.cuda.current_stream()
+    config['load_stream'].wait_stream(current_stream)
 
 def grouped_parameters(model : torch.nn.Module) -> Generator[Tuple[str, List[torch.nn.Parameter]], None, None]:
     """
