@@ -61,8 +61,8 @@ jobs:
       with:
         body_path: "Release.txt"
         files: ｜
-          ./dist/sdist/*.tar.gz
-          ./dist/wheel/*.whl
+          dist/sdist/*.tar.gz
+          dist/wheel/*.whl
         prerelease: false
         token: ${{ secrets.RELEASE_TOKEN }}
         release_tag: ${{ steps.create_release.outputs.tag }}
