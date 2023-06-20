@@ -1,0 +1,13 @@
+version: 2.0
+base_image: bionic
+
+deps:
+  - libxml2-dev
+  - python-pip
+
+build:
+  - ./scripts/publish.sh
+
+test:
+  unittest:
+    - echo 0
