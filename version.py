@@ -6,7 +6,7 @@ import re
 # 发版改这里的版本号, 会自动打tag & 自动编译py3.7～3.10的 wheel package 到 https://mirror.in.zhihu.com/simple/libcpm/
 # 默认 MR 和 Master 不发版情况下，只做py310的编译过程, 每个 MR 都跑 py3.7～3.10 的编译过程的话，速度会比较慢
 # libcpm release version
-__package__ = 'bmtrain'
+__package__ = 'bmtrain-zh'
 __version__ = 'v0.2.2'
 
 ##########################
