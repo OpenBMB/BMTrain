@@ -51,15 +51,12 @@ inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F
         num_threads = std::max(numiter / grain_size, static_cast<int64_t>(1));
     }
     else{
-        cpu_set_t get;
-        // int64_t n = sched_getaffinity(0, sizeof(get), &get);
         cpu_set_t cpu_set;
         CPU_ZERO(&cpu_set);
         sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
         num_threads = CPU_COUNT(&cpu_set);
         grain_size = std::max(numiter / num_threads, static_cast<int64_t>(1));
-        // grain_size = std::max(numiter / n, static_cast<int64_t>(1));
-        // num_threads = std::max(numiter / grain_size, static_cast<int64_t>(1));
+
     }
 
     // Check if parallel execution is feasible
@@ -68,31 +65,14 @@ inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F
         std::vector<std::thread> threads(num_threads);
         for (int64_t t = 0; t < num_threads; ++t) {
             threads[t] = std::thread([&, t]() {
-                cpu_set_t cpu_set;
-                CPU_ZERO(&cpu_set);
-                sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
-                if (CPU_ISSET(t, &cpu_set)) {
-                    int64_t left = begin + t * grain_size;
-                    int64_t right = std::min(begin + (t + 1) * grain_size, end);
-                    f(left, right);
-                }
+                int64_t left = begin + t * grain_size;
+                int64_t right = std::min(begin + (t + 1) * grain_size, end);
+                f(left, right);
             });
         }
         for (auto& thread : threads) {
             thread.join();
         }
-        // std::vector<std::thread> threads(num_threads);
-        // for (int64_t t = 0; t < num_threads; ++t) {
-        //     threads[t] = std::thread([&, t]() {
-        //         int64_t left = begin + t * grain_size;
-        //         int64_t right = std::min(begin + (t + 1) * grain_size, end);
-        //         f(left, right);
-        //     });
-        // }
-        // // Join all threads
-        // for (auto& thread : threads) {
-        //     thread.join();
-        // }
     } else {
         // If not feasible or grain_size is 0, perform the operation serially
         f(begin, end);
