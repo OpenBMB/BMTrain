@@ -136,6 +136,50 @@ def broadcast_object(obj, comm, src = 0):
     return obj
     
 # Must be a Mapping after pytorch 1.12.0
+class DistributedTensorWrapper:
+    def __init__(self, tensor, shape=None):
+        self._dtype = tensor.dtype
+        self._device = tensor.device
+        self.shape = shape
+        self.tensor = tensor
+        
+    def broadcast(self):
+        output_param = torch.empty(self.shape, dtype=self._dtype, device="cuda")
+        if config['rank'] == 0:
+            input_param = self.tensor
+            if input_param.is_cuda:
+                input_param = input_param.clone().contiguous()
+            else:
+                input_param = input_param.cuda().contiguous()
+
+            nccl.broadcast(
+                input_param.storage(),
+                output_param.storage(),
+                0,
+                config['comm']
+            )
+        else:
+            nccl.broadcast(
+                output_param.storage(),
+                output_param.storage(),
+                0,
+                config['comm']
+            )
+        return output_param
+    def copy(self):
+        return self.tensor
+    
+    def __getattribute__(self, name):
+        if name == "tensor" or name == "shape":
+            return object.__getattribute__(self, name)
+        else:
+            try:
+                return object.__getattribute__(self, name)
+            except AttributeError:
+                pass
+
+            return getattr(self.tensor, name)
+
 class DistributedStateDictWrapper(Mapping):
     def __init__(self, state_dict : Dict) -> None:
         self._state_dict = state_dict
@@ -165,30 +209,12 @@ class DistributedStateDictWrapper(Mapping):
         dtype_idx = tmp_shape[1].item()
         shape_list = torch.Size(tmp_shape[2: 2 + shape_list_size].tolist())
 
-        output_param = torch.empty(shape_list, dtype=DTYPE_LIST[dtype_idx], device="cuda")
-        
-        if config['rank'] == 0:
-            input_param : torch.Tensor = self._state_dict[key]
-            if input_param.is_cuda:
-                input_param = input_param.clone().contiguous()
-            else:
-                input_param = input_param.cuda().contiguous()
-
-            nccl.broadcast(
-                input_param.storage(),
-                output_param.storage(),
-                0,
-                config['comm']
-            )
+        if config['rank'] != 0:
+            return DistributedTensorWrapper(torch.tensor([],dtype=DTYPE_LIST[dtype_idx],device="cuda"),shape=shape_list)
         else:
-            nccl.broadcast(
-                output_param.storage(),
-                output_param.storage(),
-                0,
-                config['comm']
-            )
+            return DistributedTensorWrapper(self._state_dict[key],shape=shape_list)
+
         
-        return output_param
         
     def copy(self):
         return self

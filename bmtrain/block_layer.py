@@ -492,6 +492,8 @@ class CheckpointBlock(torch.nn.Module):
             if key in state_dict:
                 # load here
                 input_param = state_dict[key]
+                if input_param.__class__.__name__ == "DistributedTensorWrapper":
+                    input_param = input_param.broadcast()
                 if input_param.shape != it["shape"]:
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
