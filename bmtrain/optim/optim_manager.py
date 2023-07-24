@@ -1,7 +1,6 @@
 from typing import Optional, Union, List, Dict, Tuple
 import torch
-
-from . import _cuda as G
+from ..loss._function import has_inf_nan
 from ..utils import print_rank
 from ..lr_scheduler.warmup import WarmupLRScheduler
 from .. import nccl
@@ -13,7 +12,7 @@ def check_overflow(param_groups):
     for group in param_groups:
         for p in group['params']:
             if p.grad is not None and p.dtype == torch.half: # TODO support other types
-                G.f_has_inf_nan(p.grad, has_inf_or_nan)
+                has_inf_nan(p.grad, has_inf_or_nan)
 
     if "comm" in config:
         nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
@@ -51,6 +50,8 @@ class OptimManager:
         loss_scale : Optional[float] = None,
         loss_scale_factor : float = 2,
         loss_scale_steps : int = 1024,
+        min_loss_scale = 1,
+        max_loss_scale = float("inf"),
     ):
         if loss_scale is not None:
             self.loss_scale = loss_scale
@@ -61,6 +62,8 @@ class OptimManager:
         self.steps_since_last_scale = 0
         self.loss_scale_factor = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
         self.loss_scale_steps = loss_scale_steps
+        self.min_loss_scale = 1
+        self.max_loss_scale = max_loss_scale
 
         self.optimizers = []
         self.lr_schedulers = []
@@ -81,6 +84,7 @@ class OptimManager:
         self.lr_schedulers.append(lr_scheduler)
 
     def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
+
         return loss * (self.loss_scale / config['world_size']) # loss scale
 
     def backward(self, loss : torch.Tensor):
@@ -101,7 +105,7 @@ class OptimManager:
         This is a helper function to call optimizer.zero_grad()
         """
         for optimizer in self.optimizers:
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=False)
 
     def step(self):
         """
@@ -112,7 +116,7 @@ class OptimManager:
 
         This function can also handle gradient overflow by reducing the loss scale when it occurs.
         """
-        if self.loss_scale_enabled and self.loss_scale > 1:
+        if self.loss_scale_enabled and self.loss_scale > self.min_loss_scale:
             has_overflow = False
             for optimizer in self.optimizers:
                 try:
@@ -122,10 +126,10 @@ class OptimManager:
                     break
             if has_overflow:
                 print_rank("Gradient overflow, change scale from %lf to %lf" % (self.loss_scale, self.loss_scale / self.loss_scale_factor))
-                self._justify_scale(self.loss_scale / self.loss_scale_factor)
-                self.zero_grad()
+                with torch.no_grad():
+                    self._justify_scale(self.loss_scale / self.loss_scale_factor)
+                    self.zero_grad()
                 return
-                
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
             if hasattr(optimizer, "_bmtrain_optimizer") and optimizer._bmtrain_optimizer:
                 optimizer.step(scale=self.loss_scale)
@@ -140,7 +144,7 @@ class OptimManager:
         if self.loss_scale_enabled:
             self.steps_since_last_scale += 1
 
-            if self.steps_since_last_scale >= self.loss_scale_steps:
+            if self.steps_since_last_scale >= self.loss_scale_steps and self.loss_scale < self.max_loss_scale:
                 self._justify_scale(self.loss_scale * self.loss_scale_factor)
 
         current_stream = torch.cuda.current_stream()

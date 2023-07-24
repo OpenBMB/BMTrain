@@ -1,4 +1,4 @@
-name: Build and Publish to PyPI
+name: Publish release in Github
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       run: |
         version=${{ matrix.python-version }}
         docker run -e CUDACXX=/usr/local/cuda/bin/nvcc -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:/opt/rh/devtoolset-7/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-7/root/usr/lib64:/opt/rh/devtoolset-7/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./wheel/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./sdist/;for file in wheel/*-linux_x86_64.whl; do mv \"\$file\" \"\${file//-linux_x86_64/-manylinux2014_x86_64}\"; done"
-        
+      
     - name: Archive distribution files
       uses: actions/upload-artifact@v2
       with:
@@ -42,13 +42,13 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
     - name: Set Up the Python
       uses: actions/setup-python@v2
       with:
         python-version: 3.9
-
-    - name: Install twine
-      run: python -m pip install twine
 
     - name: Download distribution files
       uses: actions/download-artifact@v2
@@ -56,10 +56,16 @@ jobs:
         name: dist
         path: dist
 
-    - name: Publish to PyPI
+    - name: Upload Distribution Files
+      uses: softprops/action-gh-release@v1
+      with:
+        body_path: "Release.txt"
+        files: ｜
+          dist/sdist/*.tar.gz
+          dist/wheel/*.whl
+        prerelease: false
+        token: ${{ secrets.RELEASE_TOKEN }}
+        release_tag: ${{ steps.create_release.outputs.tag }}
+        github_token: ${{ secrets.GITHUB_TOKEN }}
       env:
-        TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-      run: |
-        cd dist
-        python -m twine upload sdist/*.tar.gz wheel/*.whl
+        GITHUB_REPOSITORY: MayDomine/BMTrain

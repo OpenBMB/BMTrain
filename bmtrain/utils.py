@@ -5,6 +5,18 @@ from .global_var import config
 
 ALIGN = 4
 ROW_WIDTH = 60
+def check_torch_version(version_str):
+    """
+    Checks if the current torch version is greater than or equal to the given version.
+    version_str (str): The version to compare with, in the format of "x.y.z" ,and the func will convert it into a int value of x*100+y*10+z.
+    """
+    version_int_arr = [int(v) for v in version_str.split(".")]
+
+    version_int = version_int_arr[0] * 10000 + version_int_arr[1] * 100 + version_int_arr[2]
+    torch_version = torch.__version__.split("+")[0]
+    current_version_int_arr = [int(v) for v in torch_version.split(".")]
+    current_version_int = current_version_int_arr[0] * 10000 + current_version_int_arr[1] * 100 + current_version_int_arr[2]
+    return current_version_int - version_int
 
 def round_up(x, d):
     return (x + d - 1) // d * d

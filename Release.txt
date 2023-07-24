@@ -1,0 +1,3 @@
+# BMTrain New Version Release v0.2.3
+- easier to install (without torch dependency while compiling)
+- compatible with torch 2.0

@@ -82,6 +82,8 @@ class DistributedModule(torch.nn.Module):
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+                if input_param.__class__.__name__ == "DistributedTensorWrapper":
+                    input_param = input_param.broadcast()
                 # This is used to avoid copying uninitialized parameters into
                 # non-lazy modules, since they dont have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.

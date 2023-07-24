@@ -1,2 +1,5 @@
 graft csrc
+include CMakeLists.txt
+graft cmake
+
 include version.py
