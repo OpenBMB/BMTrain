@@ -47,6 +47,11 @@ Our [documentation](https://bmtrain.readthedocs.io/en/latest/index.html) provide
 
 <div id="install"></div>
 
+## Publish
+
+- Increase the '\_\_version\_\_' in version.py
+- Merge mr to master, then auto publish
+
 ## Installation
 
 - From pip （recommend） : ``pip install bmtrain``
