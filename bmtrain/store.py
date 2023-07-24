@@ -166,6 +166,7 @@ class DistributedTensorWrapper:
                 config['comm']
             )
         return output_param
+    
     def copy(self):
         return self.tensor
     
@@ -210,9 +211,9 @@ class DistributedStateDictWrapper(Mapping):
         shape_list = torch.Size(tmp_shape[2: 2 + shape_list_size].tolist())
 
         if config['rank'] != 0:
-            return DistributedTensorWrapper(torch.tensor([],dtype=DTYPE_LIST[dtype_idx],device="cuda"),shape=shape_list)
+            return DistributedTensorWrapper(torch.tensor([], dtype=DTYPE_LIST[dtype_idx], device="cuda"), shape=shape_list)
         else:
-            return DistributedTensorWrapper(self._state_dict[key],shape=shape_list)
+            return DistributedTensorWrapper(self._state_dict[key], shape=shape_list)
 
         
         

@@ -6,22 +6,12 @@
 #include <pybind11/pybind11.h>
 #include<iostream>
 #include<cuda_fp16.h>
-#define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
-
-#if defined(__AVX512F__)
-
-#pragma message "Using AVX512"
-#define __AVX512__ 1
-
-#elif defined(__AVX__) and defined(__FMA__) and defined(__F16C__)
-
-#pragma message "Using AVX256"
-#define __AVX256__ 1
-#endif
 #include <vector>
 #include <thread>
 #include <algorithm>
-using namespace std;
+#include "cpu_info.h"
+#define CHECK_CONTIGUOUS(x) AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
+
 
 inline float fp32_from_bits(uint32_t w) {
     union {
@@ -134,38 +124,56 @@ inline float fp16_ieee_to_fp32_value(uint16_t h) {
                                           : fp32_to_bits(normalized_value));
   return  fp32_from_bits(result);
 }
-void adam_cpu_launcher(
+
+void adam_cpu_0(
     int64_t n,
-    std::uintptr_t param_fp32,
-    std::uintptr_t param_fp16,
-    std::uintptr_t g_fp16,
-    std::uintptr_t m_fp32,
-    std::uintptr_t v_fp32,
+    float* param_fp32_ptr,
+    uint16_t* param_fp16_ptr,
+    uint16_t* g_fp16_ptr,
+    float* m_fp32_ptr,
+    float* v_fp32_ptr,
     float beta1, float beta2, 
     float eps, float lr, 
     float scale, 
     float weight_decay,
     float bias_correction1,
     float bias_correction2
-) {
-    auto param_fp32_ptr = reinterpret_cast<float*>(param_fp32);
-    auto m_fp32_ptr = reinterpret_cast<float*>(m_fp32);
-    auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
-    auto p_fp16_ptr = reinterpret_cast<uint16_t*>(param_fp16);
-    auto g_fp16_ptr  = reinterpret_cast<uint16_t*>(g_fp16);
-#if defined(__AVX512__)
-    auto avx_beta1 = _mm512_set1_ps(beta1);
-    auto avx_beta2 = _mm512_set1_ps(beta2);
-    auto avx_beta1_1 = _mm512_set1_ps(1 - beta1);
-    auto avx_beta2_1 = _mm512_set1_ps(1 - beta2);
-    auto avx_eps = _mm512_set1_ps(eps);
-    auto avx_neg_lr = _mm512_set1_ps(-lr);
-    auto avx_scale = _mm512_set1_ps(scale);
-    auto avx_weight_decay = _mm512_set1_ps(weight_decay);
-    auto avx_bias_correction1 = _mm512_set1_ps(bias_correction1);
-    auto avx_bias_correction2 = _mm512_set1_ps(bias_correction2);
-    int64_t span = 16;
-#elif defined(__AVX256__)
+){
+    int64_t span = 1;
+    parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+    for (int64_t j = start; j < end; j += span) {
+        for (int64_t i = j; i < end; i++) {
+            float g = fp16_ieee_to_fp32_value(g_fp16_ptr[i]) / scale;
+            float m = m_fp32_ptr[i];
+            float v = v_fp32_ptr[i];
+            float p = param_fp32_ptr[i];
+            m = beta1 * m + (1 - beta1) * g;
+            v = beta2 * v + (1 - beta2) * g * g;
+            p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
+            param_fp32_ptr[i] = p;
+            param_fp16_ptr[i] = fp16_ieee_from_fp32_value(p);
+            m_fp32_ptr[i] = m;
+            v_fp32_ptr[i] = v;
+                    }
+            break; // must break here
+        }
+        });
+}
+
+static void __attribute__ ((__target__ ("avx,fma,f16c"))) adam_cpu_1(
+    int64_t n,
+    float* param_fp32_ptr,
+    uint16_t* param_fp16_ptr,
+    uint16_t* g_fp16_ptr,
+    float* m_fp32_ptr,
+    float* v_fp32_ptr,
+    float beta1, float beta2, 
+    float eps, float lr, 
+    float scale, 
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2
+){
     auto avx_beta1 = _mm256_set1_ps(beta1);
     auto avx_beta2 = _mm256_set1_ps(beta2);
     auto avx_beta1_1 = _mm256_set1_ps(1 - beta1);
@@ -177,18 +185,9 @@ void adam_cpu_launcher(
     auto avx_bias_correction1 = _mm256_set1_ps(bias_correction1);
     auto avx_bias_correction2 = _mm256_set1_ps(bias_correction2);
     int64_t span = 8;
-#else
-    int64_t span = 1;
-#endif
-
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
         for (int64_t j = start; j < end; j += span) {
-#if defined(__AVX256__) or defined(__AVX512__)
             if (j + span > end) {
-#else
-            if (true) {
-#endif
-                // No AVX or n is not alinged
                 for (int64_t i = j; i < end; i++) {
                     float g = fp16_ieee_to_fp32_value(g_fp16_ptr[i]) / scale;
                     float m = m_fp32_ptr[i];
@@ -198,14 +197,78 @@ void adam_cpu_launcher(
                     v = beta2 * v + (1 - beta2) * g * g;
                     p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
                     param_fp32_ptr[i] = p;
-                    p_fp16_ptr[i] = fp16_ieee_from_fp32_value(p);
+                    param_fp16_ptr[i] = fp16_ieee_from_fp32_value(p);
                     m_fp32_ptr[i] = m;
                     v_fp32_ptr[i] = v;
                 }
                 break; // must break here
             } else {
-                // use AVX here
-#if defined(__AVX512__)
+                auto g = _mm256_div_ps(_mm256_cvtph_ps(_mm_loadu_si128((const __m128i*)&g_fp16_ptr[j])), avx_scale);
+                auto m = _mm256_loadu_ps(&m_fp32_ptr[j]);
+                auto v = _mm256_loadu_ps(&v_fp32_ptr[j]);
+                auto p = _mm256_loadu_ps(&param_fp32_ptr[j]);
+                m = _mm256_fmadd_ps(avx_beta1, m, _mm256_mul_ps(avx_beta1_1, g));
+                v = _mm256_fmadd_ps(avx_beta2, v, _mm256_mul_ps(avx_beta2_1, _mm256_mul_ps(g, g)));
+                p = _mm256_fmadd_ps(avx_neg_lr, _mm256_mul_ps(avx_weight_decay, p), p); // p = p - lr * weight_decay * p
+                p = _mm256_fmadd_ps(
+                    avx_neg_lr,
+                    _mm256_div_ps(
+                        _mm256_div_ps(m, avx_bias_correction1), // m / bias_correction1
+                        _mm256_add_ps(_mm256_sqrt_ps(_mm256_div_ps(v, avx_bias_correction2)), avx_eps)  // sqrt(v / bias_correction2) + eps
+                    ),  // m / bias_correction1 / (sqrt(v / bias_correction2) + eps)
+                    p
+                );  // p = p - lr * m / bias_correction1 / (sqrt(v / bias_correction2) + eps)
+                _mm256_storeu_ps(&param_fp32_ptr[j], p);
+                _mm_storeu_si128((__m128i*)&param_fp16_ptr[j], _mm256_cvtps_ph(p, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+                _mm256_storeu_ps(&m_fp32_ptr[j], m);
+                _mm256_storeu_ps(&v_fp32_ptr[j], v);
+            }
+    }});
+}
+
+static void __attribute__ ((__target__ ("avx512f"))) adam_cpu_2(
+    int64_t n,
+    float* param_fp32_ptr,
+    uint16_t* param_fp16_ptr,
+    uint16_t* g_fp16_ptr,
+    float* m_fp32_ptr,
+    float* v_fp32_ptr,
+    float beta1, float beta2, 
+    float eps, float lr, 
+    float scale, 
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2
+){
+    auto avx_beta1 = _mm512_set1_ps(beta1);
+    auto avx_beta2 = _mm512_set1_ps(beta2);
+    auto avx_beta1_1 = _mm512_set1_ps(1 - beta1);
+    auto avx_beta2_1 = _mm512_set1_ps(1 - beta2);
+    auto avx_eps = _mm512_set1_ps(eps);
+    auto avx_neg_lr = _mm512_set1_ps(-lr);
+    auto avx_scale = _mm512_set1_ps(scale);
+    auto avx_weight_decay = _mm512_set1_ps(weight_decay);
+    auto avx_bias_correction1 = _mm512_set1_ps(bias_correction1);
+    auto avx_bias_correction2 = _mm512_set1_ps(bias_correction2);
+    int64_t span = 16;  
+    parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+        for (int64_t j = start; j < end; j += span) {
+            if (j + span > end) {
+                for (int64_t i = j; i < end; i++) {
+                    float g = fp16_ieee_to_fp32_value(g_fp16_ptr[i]) / scale;
+                    float m = m_fp32_ptr[i];
+                    float v = v_fp32_ptr[i];
+                    float p = param_fp32_ptr[i];
+                    m = beta1 * m + (1 - beta1) * g;
+                    v = beta2 * v + (1 - beta2) * g * g;
+                    p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
+                    param_fp32_ptr[i] = p;
+                    param_fp16_ptr[i] = fp16_ieee_from_fp32_value(p);
+                    m_fp32_ptr[i] = m;
+                    v_fp32_ptr[i] = v;
+                }
+                break; // must break here
+            }else{
                 auto g = _mm512_div_ps(_mm512_cvtph_ps(_mm256_loadu_si256((const __m256i*)&g_fp16_ptr[j])), avx_scale);
                 auto m = _mm512_loadu_ps(&m_fp32_ptr[j]);
                 auto v = _mm512_loadu_ps(&v_fp32_ptr[j]);
@@ -225,34 +288,45 @@ void adam_cpu_launcher(
                     p
                 );  // p = p - lr * m / bias_correction1 / (sqrtf(v / bias_correction2) + eps)
                 _mm512_storeu_ps(&param_fp32_ptr[j], p);
-                _mm256_storeu_si256((__m256i*)&p_fp16_ptr[j], _mm512_cvtps_ph(p, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+                _mm256_storeu_si256((__m256i*)&param_fp16_ptr[j], _mm512_cvtps_ph(p, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
                 _mm512_storeu_ps(&m_fp32_ptr[j], m);
                 _mm512_storeu_ps(&v_fp32_ptr[j], v);
-#elif defined(__AVX256__)
-                auto g = _mm256_div_ps(_mm256_cvtph_ps(_mm_loadu_si128((const __m128i*)&g_fp16_ptr[j])), avx_scale);
-                auto m = _mm256_loadu_ps(&m_fp32_ptr[j]);
-                auto v = _mm256_loadu_ps(&v_fp32_ptr[j]);
-                auto p = _mm256_loadu_ps(&param_fp32_ptr[j]);
-                m = _mm256_fmadd_ps(avx_beta1, m, _mm256_mul_ps(avx_beta1_1, g));
-                v = _mm256_fmadd_ps(avx_beta2, v, _mm256_mul_ps(avx_beta2_1, _mm256_mul_ps(g, g)));
-                p = _mm256_fmadd_ps(avx_neg_lr, _mm256_mul_ps(avx_weight_decay, p), p); // p = p - lr * weight_decay * p
-                p = _mm256_fmadd_ps(
-                    avx_neg_lr,
-                    _mm256_div_ps(
-                        _mm256_div_ps(m, avx_bias_correction1), // m / bias_correction1
-                        _mm256_add_ps(_mm256_sqrt_ps(_mm256_div_ps(v, avx_bias_correction2)), avx_eps)  // sqrt(v / bias_correction2) + eps
-                    ),  // m / bias_correction1 / (sqrt(v / bias_correction2) + eps)
-                    p
-                );  // p = p - lr * m / bias_correction1 / (sqrt(v / bias_correction2) + eps)
-                _mm256_storeu_ps(&param_fp32_ptr[j], p);
-                _mm_storeu_si128((__m128i*)&p_fp16_ptr[j], _mm256_cvtps_ph(p, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
-                _mm256_storeu_ps(&m_fp32_ptr[j], m);
-                _mm256_storeu_ps(&v_fp32_ptr[j], v);
-#endif
             }
         }
+        });
+}
 
-    });
+
+
+
+void adam_cpu_launcher(
+    int64_t n,
+    std::uintptr_t param_fp32,
+    std::uintptr_t param_fp16,
+    std::uintptr_t g_fp16,
+    std::uintptr_t m_fp32,
+    std::uintptr_t v_fp32,
+    float beta1, float beta2, 
+    float eps, float lr, 
+    float scale, 
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2
+) {
+    
+    auto param_fp32_ptr = reinterpret_cast<float*>(param_fp32);
+    auto m_fp32_ptr = reinterpret_cast<float*>(m_fp32);
+    auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
+    auto param_fp16_ptr = reinterpret_cast<uint16_t*>(param_fp16);
+    auto g_fp16_ptr  = reinterpret_cast<uint16_t*>(g_fp16);
+    int cpu_level = get_cpu_level();
+    if (cpu_level == 0 ){
+        adam_cpu_0(n, param_fp32_ptr, param_fp16_ptr, g_fp16_ptr, m_fp32_ptr, v_fp32_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
+    }else if(cpu_level == 1){
+        adam_cpu_1(n, param_fp32_ptr, param_fp16_ptr, g_fp16_ptr, m_fp32_ptr, v_fp32_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
+    }else{
+        adam_cpu_2(n, param_fp32_ptr, param_fp16_ptr, g_fp16_ptr, m_fp32_ptr, v_fp32_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
+    }
 }
 
 

@@ -8,7 +8,13 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CUDA_STANDARD 14)
 set(CMAKE_CUDA_STANDARD_REQUIRED True)
+
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_62,code=sm_62 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_72,code=sm_72 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80")
+
+if(NOT DEFINED ENV{BUILD_DOCKER_ENV} OR "$ENV{BUILD_DOCKER_ENV}" STREQUAL "0")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode=arch=compute_86,code=sm_86")
+endif()
+
 set(CMAKE_BUILD_RPATH $ORIGIN)
 set(CMAKE_INSTALL_RPATH $ORIGIN)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/)
@@ -30,29 +36,7 @@ message (STATUS "CMAKE_INSTALL_RPATH: ${CMAKE_INSTALL_RPATH}")
 file(GLOB_RECURSE SOURCES "csrc/*.cpp")
 file(GLOB_RECURSE CUDA_SOURCES "csrc/cuda/*.cu")
 
-set(BMT_AVX256 $ENV{BMT_AVX256})
-set(BMT_AVX512 $ENV{BMT_AVX512})
-
-# Convert them to lowercase
-string(TOLOWER "${BMT_AVX256}" BMT_AVX256_LOWER)
-string(TOLOWER "${BMT_AVX512}" BMT_AVX512_LOWER)
-
-# Check the flags
-if ("${BMT_AVX256_LOWER}" STREQUAL "1" OR "${BMT_AVX256_LOWER}" STREQUAL "true" OR "${BMT_AVX256_LOWER}" STREQUAL "on")
-    set(AVX_FLAGS "${AVX_FLAGS} -mavx -mfma -mf16c")
-elseif ("${BMT_AVX512_LOWER}" STREQUAL "1" OR "${BMT_AVX512_LOWER}" STREQUAL "true" OR "${BMT_AVX512_LOWER}" STREQUAL "on")
-    set(AVX_FLAGS "${AVX_FLAGS} -mavx512f")
-elseif ("${BMT_AVX256_LOWER}" STREQUAL "" OR "${BMT_AVX512_LOWER}" STREQUAL "")
-    message(WARNING "BMT_AVX256 or BMT_AVX512 is empty or not defined.")
-else()
-    set(AVX_FLAGS "${AVX_FLAGS} -march=native")
-endif()
-
-
-
-# Now you can use AVX_FLAGS variable in your target_compile_options
-# For example, if your target is named 'my_target':
-
+set(AVX_FLAGS "${AVX_FLAGS} -march=native")
 
 pybind11_add_module(C ${SOURCES} ${CUDA_SOURCES})
 
