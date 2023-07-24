@@ -13,6 +13,7 @@ def init_distributed(
         zero_level: int = 3,
         pipe_size: int = -1,
         num_micro_batches: int = None,
+        use_checkpoint: bool = True,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -70,6 +71,7 @@ def init_distributed(
     config['barrier_stream'] = torch.cuda.Stream()
     config["load_event"] = torch.cuda.Event()
     config["zero_level"] = zero_level
+    config["use_checkpoint"] = use_checkpoint 
     config["topology"] = topology(config)
     config["zero_rank"] = config["topology"].get_group_rank("zero") if pipe_size > 1 else config['rank']
     cpus_this_worker = None
