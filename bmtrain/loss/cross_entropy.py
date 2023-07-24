@@ -1,7 +1,6 @@
 from typing import Optional
 import torch
-from . import _cuda as C
-
+from . import _function as F
 class OpFusedCrossEntropy(torch.autograd.Function):
     """
     CrossEntropy dim = 1
@@ -11,7 +10,7 @@ class OpFusedCrossEntropy(torch.autograd.Function):
         assert x.ndim == 2
         softmax = torch.empty(x.size(), device=x.device, dtype=x.dtype)
         out = torch.empty(x.size(0), device=x.device, dtype=torch.float)
-        C.f_cross_entropy_forward(
+        F.cross_entropy_forward(
             x.size(0), x.size(1),
             x, target,
             softmax, out,
@@ -25,7 +24,7 @@ class OpFusedCrossEntropy(torch.autograd.Function):
     def backward(ctx, grad_output : torch.Tensor):
         grad_output = grad_output.contiguous()
         softmax, target = ctx.saved_tensors
-        C.f_cross_entropy_backward_inplace(
+        F.cross_entropy_backward_inplace(
             softmax.size(0), softmax.size(1),
             grad_output, target,
             softmax,
@@ -41,7 +40,7 @@ class OpFusedCrossEntropyInplace(torch.autograd.Function):
     def forward(ctx, x : torch.Tensor, target : torch.Tensor, ignore_index: int):
         assert x.ndim == 2
         out = torch.empty(x.size(0), device=x.device, dtype=torch.float)
-        C.f_cross_entropy_forward_inplace(
+        F.cross_entropy_forward_inplace(
             x.size(0), x.size(1),
             x, target,
             out,
@@ -55,7 +54,7 @@ class OpFusedCrossEntropyInplace(torch.autograd.Function):
     def backward(ctx, grad_output : torch.Tensor):
         grad_output = grad_output.contiguous()
         softmax, target = ctx.saved_tensors
-        C.f_cross_entropy_backward_inplace(
+        F.cross_entropy_backward_inplace(
             softmax.size(0), softmax.size(1),
             grad_output, target,
             softmax,

@@ -1,7 +1,7 @@
 #include <cuda_fp16.h>
-#include <torch/extension.h>
-#include <ATen/cuda/CUDAContext.h>
 #include "reduce.cuh"
+#include <cstdint>
+#include<cuda_runtime_api.h>
 
 namespace {
 // blocks <m>,      threads<1024>
@@ -134,64 +134,74 @@ __global__ void cross_entropy_backward_inplace(
 
 void cross_entropy_forward_launcher(
     int32_t m, int32_t n,
-    const torch::Tensor &input,
-    const torch::Tensor &target,
-    torch::Tensor &softmax,
-    torch::Tensor &output,
-    int32_t ignore_index
+    std::uintptr_t input,
+    std::uintptr_t target,
+    std::uintptr_t softmax,
+    std::uintptr_t output,
+    int32_t ignore_index,
+    std::uintptr_t stream
 ) {
-    auto input_ptr = reinterpret_cast<half*>(input.data_ptr<at::Half>());
-    auto target_ptr = target.data_ptr<int32_t>();
-    auto softmax_ptr = reinterpret_cast<half*>(softmax.data_ptr<at::Half>());
-    auto output_ptr = output.data_ptr<float>();
+    auto input_ptr = reinterpret_cast<half*>(input);
+    auto target_ptr = reinterpret_cast<int32_t*>(target);
+    auto softmax_ptr = reinterpret_cast<half*>(softmax);
+    auto output_ptr = reinterpret_cast<float*>(output);
     int32_t threads = 1024;
-    auto stream = at::cuda::getCurrentCUDAStream();
-    cross_entropy_forward<<<m, threads, 0, stream.stream()>>>(n, input_ptr, target_ptr, softmax_ptr, output_ptr, ignore_index);
+    cross_entropy_forward<<<m, threads, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, input_ptr, target_ptr, softmax_ptr, output_ptr, ignore_index);
 }
 
 void cross_entropy_backward_launcher(
     int32_t m, int32_t n,
-    const torch::Tensor &grad_output,
-    const torch::Tensor &target,
-    const torch::Tensor &softmax,
-    torch::Tensor &grad_input,
-    int32_t ignore_index
+    std::uintptr_t grad_output,
+    std::uintptr_t target,
+    std::uintptr_t softmax,
+    std::uintptr_t grad_input,
+    int32_t ignore_index,
+    std::uintptr_t stream
 ) {
-    auto output_ptr = grad_output.data_ptr<float>();
-    auto target_ptr = target.data_ptr<int32_t>();
-    auto softmax_ptr = reinterpret_cast<half*>(softmax.data_ptr<at::Half>());
-    auto input_ptr = reinterpret_cast<half*>(grad_input.data_ptr<at::Half>());
+    // auto output_ptr = grad_output.data_ptr<float>();
+    auto output_ptr = reinterpret_cast<float*>(grad_output);
+    // auto target_ptr = target.data_ptr<int32_t>();
+    auto target_ptr = reinterpret_cast<int32_t*>(target);
+    auto softmax_ptr = reinterpret_cast<half*>(softmax);
+    auto input_ptr = reinterpret_cast<half*>(grad_input);
     int32_t threads = 1024;
-    auto stream = at::cuda::getCurrentCUDAStream();
-    cross_entropy_backward<<<m, threads, 0, stream.stream()>>>(n, output_ptr, target_ptr, softmax_ptr, input_ptr, ignore_index);
+    cross_entropy_backward<<<m, threads, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, output_ptr, target_ptr, softmax_ptr, input_ptr, ignore_index);
 }
 
 void cross_entropy_forward_inplace_launcher(
     int32_t m, int32_t n,
-    torch::Tensor &x,
-    const torch::Tensor &target,
-    torch::Tensor &output,
-    int32_t ignore_index
+    std::uintptr_t x,
+    std::uintptr_t target,
+    std::uintptr_t output,
+    int32_t ignore_index,
+    std::uintptr_t stream
 ) {
-    auto x_ptr = reinterpret_cast<half*>(x.data_ptr<at::Half>());
-    auto target_ptr = target.data_ptr<int32_t>();
-    auto output_ptr = output.data_ptr<float>();
+    // auto x_ptr = reinterpret_cast<half*>(x.data_ptr<at::Half>());
+    auto x_ptr = reinterpret_cast<half*>(x);
+    // auto target_ptr = target.data_ptr<int32_t>();
+    auto target_ptr = reinterpret_cast<int32_t*>(target);
+    // auto output_ptr = output.data_ptr<float>();
+    auto output_ptr = reinterpret_cast<float*>(output);
     int32_t threads = 1024;
-    auto stream = at::cuda::getCurrentCUDAStream();
-    cross_entropy_forward_inplace<<<m, threads, 0, stream.stream()>>>(n, x_ptr, target_ptr, output_ptr, ignore_index);
+    // auto stream = at::cuda::getCurrentCUDAStream();
+    cross_entropy_forward_inplace<<<m, threads, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, x_ptr, target_ptr, output_ptr, ignore_index);
 }
 
 void cross_entropy_backward_inplace_launcher(
     int32_t m, int32_t n,
-    const torch::Tensor &grad_output,
-    const torch::Tensor &target,
-    torch::Tensor &x,
-    int32_t ignore_index
+    std::uintptr_t grad_output,
+    std::uintptr_t target,
+    std::uintptr_t x,
+    int32_t ignore_index,
+    std::uintptr_t stream
 ) {
-    auto output_ptr = grad_output.data_ptr<float>();
-    auto target_ptr = target.data_ptr<int32_t>();
-    auto x_ptr = reinterpret_cast<half*>(x.data_ptr<at::Half>());
+    // auto output_ptr = grad_output.data_ptr<float>();
+    auto output_ptr = reinterpret_cast<float*>(grad_output);
+    // auto target_ptr = target.data_ptr<int32_t>();
+    auto target_ptr = reinterpret_cast<int32_t*>(target);
+    // auto x_ptr = reinterpret_cast<half*>(x.data_ptr<at::Half>());
+    auto x_ptr = reinterpret_cast<half*>(x);
     int32_t threads = 1024;
-    auto stream = at::cuda::getCurrentCUDAStream();
-    cross_entropy_backward_inplace<<<m, threads, 0, stream.stream()>>>(n, output_ptr, target_ptr, x_ptr, ignore_index);
+    // auto stream = at::cuda::getCurrentCUDAStream();
+    cross_entropy_backward_inplace<<<m, threads, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, output_ptr, target_ptr, x_ptr, ignore_index);
 }

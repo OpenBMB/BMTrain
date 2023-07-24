@@ -1,7 +1,6 @@
 from typing import Optional, Union, List, Dict, Tuple
 import torch
-
-from . import _cuda as G
+from ..loss._function import has_inf_nan
 from ..utils import print_rank
 from ..lr_scheduler.warmup import WarmupLRScheduler
 from .. import nccl
@@ -13,7 +12,7 @@ def check_overflow(param_groups):
     for group in param_groups:
         for p in group['params']:
             if p.grad is not None and p.dtype == torch.half: # TODO support other types
-                G.f_has_inf_nan(p.grad, has_inf_or_nan)
+                has_inf_nan(p.grad, has_inf_or_nan)
 
     if "comm" in config:
         nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
@@ -81,6 +80,7 @@ class OptimManager:
         self.lr_schedulers.append(lr_scheduler)
 
     def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
+
         return loss * (self.loss_scale / config['world_size']) # loss scale
 
     def backward(self, loss : torch.Tensor):
@@ -101,7 +101,7 @@ class OptimManager:
         This is a helper function to call optimizer.zero_grad()
         """
         for optimizer in self.optimizers:
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=False)
 
     def step(self):
         """
@@ -122,10 +122,10 @@ class OptimManager:
                     break
             if has_overflow:
                 print_rank("Gradient overflow, change scale from %lf to %lf" % (self.loss_scale, self.loss_scale / self.loss_scale_factor))
-                self._justify_scale(self.loss_scale / self.loss_scale_factor)
-                self.zero_grad()
+                with torch.no_grad():
+                    self._justify_scale(self.loss_scale / self.loss_scale_factor)
+                    self.zero_grad()
                 return
-                
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
             if hasattr(optimizer, "_bmtrain_optimizer") and optimizer._bmtrain_optimizer:
                 optimizer.step(scale=self.loss_scale)

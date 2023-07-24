@@ -1,88 +1,116 @@
-from setuptools import setup, find_packages
-import torch
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
 import os
+from setuptools.command.build_ext import build_ext
+from setuptools import  setup, find_packages, Extension
+import setuptools
+import warnings
+import sys
+import subprocess
+COMMON_NVCC_FLAGS = [
+    '-D__CUDA_NO_HALF_OPERATORS__',
+    '-D__CUDA_NO_HALF_CONVERSIONS__',
+    '-D__CUDA_NO_HALF2_OPERATORS__',
+    '--expt-relaxed-constexpr'
+]
+class CMakeExtension(Extension):
+    def __init__(self, name, sourcedir=""):
+        Extension.__init__(self, name, sources=[])
+        self.sourcedir = os.path.abspath(sourcedir)
 
-def get_avx_flags():
-    if os.environ.get("BMT_AVX256", "").lower() in ["1", "true", "on"]:
-        return ["-mavx", "-mfma", "-mf16c"]
-    elif os.environ.get("BMT_AVX512", "").lower() in ["1", "true", "on"]:
-        return ["-mavx512f"]
-    else:
-        return ["-march=native"]
 
-def get_device_cc():
-    try:
-        CC_SET = set()
-        for i in range(torch.cuda.device_count()):
-            CC_SET.add(torch.cuda.get_device_capability(i))
-        
-        if len(CC_SET) == 0:
-            return None
-        
-        ret = ""
-        for it in CC_SET:
-            if len(ret) > 0:
-                ret = ret + " "
-            ret = ret + ("%d.%d" % it)
-        return ret
-    except RuntimeError:
-        return None
-
-avx_flag = get_avx_flags()
-device_cc = get_device_cc()
-if device_cc is None:
-    if not torch.cuda.is_available():
-        os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0+PTX")
-    else:
-        if torch.version.cuda.startswith("10"):
-            os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5+PTX")
+def is_ninja_available():
+    r'''
+    Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
+    available on the system, ``False`` otherwise.
+    '''
+    with open(os.devnull, 'wb') as devnull:
+        try:
+            subprocess.check_call('ninja --version'.split(), stdout=devnull)
+        except OSError:
+            return False
         else:
-            if not torch.version.cuda.startswith("11.0"):
-                os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0 8.6+PTX")
-            else:
-                os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "6.0 6.1 7.0 7.5 8.0+PTX")
-else:
-    os.environ["TORCH_CUDA_ARCH_LIST"] = os.environ.get("TORCH_CUDA_ARCH_LIST", device_cc)
+            return True
 
-ext_modules = []
 
-if os.environ.get("GITHUB_ACTIONS", "false") == "false":
-    ext_modules = [
-        CUDAExtension('bmtrain.nccl._C', [
-            'csrc/nccl.cpp',
-        ], include_dirs=["csrc/nccl/build/include"], extra_compile_args={}),
-        CUDAExtension('bmtrain.optim._cuda', [
-            'csrc/adam_cuda.cpp',
-            'csrc/cuda/adam.cu',
-            'csrc/cuda/has_inf_nan.cu'
-        ], extra_compile_args={}),
-        CppExtension("bmtrain.optim._cpu", [
-            "csrc/adam_cpu.cpp",
-        ], extra_compile_args=[
-            '-fopenmp', 
-            *avx_flag
-        ], extra_link_args=['-lgomp']),
-        CUDAExtension('bmtrain.loss._cuda', [
-            'csrc/cross_entropy_loss.cpp',
-            'csrc/cuda/cross_entropy.cu',
-        ], extra_compile_args={}),
-    ]
-else:
-    ext_modules = []
+class CMakeBuild(build_ext):
+ 
+    def build_extension(self, ext):
+        extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
 
+        # required for auto-detection & inclusion of auxiliary "native" libs
+        if not extdir.endswith(os.path.sep):
+            extdir += os.path.sep
+
+        debug = int(os.environ.get("DEBUG", 0)) if self.debug is None else self.debug
+        cfg = "Debug" if debug else "Release"
+
+        # CMake lets you override the generator - we need to check this.
+        # Can be set with Conda-Build, for example.
+        cmake_generator = os.environ.get("CMAKE_GENERATOR", "")
+
+        # Set Python_EXECUTABLE instead if you use PYBIND11_FINDPYTHON
+        # EXAMPLE_VERSION_INFO shows you how to pass a value into the C++ code
+        # from Python.
+        cmake_args = [
+	        f"-DCMAKE_CXX_STANDARD=14",
+            f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
+            f"-DPYTHON_EXECUTABLE={sys.executable}",
+            f"-DPYTHON_VERSION={sys.version_info.major}.{sys.version_info.minor}",
+            f"-DCMAKE_BUILD_TYPE={cfg}",  # not used on MSVC, but no harm
+        ]
+
+        build_args = []
+        if "CMAKE_ARGS" in os.environ:
+            cmake_args += [item for item in os.environ["CMAKE_ARGS"].split(" ") if item]
+
+        cmake_args += [f"-DEXAMPLE_VERSION_INFO={self.distribution.get_version()}"]
+
+
+        if not cmake_generator or cmake_generator == "Ninja":
+            try:
+                import ninja  # noqa: F401
+
+                ninja_executable_path = os.path.join(ninja.BIN_DIR, "ninja")
+                cmake_args += [
+                    "-GNinja",
+                    f"-DCMAKE_MAKE_PROGRAM:FILEPATH={ninja_executable_path}",
+                ]
+            except ImportError:
+                pass
+
+        if "CMAKE_BUILD_PARALLEL_LEVEL" not in os.environ:
+            # self.parallel is a Python 3 only way to set parallel jobs by hand
+            # using -j in the build_ext call, not supported by pip or PyPA-build.
+            if hasattr(self, "parallel") and self.parallel:
+                # CMake 3.12+ only.
+                build_args += [f"-j{self.parallel}"]
+
+        build_temp = os.path.join(self.build_temp, ext.name)
+        if not os.path.exists(build_temp):
+            os.makedirs(build_temp)
+
+        cmake_args += ["-DPython_ROOT_DIR=" + os.path.dirname(os.path.dirname(sys.executable))]
+        subprocess.check_call(["cmake", ext.sourcedir] + cmake_args, cwd=build_temp)
+        subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=build_temp)
+        
+ext_modules = [
+    CMakeExtension("bmtrain.C"),
+]
 setup(
     name='bmtrain',
-    version='0.2.2',
+    version='0.2.3',
     author="Guoyang Zeng",
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",
     packages=find_packages(),
     install_requires=[
         "numpy",
+		"nvidia-nccl-cu11>=2.14.3"
+    ],
+    setup_requires=[
+        "nvidia-nccl-cu11>=2.14.3"
     ],
     ext_modules=ext_modules,
     cmdclass={
-        'build_ext': BuildExtension
+        'build_ext': CMakeBuild
     })
 

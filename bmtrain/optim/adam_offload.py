@@ -1,11 +1,9 @@
 import torch
 from ..global_var import config
-from . import _cpu as C
-from . import _cuda as G
+from . import _function as F
 from .. import nccl
-import torch.optim._functional as F
 import inspect
-
+from ..utils import check_torch_version
 from copy import deepcopy
 from itertools import chain
 from collections import defaultdict
@@ -107,7 +105,7 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     grad = -state["_grad_fp16"]
                 else:
                     grad = state["_grad_fp16"]
-                C.f_adam_cpu(
+                F.adam_cpu(
                     state["_param_fp32"].view(-1),
                     state["_param_fp16"].view(-1),
                     grad.view(-1),
@@ -128,15 +126,15 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 else:
                     grad = state["_grad_fp32"]
                 other_kwargs = {}
-                if 'maximize' in inspect.signature(F.adam).parameters:
+                if 'maximize' in inspect.signature(torch.optim._functional.adam).parameters:
                     other_kwargs['maximize'] = False
-                F.adam(
+                torch.optim._functional.adam(
                     [state["_param_fp32"]],
                     [grad],
                     [state["exp_avg"]],
                     [state["exp_avg_sq"]],
                     [],
-                    [state["step"]] if int(torch.__version__.split('.')[1]) < 12
+                    [state["step"]] if check_torch_version("1.12.0") < 0
                         else [torch.tensor(state["step"])],
                     amsgrad=False,
                     beta1=beta1,
@@ -253,3 +251,8 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
             'state': packed_state,
             'param_groups': param_groups,
         }
+            
+    #TODO zero_grad(set_to_none=True) makes optimizer crashed, maybe the reason of grad accu
+    def zero_grad(self, set_to_none: bool = False):
+        super().zero_grad(set_to_none=set_to_none)
+
