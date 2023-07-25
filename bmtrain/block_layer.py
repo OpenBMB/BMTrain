@@ -208,7 +208,7 @@ class CheckpointBlockContext:
     def __enter__(self):
         self.enter()
     
-    def exit(self):
+    def exit(self, backward=False):
         """
         Reduce scatter gradients
         """
@@ -217,8 +217,7 @@ class CheckpointBlockContext:
             return
         self._need_release = False
         self.block._ready = False
-        requires_grad = torch.is_grad_enabled()
-        if requires_grad:
+        if backward:
             for kw, val in self.block._storage_info.items():
                 local_param = self.block._storage_params[kw]
 
@@ -333,6 +332,7 @@ class CheckpointBlock(torch.nn.Module):
         self._module = inner_module
         self._inputs = None
         self._layer_dict = {}
+        self._backward_block_ctx = None
         # build large parameter&grad here
         self._param_info = []
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
@@ -450,16 +450,16 @@ class CheckpointBlock(torch.nn.Module):
         for kw in offsets.keys():
             assert offsets[kw] == self._storage_info[kw]["total"]
     
-    def __call__(self, *args, **kwargs):
-        # gather here
-        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-        all_inputs = list(args)
-        for kw, val in kwargs.items():
-            all_inputs.append(kw)
-            all_inputs.append(val)
-        outputs = OpCheckpointBlock.apply(placeholder, self, True, len(args), *all_inputs)
-        len_output = outputs[0]
-        return outputs[1:1+len_output] if len_output > 0 else outputs[1]
+#    def __call__(self, *args, **kwargs):
+#        # gather here
+#        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+#        all_inputs = list(args)
+#        for kw, val in kwargs.items():
+#            all_inputs.append(kw)
+#            all_inputs.append(val)
+#        outputs = OpCheckpointBlock.apply(placeholder, self, True, len(args), *all_inputs)
+#        len_output = outputs[0]
+#        return outputs[1:1+len_output] if len_output > 0 else outputs[1]
 
     def forward(self, *args):
         if config["use_checkpoint"]:
@@ -698,16 +698,6 @@ class CheckpointBlock(torch.nn.Module):
     def __repr__(self):
         return self._module.__repr__()
         
-def checkpoint_pre_forward(module, inputs):
-    module._inputs = inputs
-
-def checkpoint_pre_backward(module, grad_outputs):
-    with torch.enable_grad():
-        out = module._module(*module._inputs)
-        torch.autograd.backward(out, *grad_outputs)
-
-        if config["zero_level"] != 0:
-            module._backward_block_ctx.exit()
 
 def zero_pre_forward(module, inputs):
     forward_flag = 1 if config['zero_level'] == 2 else 0
@@ -720,12 +710,26 @@ def zero_post_forward(module, inputs, outputs):
 def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if config['zero_level'] == 2 else 0
     with torch.enable_grad():
-        module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, backward_flag)
-        module._backward_block_ctx.enter()
+        module._backward_block_ctxs[module._layer_id] = CheckpointBlockContext(module, module._layer_dict, backward_flag)
+        module._backward_block_ctxs[module._layer_id].enter()
 
 def zero_post_backward(module, grad_inputs, grad_outputs):
     with torch.enable_grad():
-        module._backward_block_ctx.exit()
+        if not module._is_last_layer:
+            module._backward_block_ctxs[module._layer_id + 1].exit(True)
+        if module._layer_id == 0:
+            module._backward_block_ctxs[0].exit(True)
+
+def checkpoint_pre_forward(module, inputs):
+    module._inputs = inputs
+
+def checkpoint_pre_backward(module, grad_outputs):
+    with torch.enable_grad():
+        out = module._module(*module._inputs)
+        torch.autograd.backward(out, *grad_outputs)
+
+        if config["zero_level"] != 0:
+            zero_post_backward(module, None, None)
     
 
 class TransformerBlockList(torch.nn.Module):
@@ -753,6 +757,7 @@ class TransformerBlockList(torch.nn.Module):
         super().__init__()
         
         self._modules = {}
+        self._backward_block_ctxs = [None for _ in range(len(modules))]
         for i, module in enumerate(modules):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
@@ -768,10 +773,13 @@ class TransformerBlockList(torch.nn.Module):
 
             if config["zero_level"] > 0 and not config["use_checkpoint"]:
                 module.register_full_backward_hook(zero_post_backward)
+            module._backward_block_ctxs = self._backward_block_ctxs
+            module._layer_id = i
+            module._is_last_layer = True if i == len(modules) -1 else False
 
             self._modules[str(i)] = module
             self.add_module(str(i), module)
-
+    
         self.num_hidden = num_hidden
 
         if sqrt:
