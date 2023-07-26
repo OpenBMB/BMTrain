@@ -722,9 +722,11 @@ def zero_post_backward(module, grad_inputs, grad_outputs):
 
 def checkpoint_pre_forward(module, inputs):
     module._inputs = inputs
+    module._cuda_rng_state = torch.cuda.get_rng_state()
 
 def checkpoint_pre_backward(module, grad_outputs):
     with torch.enable_grad():
+        torch.cuda.set_rng_state(module._cuda_rng_state)
         out = module._module(*module._inputs)
         torch.autograd.backward(out, *grad_outputs)
 
