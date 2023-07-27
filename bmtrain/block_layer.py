@@ -727,10 +727,15 @@ def checkpoint_pre_forward(module, inputs):
     module._cuda_rng_state = torch.cuda.get_rng_state()
 
 def checkpoint_pre_backward(module, grad_outputs):
-    with torch.enable_grad():
-        torch.cuda.set_rng_state(module._cuda_rng_state)
-        out = module._module(*module._inputs)
-        torch.autograd.backward(out, *grad_outputs)
+    with torch.random.fork_rng(devices=[torch.cuda.current_device()], enabled=True):
+        with torch.enable_grad():
+            torch.cuda.set_rng_state(module._cuda_rng_state)
+            out = module._module(*module._inputs)
+            torch.autograd.backward(out, *grad_outputs)
+
+            if module._layer_id == 0:
+                module._backward_block_ctxs[0].exit(True)
+                module._backward_block_ctxs[0] = None
 
     
 
@@ -775,6 +780,7 @@ class TransformerBlockList(torch.nn.Module):
 
             if config["zero_level"] > 0 and not config["use_checkpoint"]:
                 module.register_full_backward_hook(zero_post_backward)
+
             module._backward_block_ctxs = self._backward_block_ctxs
             module._layer_id = i
             module._is_last_layer = True if i == len(modules) -1 else False
