@@ -450,16 +450,16 @@ class CheckpointBlock(torch.nn.Module):
         for kw in offsets.keys():
             assert offsets[kw] == self._storage_info[kw]["total"]
     
-#    def __call__(self, *args, **kwargs):
-#        # gather here
-#        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
-#        all_inputs = list(args)
-#        for kw, val in kwargs.items():
-#            all_inputs.append(kw)
-#            all_inputs.append(val)
-#        outputs = OpCheckpointBlock.apply(placeholder, self, True, len(args), *all_inputs)
-#        len_output = outputs[0]
-#        return outputs[1:1+len_output] if len_output > 0 else outputs[1]
+    def __call__(self, *args, **kwargs):
+        # gather here
+        placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+        all_inputs = list(args)
+        for kw, val in kwargs.items():
+            all_inputs.append(kw)
+            all_inputs.append(val)
+        outputs = OpCheckpointBlock.apply(placeholder, self, True, len(args), *all_inputs)
+        len_output = outputs[0]
+        return outputs[1:1+len_output] if len_output > 0 else outputs[1]
 
     def forward(self, *args):
         if config["use_checkpoint"]:

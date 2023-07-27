@@ -111,7 +111,7 @@ class OpMicroForward(torch.autograd.Function):
                         ipt = layer_inputs[ctx.save_list[idx][1]].requires_grad_()
                         if ctx.micro_idx == 0:
                             ctx.block_ctx_list[idx] = CheckpointBlockContext(ctx.self._modules[str(layer_id)], ctx.layers_dict[idx], 2, pipe=True)
-                            ctx.block_ctx_list[idx].enter()
+                            ctx.block_ctx_list[idx].enter(True)
                         if ctx.micro_idx == config["micros"]-1:
                             exit_prev(prev_ctx, prev_grad)
                             prev_ctx = ctx.block_ctx_list[idx]
