@@ -141,7 +141,7 @@ class CheckpointBlockContext:
             self.comm = config["zero_comm"] 
         else:
             self.comm = config["comm"]
-    def enter(self):
+    def enter(self, requires_grad=False):
         """
         gather parameters
         """
@@ -151,7 +151,7 @@ class CheckpointBlockContext:
         self._need_release = True
 
         wait_loader()
-        requires_grad = torch.is_grad_enabled()
+#requires_grad = torch.is_grad_enabled()
         with torch.cuda.stream(config["load_stream"]):
             for kw, val in self.block._storage_info.items():
                 assert self.block._storage_params[kw].is_cuda
@@ -711,14 +711,16 @@ def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if config['zero_level'] == 2 else 0
     with torch.enable_grad():
         module._backward_block_ctxs[module._layer_id] = CheckpointBlockContext(module, module._layer_dict, backward_flag)
-        module._backward_block_ctxs[module._layer_id].enter()
-
-def zero_post_backward(module, grad_inputs, grad_outputs):
-    with torch.enable_grad():
+        module._backward_block_ctxs[module._layer_id].enter(True)
         if not module._is_last_layer:
             module._backward_block_ctxs[module._layer_id + 1].exit(True)
-        if module._layer_id == 0:
-            module._backward_block_ctxs[0].exit(True)
+            module._backward_block_ctxs[module._layer_id + 1] = None
+
+
+def zero_post_backward(module, grad_inputs, grad_outputs):
+    if module._layer_id == 0:
+        module._backward_block_ctxs[0].exit(True)
+        module._backward_block_ctxs[0] = None
 
 def checkpoint_pre_forward(module, inputs):
     module._inputs = inputs
@@ -730,8 +732,6 @@ def checkpoint_pre_backward(module, grad_outputs):
         out = module._module(*module._inputs)
         torch.autograd.backward(out, *grad_outputs)
 
-        if config["zero_level"] != 0:
-            zero_post_backward(module, None, None)
     
 
 class TransformerBlockList(torch.nn.Module):
