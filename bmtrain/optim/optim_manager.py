@@ -62,7 +62,7 @@ class OptimManager:
         self.steps_since_last_scale = 0
         self.loss_scale_factor = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
         self.loss_scale_steps = loss_scale_steps
-        self.min_loss_scale = 1
+        self.min_loss_scale = min_loss_scale
         self.max_loss_scale = max_loss_scale
 
         self.optimizers = []
