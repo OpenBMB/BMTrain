@@ -7,7 +7,7 @@ import re
 # 默认 MR 和 Master 不发版情况下，只做py310的编译过程, 每个 MR 都跑 py3.7～3.10 的编译过程的话，速度会比较慢
 # libcpm release version
 __package__ = 'bmtrain-zh'
-__version__ = 'v0.2.3.dev9'
+__version__ = 'v0.2.3.dev10'
 
 ##########################
 
