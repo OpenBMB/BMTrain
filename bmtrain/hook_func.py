@@ -3,6 +3,9 @@ from .global_var import config
 from .checkpointing import CheckpointBlockContext
 from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
 
+torch_version = torch.__version__
+#torch_version = '1.9.0'
+
 def zero_pre_forward(module, inputs):
     enter = True
     pipe = False
@@ -27,14 +30,12 @@ def zero_pre_backward(module, grad_outputs):
     if not config['pipe_enabled']:
         module._backward_block_ctxs[module._layer_id] = CheckpointBlockContext(module, module._layer_dict, backward_flag)
         module._backward_block_ctxs[module._layer_id].enter(True)
-        if exit:
-            if not module._is_last_layer:
-                module._backward_block_ctxs[module._layer_id + 1].exit(True)
+        if not module._is_last_layer:
+            module._backward_block_ctxs[module._layer_id + 1].exit(True)
     else:
         if module._micro_idx == config['micros'] - 1:
             module._backward_block_ctxs[module._layer_id] = CheckpointBlockContext(module, module._layer_dict, backward_flag, pipe=True)
             module._backward_block_ctxs[module._layer_id].enter(True)
-
 
 def zero_post_backward(module, grad_inputs, grad_outputs):
     if not config['pipe_enabled']:
@@ -43,6 +44,10 @@ def zero_post_backward(module, grad_inputs, grad_outputs):
     else:
         if module._micro_idx == 0:
             module._backward_block_ctxs[module._layer_id].exit(True)
+
+    if torch_version < '2.0.1':
+        if module._layer_id != 0:
+            zero_pre_backward(module._pre_module, grad_inputs)
 
 def pipe_pre_forward(module, inputs):
     if not module._is_first_stage:
@@ -119,4 +124,34 @@ def checkpoint_pre_backward(module, grad_outputs):
             else:
                 zero_post_backward(module, None, grad_outputs)
                 pipe_post_backward(module, module._inputs[module._micro_idx][0].grad, None)
+
+class CheckpointFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, module, *args):
+        inputs = args[0].detach()
+        ctx.module = module
+        with torch.no_grad():
+            zero_pre_forward(module, args) 
+            checkpoint_pre_forward(module, args) 
+            outputs = module._module(inputs, *args[1:])
+            outputs.requires_grad_()
+            zero_post_forward(module, args, outputs) 
+            return outputs
+
+    @staticmethod
+    def backward(ctx, grads):
+        with torch.enable_grad():
+            zero_pre_backward(ctx.module, grads)
+            checkpoint_pre_backward(ctx.module, grads)
+            return None, ctx.module._inputs[0].grad, None, None
+
+def identity_post_backward(module, grad_inputs, grad_outputs):
+    zero_pre_backward(module._pre_module, grad_inputs)
+
+class IdentityLayer(torch.nn.Module):
+    def __init__(self):
+        super(IdentityLayer, self).__init__()
+
+    def forward(self, x):
+        return x
 
