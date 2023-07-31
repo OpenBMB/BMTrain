@@ -118,9 +118,7 @@ def checkpoint_pre_backward(module, grad_outputs):
             torch.autograd.backward(out, *grad_outputs)
 
             if not config['pipe_enabled']:
-                if module._layer_id == 0:
-                    module._backward_block_ctxs[0].exit(True)
-                    module._backward_block_ctxs[0] = None
+                zero_post_backward(module, None, grad_outputs)
             else:
                 zero_post_backward(module, None, grad_outputs)
                 pipe_post_backward(module, module._inputs[module._micro_idx][0].grad, None)
@@ -147,6 +145,8 @@ class CheckpointFunction(torch.autograd.Function):
 
 def identity_post_backward(module, grad_inputs, grad_outputs):
     zero_pre_backward(module._pre_module, grad_inputs)
+    if config['use_checkpoint']:
+        checkpoint_pre_backward(module.Pre_module, grad_inputs)
 
 class IdentityLayer(torch.nn.Module):
     def __init__(self):
