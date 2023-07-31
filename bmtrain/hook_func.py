@@ -4,7 +4,6 @@ from .checkpointing import CheckpointBlockContext
 from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
 
 torch_version = torch.__version__
-#torch_version = '1.9.0'
 
 def zero_pre_forward(module, inputs):
     enter = True
@@ -123,35 +122,7 @@ def checkpoint_pre_backward(module, grad_outputs):
                 zero_post_backward(module, None, grad_outputs)
                 pipe_post_backward(module, module._inputs[module._micro_idx][0].grad, None)
 
-class CheckpointFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, module, *args):
-        inputs = args[0].detach()
-        ctx.module = module
-        with torch.no_grad():
-            zero_pre_forward(module, args) 
-            checkpoint_pre_forward(module, args) 
-            outputs = module._module(inputs, *args[1:])
-            outputs.requires_grad_()
-            zero_post_forward(module, args, outputs) 
-            return outputs
-
-    @staticmethod
-    def backward(ctx, grads):
-        with torch.enable_grad():
-            zero_pre_backward(ctx.module, grads)
-            checkpoint_pre_backward(ctx.module, grads)
-            return None, ctx.module._inputs[0].grad, None, None
-
 def identity_post_backward(module, grad_inputs, grad_outputs):
     zero_pre_backward(module._pre_module, grad_inputs)
     if config['use_checkpoint']:
         checkpoint_pre_backward(module.Pre_module, grad_inputs)
-
-class IdentityLayer(torch.nn.Module):
-    def __init__(self):
-        super(IdentityLayer, self).__init__()
-
-    def forward(self, x):
-        return x
-

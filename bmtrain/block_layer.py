@@ -600,7 +600,7 @@ class TransformerBlockList(torch.nn.Module):
                 module._pre_module = self._modules[str(i-1)] 
     
         self.num_hidden = num_hidden
-        self.identity = hook_func.IdentityLayer()
+        self.identity = torch.nn.Identity()
         self.identity.register_full_backward_hook(hook_func.identity_post_backward)
         self.identity._pre_module = self._modules[str(len(modules)-1)]
 
