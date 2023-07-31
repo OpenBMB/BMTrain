@@ -116,7 +116,7 @@ class OptimManager:
 
         This function can also handle gradient overflow by reducing the loss scale when it occurs.
         """
-        if self.loss_scale_enabled and self.loss_scale > self.min_loss_scale:
+        if self.loss_scale_enabled:
             has_overflow = False
             for optimizer in self.optimizers:
                 try:
@@ -127,7 +127,8 @@ class OptimManager:
             if has_overflow:
                 print_rank("Gradient overflow, change scale from %lf to %lf" % (self.loss_scale, self.loss_scale / self.loss_scale_factor))
                 with torch.no_grad():
-                    self._justify_scale(self.loss_scale / self.loss_scale_factor)
+                    if self.loss_scale > self.min_loss_scale:
+                        self._justify_scale(self.loss_scale / self.loss_scale_factor)
                     self.zero_grad()
                 return
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
