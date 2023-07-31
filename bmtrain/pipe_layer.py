@@ -14,6 +14,7 @@ from .checkpointing import (
 )
 from . import debug
 from .block_layer import CheckpointBlock, round_up, _get_param_kw
+from . import hook_func
 
 class OpMicroForward(torch.autograd.Function):
     @staticmethod
@@ -442,21 +443,21 @@ class PipelineTransformerBlockList(torch.nn.Module):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
 
-            module.register_forward_pre_hook(pipe_pre_forward)
-            module.register_forward_pre_hook(zero_pre_forward)
+            module.register_forward_pre_hook(hook_func.pipe_pre_forward)
+            module.register_forward_pre_hook(hook_func.zero_pre_forward)
             if config['use_checkpoint']:
-                module.register_forward_pre_hook(checkpoint_pre_forward)
+                module.register_forward_pre_hook(hook_func.checkpoint_pre_forward)
 
-            module.register_forward_hook(zero_post_forward)
-            module.register_forward_hook(pipe_post_forward)
+            module.register_forward_hook(hook_func.zero_post_forward)
+            module.register_forward_hook(hook_func.pipe_post_forward)
 
-            module.register_full_backward_pre_hook(pipe_pre_backward)
-            module.register_full_backward_pre_hook(zero_pre_backward)
+            module.register_full_backward_pre_hook(hook_func.pipe_pre_backward)
+            module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
             if config['use_checkpoint']:
-                module.register_full_backward_pre_hook(checkpoint_pre_backward)
+                module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
 
-            module.register_full_backward_hook(zero_post_backward)
-            module.register_full_backward_hook(pipe_post_backward)
+            module.register_full_backward_hook(hook_func.zero_post_backward)
+            module.register_full_backward_hook(hook_func.pipe_post_backward)
 
             module.stage_id = self.stage_id
             module.stages = self.stages
