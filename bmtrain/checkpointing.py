@@ -56,7 +56,6 @@ class CheckpointBlockContext:
         self._need_release = True
 
         wait_loader()
-#requires_grad = torch.is_grad_enabled()
         with torch.cuda.stream(config["load_stream"]):
             for kw, val in self.block._storage_info.items():
                 assert self.block._storage_params[kw].is_cuda

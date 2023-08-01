@@ -62,6 +62,10 @@ class PipePreFunction(torch.autograd.Function):
     def backward(ctx, grads):
         return grads, None
 
+    if torch_version < '2.0.1':
+        if module._layer_id != 0:
+            zero_pre_backward(module._pre_module, grad_inputs)
+
 def pipe_pre_forward(module, inputs):
     if not module._is_first_stage:
         if module._is_first_layer:

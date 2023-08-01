@@ -586,8 +586,8 @@ class TransformerBlockList(torch.nn.Module):
                 if torch_version >= '2.0.1':
                     module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
 
-            if config["zero_level"] > 0 and not config["use_checkpoint"]:
-                module.register_full_backward_hook(hook_func.zero_post_backward)
+                if config["zero_level"] > 0 and not config["use_checkpoint"]:
+                    module.register_full_backward_hook(hook_func.zero_post_backward)
 
             module._backward_block_ctxs = self._backward_block_ctxs
             module._layer_id = i
