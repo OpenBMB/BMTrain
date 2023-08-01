@@ -16,6 +16,8 @@ from . import debug
 from .block_layer import CheckpointBlock, round_up, _get_param_kw
 from . import hook_func
 
+torch_version = hook_func.torch_version
+
 class OpMicroForward(torch.autograd.Function):
     @staticmethod
     def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', micro_idx, block_ctx_list, layers_dict, save_list, hidden_state, *args):
@@ -359,10 +361,12 @@ class PipelineTransformerBlockList(torch.nn.Module):
             module.register_forward_hook(hook_func.zero_post_forward)
             module.register_forward_hook(hook_func.pipe_post_forward)
 
-            module.register_full_backward_pre_hook(hook_func.pipe_pre_backward)
-            module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
+            if torch_version >= '2.0.1':
+                module.register_full_backward_pre_hook(hook_func.pipe_pre_backward)
+                module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
             if config['use_checkpoint']:
-                module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
+                if torch_version >= '2.0.1':
+                    module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
 
             module.register_full_backward_hook(hook_func.zero_post_backward)
             module.register_full_backward_hook(hook_func.pipe_post_backward)
@@ -371,6 +375,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
             module.stages = self.stages
 
             self._modules[str(idx)] = module
+            if idx > 0:
+                module._pre_module = self._modules[str(idx-1)] 
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)
 
@@ -387,6 +393,11 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.next_rank = pipe_group[self.pipe_idx, self.stage_id + 1] if self.stage_id < config['pipe_size'] - 1 else -1
         self.prev_rank = pipe_group[self.pipe_idx, self.stage_id - 1] if self.stage_id > 0 else -1
         # self.micro_batches = config['num_micro_batches']
+
+        if torch_version < '2.0.1':
+            self.identity = torch.nn.Identity()
+            self.identity.register_full_backward_hook(hook_func.identity_post_backward)
+            self.identity._pre_module = self._modules[str(self.layer_ids[-1])]
             
         self.save_list = [(i, i) for i in range(len(self.layer_ids))]
             
@@ -414,7 +425,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         else:
             batch_size = hidden_state.shape[0]
             num_micros = config["micros"]
-            hidden_state_list = all_gather(hidden_state, config["pipe_comm"]).flatten(0, 1).detach().requires_grad_()
+            hidden_state_list = hook_func.PipeAllGatherFunction.apply(hidden_state)
 
             args_list = [[] for _ in range(num_micros)]
             for arg in args:
@@ -430,23 +441,25 @@ class PipelineTransformerBlockList(torch.nn.Module):
                 for i in range(num_micros):
                     args_list[i].append(arg_all[i])
             
+            hidden_state_list = hidden_state_list.flatten(0, 1).chunk(num_micros, dim=0)
             outputs = []
-            hidden_state_list = hidden_state_list.chunk(num_micros, dim=0)
+
             for micro_idx, (hidden_state, arg) in enumerate(zip(hidden_state_list, args_list)):
                 for idx,layer_id in enumerate(self.layer_ids):
                     self._modules[str(layer_id)]._micro_idx = micro_idx
                     hidden_state = self._modules[str(layer_id)](hidden_state, *arg)
                 outputs.append(hidden_state)
 
-            last_hidden = torch.cat(outputs, dim=0)
-            last_hidden = broadcast(last_hidden, config["pipe_size"] - 1, config["pipe_comm"])
-            last_hidden = last_hidden.chunk(self.stages, dim=0)
-            outputs = last_hidden[self.stage_id]
+            if torch_version < '2.0.1':
+                outputs[-1] = self.identity(outputs[-1])
 
-        if return_hidden_states:
-            return outputs[:2*self.num_hidden]
-        else:
-            return outputs[:self.num_hidden] if self.num_hidden > 1 else outputs
+            last_hidden = torch.cat(outputs, dim=0)
+            outputs = hook_func.PipePostFunction.apply(last_hidden)
+
+            if return_hidden_states:
+                return outputs[:2*self.num_hidden]
+            else:
+                return outputs[:self.num_hidden] if self.num_hidden > 1 else outputs
 
     def get_range_by_stage_id(self, stage_id : int) -> List[int]:
         part_lens = [0]+[self.get_part_len_by_stage_id(i) for i in range(stage_id+1)]
