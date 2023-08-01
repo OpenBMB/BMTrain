@@ -575,24 +575,24 @@ class TransformerBlockList(torch.nn.Module):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
 
-            if torch_version >= '2.0.1' or i < len(modules):
-                if config["zero_level"] > 0:
-                    module.register_forward_pre_hook(hook_func.zero_pre_forward)
-                    module.register_forward_hook(hook_func.zero_post_forward)
-                    if torch_version >= '2.0.1':
-                        module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
+            if config["zero_level"] > 0:
+                module.register_forward_pre_hook(hook_func.zero_pre_forward)
+                module.register_forward_hook(hook_func.zero_post_forward)
+                if torch_version >= '2.0.1':
+                    module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
 
-                if config["use_checkpoint"]:
-                    if torch_version >= '2.0.1':
-                        module.register_forward_pre_hook(hook_func.checkpoint_pre_forward)
-                        module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
+            if config["use_checkpoint"]:
+                module.register_forward_pre_hook(hook_func.checkpoint_pre_forward)
+                if torch_version >= '2.0.1':
+                    module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
 
-                if config["zero_level"] > 0 and not config["use_checkpoint"]:
-                    module.register_full_backward_hook(hook_func.zero_post_backward)
+            if config["zero_level"] > 0 and not config["use_checkpoint"]:
+                module.register_full_backward_hook(hook_func.zero_post_backward)
 
             module._backward_block_ctxs = self._backward_block_ctxs
             module._layer_id = i
             module._is_last_layer = True if i == len(modules) -1 else False
+            module._is_first_layer = True if i == 0 else False
 
             self._modules[str(i)] = module
             self.add_module(str(i), module)
@@ -600,9 +600,10 @@ class TransformerBlockList(torch.nn.Module):
                 module._pre_module = self._modules[str(i-1)] 
     
         self.num_hidden = num_hidden
-        self.identity = hook_func.IdentityLayer()
-        self.identity.register_full_backward_hook(hook_func.identity_post_backward)
-        self.identity._pre_module = self._modules[str(len(modules)-1)]
+        if torch_version < '2.0.1':
+            self.identity = torch.nn.Identity()
+            self.identity.register_full_backward_hook(hook_func.identity_post_backward)
+            self.identity._pre_module = self._modules[str(len(modules)-1)]
 
         if sqrt:
             length = len(self)
@@ -627,7 +628,11 @@ class TransformerBlockList(torch.nn.Module):
             self.save_list = [(i, i) for i in range(len(self))]
             
     def __len__(self) -> int:
-        return len(self._modules) - 1
+        if torch_version < '2.0.1':
+            return len(self._modules) - 1
+        else:
+            return len(self._modules)
+
     def __iter__(self) -> Iterator[CheckpointBlock]:
         return iter(self._modules.values())
     def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:

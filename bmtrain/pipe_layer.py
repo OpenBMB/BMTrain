@@ -16,6 +16,8 @@ from . import debug
 from .block_layer import CheckpointBlock, round_up, _get_param_kw
 from . import hook_func
 
+torch_version = hook_func.torch_version
+
 class OpMicroForward(torch.autograd.Function):
     @staticmethod
     def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', micro_idx, block_ctx_list, layers_dict, save_list, hidden_state, *args):
@@ -315,98 +317,6 @@ class OpPipeTransformerBlockList(torch.autograd.Function):
 
         return (None, None, None, grad) + tuple(grads) + (None,)
 
-def zero_pre_forward(module, inputs):
-    if module._micro_idx == 0:
-        forward_flag = 1 if config['zero_level'] == 2 else 0
-        module._forward_block_ctx = CheckpointBlockContext(module, module._layer_dict, forward_flag, pipe=True)
-        module._forward_block_ctx.enter()
-
-def zero_post_forward(module, inputs, outputs):
-    if module._micro_idx == config['micros'] - 1:
-        module._forward_block_ctx.exit()
-
-
-def pipe_pre_forward(module, inputs):
-    if not module._is_first_stage:
-        if module._is_first_layer:
-            pre_inputs = recv_activations(module.stage_id - 1, config['pipe_comm'])
-            pre_inputs.requires_grad_()
-            return (pre_inputs, ) + inputs[1:]
-
-def pipe_post_forward(module, inputs, outputs):
-    if not module._is_last_stage:
-        if module._is_last_layer:
-            send_data = outputs[0] if isinstance(outputs, tuple) else outputs
-            send_activations(send_data, module.stage_id + 1, config['pipe_comm'])
-
-def zero_pre_backward(module, grad_inputs):
-    if module._micro_idx == config['micros'] - 1:
-        backward_flag = 2 if config['zero_level'] == 2 else 0
-        with torch.enable_grad():
-            module._backward_block_ctxs[module._layer_id] = CheckpointBlockContext(module, module._layer_dict, backward_flag, pipe=True)
-            module._backward_block_ctxs[module._layer_id].enter(True)
-#    if module._micro_idx == 0:
-#        if not module._is_last_layer:
-#            module._backward_block_ctxs[module._layer_id + 1].exit(True)
-
-def zero_post_backward(module, grad_inputs, grad_outputs):
-    if module._micro_idx == 0:
-        module._backward_block_ctxs[module._layer_id].exit(True)
-#        if module._is_first_layer:
-#            module._backward_block_ctxs[module._layer_id].exit(True)
-
-def pipe_pre_backward(module, grad_inputs):
-    if module._is_last_layer:
-        module._grad_list = all_gather(grad_inputs[0], config["pipe_comm"])
-        module._grad_list = module._grad_list.flatten(start_dim=0, end_dim=1).chunk(module.stages, dim=0)
-
-    if module._is_last_layer and module._is_last_stage:
-        return (module._grad_list[module._micro_idx], )
-
-    if not module._is_last_stage:
-        if module._is_last_layer:
-            pre_grad_inputs = recv_activations(module.stage_id + 1, config['pipe_comm'])
-            return (pre_grad_inputs, ) + grad_inputs[1:]
-            
-
-def pipe_post_backward(module, grad_inputs, grad_outputs):
-    if not module._is_first_stage:
-        if module._is_first_layer:
-            send_data = grad_inputs[0] if isinstance(grad_inputs, tuple) else grad_inputs 
-            if send_data is not None:
-                send_activations(send_data, module.stage_id - 1, config['pipe_comm'])
-
-#    if module._is_first_layer:
-#        if module._micro_idx == config['micros'] -1:
-#            module._all_grads = []
-#        grad = grad_inputs[0] 
-#        module._all_grads.append(grad)
-#        if module._micro_idx == 0:
-#            grads = torch.cat(module._all_grads, dim=0)
-#            grad = broadcast(grads, 0, config['pipe_comm'])
-#            grad = grad.chunk(module.stages, dim=0)
-#            return (grad[module.stage_id], ) + grad_inputs[1:]
-
-    module._micro_idx -= 1
-    
-def checkpoint_pre_forward(module, inputs):
-    if module._micro_idx == 0:
-        module._inputs = [inputs]
-        module._cuda_rng_state = [torch.cuda.get_rng_state()]
-    else:
-        module._inputs.append(inputs)
-        module._cuda_rng_state.append(torch.cuda.get_rng_state())
-
-def checkpoint_pre_backward(module, grad_outputs):
-    with torch.random.fork_rng(devices=[torch.cuda.current_device()], enabled=True):
-        with torch.enable_grad():
-            torch.cuda.set_rng_state(module._cuda_rng_state[module._micro_idx])
-            out = module._module(*module._inputs[module._micro_idx])
-            torch.autograd.backward(out, *grad_outputs)
-
-            zero_post_backward(module, None, grad_outputs)
-            pipe_post_backward(module, module._inputs[module._micro_idx][0].grad, None)
-
 class PipelineTransformerBlockList(torch.nn.Module):
     r"""
     TransformerBlockList is a list of CheckpointBlocks.
@@ -451,10 +361,12 @@ class PipelineTransformerBlockList(torch.nn.Module):
             module.register_forward_hook(hook_func.zero_post_forward)
             module.register_forward_hook(hook_func.pipe_post_forward)
 
-            module.register_full_backward_pre_hook(hook_func.pipe_pre_backward)
-            module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
+            if torch_version >= '2.0.1':
+                module.register_full_backward_pre_hook(hook_func.pipe_pre_backward)
+                module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
             if config['use_checkpoint']:
-                module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
+                if torch_version >= '2.0.1':
+                    module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
 
             module.register_full_backward_hook(hook_func.zero_post_backward)
             module.register_full_backward_hook(hook_func.pipe_post_backward)
@@ -463,6 +375,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
             module.stages = self.stages
 
             self._modules[str(idx)] = module
+            if idx > 0:
+                module._pre_module = self._modules[str(idx-1)] 
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)
 
@@ -479,6 +393,11 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.next_rank = pipe_group[self.pipe_idx, self.stage_id + 1] if self.stage_id < config['pipe_size'] - 1 else -1
         self.prev_rank = pipe_group[self.pipe_idx, self.stage_id - 1] if self.stage_id > 0 else -1
         # self.micro_batches = config['num_micro_batches']
+
+        if torch_version < '2.0.1':
+            self.identity = torch.nn.Identity()
+            self.identity.register_full_backward_hook(hook_func.identity_post_backward)
+            self.identity._pre_module = self._modules[str(self.layer_ids[-1])]
             
         self.save_list = [(i, i) for i in range(len(self.layer_ids))]
             
@@ -506,7 +425,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         else:
             batch_size = hidden_state.shape[0]
             num_micros = config["micros"]
-            hidden_state_list = all_gather(hidden_state, config["pipe_comm"]).flatten(0, 1).detach().requires_grad_()
+            hidden_state_list = hook_func.PipeAllGatherFunction.apply(hidden_state)
 
             args_list = [[] for _ in range(num_micros)]
             for arg in args:
@@ -522,23 +441,25 @@ class PipelineTransformerBlockList(torch.nn.Module):
                 for i in range(num_micros):
                     args_list[i].append(arg_all[i])
             
+            hidden_state_list = hidden_state_list.flatten(0, 1).chunk(num_micros, dim=0)
             outputs = []
-            hidden_state_list = hidden_state_list.chunk(num_micros, dim=0)
+
             for micro_idx, (hidden_state, arg) in enumerate(zip(hidden_state_list, args_list)):
                 for idx,layer_id in enumerate(self.layer_ids):
                     self._modules[str(layer_id)]._micro_idx = micro_idx
                     hidden_state = self._modules[str(layer_id)](hidden_state, *arg)
                 outputs.append(hidden_state)
 
-            last_hidden = torch.cat(outputs, dim=0)
-            last_hidden = broadcast(last_hidden, config["pipe_size"] - 1, config["pipe_comm"])
-            last_hidden = last_hidden.chunk(self.stages, dim=0)
-            outputs = last_hidden[self.stage_id]
+            if torch_version < '2.0.1':
+                outputs[-1] = self.identity(outputs[-1])
 
-        if return_hidden_states:
-            return outputs[:2*self.num_hidden]
-        else:
-            return outputs[:self.num_hidden] if self.num_hidden > 1 else outputs
+            last_hidden = torch.cat(outputs, dim=0)
+            outputs = hook_func.PipePostFunction.apply(last_hidden)
+
+            if return_hidden_states:
+                return outputs[:2*self.num_hidden]
+            else:
+                return outputs[:self.num_hidden] if self.num_hidden > 1 else outputs
 
     def get_range_by_stage_id(self, stage_id : int) -> List[int]:
         part_lens = [0]+[self.get_part_len_by_stage_id(i) for i in range(stage_id+1)]
