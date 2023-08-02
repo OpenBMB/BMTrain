@@ -40,8 +40,12 @@ class AdamOptimizer(torch.optim.Optimizer):
                 if p in self.state:
                     state = self.state[p]
                     if len(state) > 0:
-                        state['exp_avg'] *= delta
-                        state['exp_avg_sq'] *= delta
+                        #if p belongs to bf16, do not justify scale  
+                        if p.dtype == torch.bfloat16:
+                            continue
+                        else:                 
+                            state['exp_avg'] *= delta
+                            state['exp_avg_sq'] *= delta
 
     @torch.no_grad()
     def step(self, closure=None, scale=1):
@@ -63,19 +67,22 @@ class AdamOptimizer(torch.optim.Optimizer):
                 if p.grad is not None and p.requires_grad:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-                    if p.dtype not in [torch.float16, torch.float32]:
-                        raise RuntimeError('Adam only supports fp32 or fp16 gradients')
+                    if p.dtype not in [torch.float32, torch.half, torch.bfloat16]:
+                        raise RuntimeError('Adam only supports fp32, fp16 and bf16 gradients')
 
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
                         state['step'] = 0
                         # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.zeros(p.size(), dtype=p.dtype, device=p.device) # on device
+                        if p.dtype == torch.bfloat16:
+                            state['exp_avg'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device) # on device
+                        else:
+                            state['exp_avg'] = torch.zeros(p.size(), dtype=p.dtype, device=p.device) # on device
                         # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device)   # on device
-
-                        if p.dtype == torch.half:
+                        state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device)# on device
+                  
+                        if p.dtype == torch.half or p.dtype == torch.bfloat16:
                             state['_param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device=p.device)   # on device
                             state['_param_fp32'].copy_(p)
 
@@ -107,6 +114,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                             p,                      # bf16
                             grad,                 # bf16
                             state['exp_avg'],       # fp32: m
+                            state["exp_avg_sq"],    # fp32: v
                             group['betas'][0], group['betas'][1],
                             group['eps'],
                             0.0 if state["step"] <= self._hold_steps else group['lr'],
@@ -172,11 +180,11 @@ class AdamOptimizer(torch.optim.Optimizer):
             if k in id_map:
                 param = id_map[k]
 
-                if param.dtype == torch.half and "_param_fp32" not in v:
+                if param.dtype != torch.float32 and "_param_fp32" not in v:
                     v["_param_fp32"] = torch.empty(param.size(), dtype=torch.float32, device=param.device)
                     v["_param_fp32"].copy_(param)
 
-                for name, dtype in [("exp_avg", param.dtype), ("exp_avg_sq", torch.float32), ("_param_fp32", torch.float32)]:
+                for name, dtype in [("exp_avg", torch.float32 if param.dtype == torch.bfloat16 else param.dtype), ("exp_avg_sq", torch.float32), ("_param_fp32", torch.float32)]:
                     if name in v:
                         v[name] = v[name].to(param.device).to(dtype)
 
