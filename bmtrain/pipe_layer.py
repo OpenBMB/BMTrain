@@ -367,9 +367,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
             if config['use_checkpoint']:
                 if torch_version >= '2.0.1':
                     module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
-
-            module.register_full_backward_hook(hook_func.zero_post_backward)
-            module.register_full_backward_hook(hook_func.pipe_post_backward)
+            else:
+                module.register_full_backward_hook(hook_func.zero_post_backward)
+                module.register_full_backward_hook(hook_func.pipe_post_backward)
 
             module.stage_id = self.stage_id
             module.stages = self.stages
@@ -402,7 +402,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.save_list = [(i, i) for i in range(len(self.layer_ids))]
             
     def __len__(self) -> int:
-        return len(self._modules)
+        return len(self._modules) 
 
     def __iter__(self) -> Iterator[CheckpointBlock]:
         return iter(self._modules.values())
@@ -448,10 +448,10 @@ class PipelineTransformerBlockList(torch.nn.Module):
                 for idx,layer_id in enumerate(self.layer_ids):
                     self._modules[str(layer_id)]._micro_idx = micro_idx
                     hidden_state = self._modules[str(layer_id)](hidden_state, *arg)
+                    if torch_version < '2.0.1':
+                        if idx == len(self.layer_ids) - 1:
+                            hidden_state = self.identity(hidden_state)
                 outputs.append(hidden_state)
-
-            if torch_version < '2.0.1':
-                outputs[-1] = self.identity(outputs[-1])
 
             last_hidden = torch.cat(outputs, dim=0)
             outputs = hook_func.PipePostFunction.apply(last_hidden)
