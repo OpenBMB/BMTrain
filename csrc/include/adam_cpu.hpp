@@ -329,4 +329,23 @@ void adam_cpu_launcher(
     }
 }
 
+void adam_cpu_bf16_launcher(
+    int64_t n,
+    std::uintptr_t param_fp32,
+    std::uintptr_t param_bf16,
+    std::uintptr_t g_bf16,
+    std::uintptr_t m_fp32,
+    std::uintptr_t v_fp32,
+    float beta1, float beta2,
+    float eps, float lr,
+    float scale,
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2
+) {
 
+    auto param_fp32_ptr = reinterpret_cast<float*>(param_fp32);
+    auto m_fp32_ptr = reinterpret_cast<float*>(m_fp32);
+    auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
+    auto param_bf16_ptr = reinterpret_cast<uint16_t*>(param_bf16);
+}

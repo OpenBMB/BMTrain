@@ -54,8 +54,8 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 if p.grad is not None and p.requires_grad:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-                    if p.dtype not in [torch.float16, torch.float32]:
-                        raise RuntimeError('Adam only supports fp32 or fp16 gradients')
+                    if p.dtype not in [torch.float16, torch.float32, torch.bfloat16]:
+                        raise RuntimeError('Adam only supports fp32, fp16 and bf16 gradients')
 
                     state = self.state[p]
                     # Lazy state initialization
@@ -73,6 +73,15 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                             # placeholder
                             state["_param_fp16"] = torch.empty(p.size(), dtype=torch.float16, pin_memory=True)  # on host
                             state["_grad_fp16"] = torch.empty(p.size(), dtype=torch.float16, pin_memory=True)   # on host
+                            
+                        elif p.dtype == torch.bfloat16:
+                            state['_param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device="cpu")     # on host
+                            state['_param_fp32'].copy_(p)
+
+                            # placeholder
+                            state["_param_bf16"] = torch.empty(p.size(), dtype=torch.bfloat16, pin_memory=True)  # on host
+                            state["_grad_bf16"] = torch.empty(p.size(), dtype=torch.bfloat16, pin_memory=True)   # on host
+                                                        
                         else:
                             state['_param_fp32'] = torch.empty(p.size(), dtype=torch.float32, pin_memory=True)     # on host
                             state['_param_fp32'].copy_(p)
@@ -89,6 +98,8 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
         for param, state, event, _, _, _, _, _ in update_params:
             if param.dtype == torch.half:
                 state["_grad_fp16"].copy_(param.grad, non_blocking=True)
+            elif param.dtype == torch.bfloat16:
+                state ["_grad_bf16"].copy_(param.grad, non_blocking=True)
             else:
                 state["_grad_fp32"].copy_(param.grad, non_blocking=True)
             torch.cuda.current_stream().record_event(event)
@@ -119,6 +130,23 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 )
                 # transfer parameters back to device asynchronously
                 param.copy_(state["_param_fp16"], non_blocking=True)
+            elif param.dtype == torch.bfloat16:
+                if ('maximize' in group) and (group['maximize'] is True):
+                    grad = -state["_grad_bf16"]
+                else:
+                    grad = state["_grad_bf16"]
+                F.adam_cpu_bf16(
+                    state["_param_fp32"].view(-1),
+                    state["_param_bf16"].view(-1),
+                    grad.view(-1),
+                    state["exp_avg"].view(-1),
+                    state["exp_avg_sq"].view(-1),
+                    beta1, beta2,
+                    eps,  0.0 if state["step"] <= self._hold_steps else lr,
+                    scale,
+                    weight_decay,
+                    state["step"]                      
+                )
             else:
                 state["_grad_fp32"].mul_(1.0 / scale)
                 if ('maximize' in group) and (group['maximize'] is True):
@@ -197,9 +225,12 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     # initialize placeholders
                     state[param]["_param_fp16"] = torch.empty(param.size(), dtype=torch.float16, pin_memory=True)  # on host
                     state[param]["_grad_fp16"] = torch.empty(param.size(), dtype=torch.float16, pin_memory=True)   # on host
+                elif param.dtype == torch.bfloat16:
+                    #initialize placeholders
+                    state[param]["_param_bf16"] = torch.empty(param.size(), dtype=torch.bfloat16, pin_memory=True)  # on host
+                    state[param]["_grad_bf16"] = torch.empty(param.size(), dtype=torch.bfloat16, pin_memory=True)   # on host
                 else:
-                    state[param]["_param_fp32"] = state[param]["_param_fp32"].pin_memory()
-
+                    state[param]["_param_fp32"] = state[param]["_param_fp32"].pin_memory()  # on host
                     # initialize placeholders
                     state[param]["_grad_fp32"] = torch.empty(param.size(), dtype=torch.float32, pin_memory=True)   # on host
             else:
@@ -255,4 +286,3 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
     #TODO zero_grad(set_to_none=True) makes optimizer crashed, maybe the reason of grad accu
     def zero_grad(self, set_to_none: bool = False):
         super().zero_grad(set_to_none=set_to_none)
-

@@ -82,7 +82,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                         # Exponential moving average of squared gradient values
                         state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device)# on device
                   
-                        if p.dtype == torch.half or p.dtype == torch.bfloat16:
+                        if p.dtype != torch.float32:
                             state['_param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device=p.device)   # on device
                             state['_param_fp32'].copy_(p)
 
@@ -95,7 +95,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                         grad = p.grad
                         
                     if p.dtype == torch.half:
-                        C.f_adam(
+                            F.adam(
                             state["_param_fp32"],    # fp32
                             p,                      # fp16
                             grad,                 # fp16
@@ -109,7 +109,7 @@ class AdamOptimizer(torch.optim.Optimizer):
                             state['step']
                         )
                     elif p.dtype == torch.bfloat16:
-                        C.f_adam_bf16(
+                            F.adam_bf16(
                             state["_param_fp32"],    # fp32
                             p,                      # bf16
                             grad,                 # bf16

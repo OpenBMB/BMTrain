@@ -20,7 +20,7 @@ __global__ void adam_fp32_accum(
     float bias_correction2
 ) {
     int32_t col = blockIdx.x * blockDim.x + threadIdx.x;
-    if (col < n) {
+    if (col < n) {Supercomputing@ncu666
         float local_g = __half2float(g[col]);                                       // real_g * scale
         float local_m = beta1 * __half2float(m[col]) + (1 - beta1) * local_g;       // real_m * scale
         float local_v = beta2 * v[col] + (1 - beta2) * local_g * local_g / scale;   // real_v * scale
@@ -60,4 +60,8 @@ void adam_launcher(
     dim3 block_size = dim3(threads, 1, 1);
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
     adam_fp32_accum<<<grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, m_ptr, v_fp32_ptr, param_fp32_ptr, param_h_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
+}
+
+void adam_bf16_launcher(){
+
 }
