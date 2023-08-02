@@ -20,7 +20,7 @@ __global__ void adam_fp32_accum(
     float bias_correction2
 ) {
     int32_t col = blockIdx.x * blockDim.x + threadIdx.x;
-    if (col < n) {Supercomputing@ncu666
+    if (col < n) {
         float local_g = __half2float(g[col]);                                       // real_g * scale
         float local_m = beta1 * __half2float(m[col]) + (1 - beta1) * local_g;       // real_m * scale
         float local_v = beta2 * v[col] + (1 - beta2) * local_g * local_g / scale;   // real_v * scale
@@ -62,6 +62,29 @@ void adam_launcher(
     adam_fp32_accum<<<grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, m_ptr, v_fp32_ptr, param_fp32_ptr, param_h_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
 }
 
-void adam_bf16_launcher(){
-
+void adam_bf16_launcher(
+    int n,
+    std::uintptr_t param_fp32,
+    std::uintptr_t param_bf16,
+    std::uintptr_t g_bf16,
+    std::uintptr_t m_bf16,
+    std::uintptr_t v_fp32,
+    float beta1, float beta2,
+    float eps, float lr,
+    float scale,
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2,
+    uintptr_t stream
+) {
+    if (n <= 0) return;
+    auto g_ptr = reinterpret_cast<half*>(g_bf16);
+    auto m_ptr = reinterpret_cast<half*>(m_bf16);
+    auto param_h_ptr = reinterpret_cast<half*>(param_bf16);
+    auto param_fp32_ptr = reinterpret_cast<float*>(param_fp32);
+    auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
+    int32_t threads = 1024;
+    dim3 block_size = dim3(threads, 1, 1);
+    dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
+    adam_fp32_accum<<<grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, m_ptr, v_fp32_ptr, param_fp32_ptr, param_h_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
 }

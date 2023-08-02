@@ -76,7 +76,7 @@ def adam(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.Tenso
         stream
     )
 
-def adam_bf16(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.Tensor, m_fp16: torch.Tensor,
+def adam(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.Tensor, m_fp16: torch.Tensor,
              v_fp32: torch.Tensor, beta1: float, beta2: float, eps: float, lr: float, scale: float,
              weight_decay: float, step: int) -> None:
     assert CHECK_INPUT(param_fp32), "param_fp32 must be contiguous and on cuda"

@@ -101,7 +101,7 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
             (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign)
           );
   }
-
+  
 inline float fp16_ieee_to_fp32_value(uint16_t h) {
 
   const uint32_t w = (uint32_t)h << 16;
@@ -343,7 +343,6 @@ void adam_cpu_bf16_launcher(
     float bias_correction1,
     float bias_correction2
 ) {
-
     auto param_fp32_ptr = reinterpret_cast<float*>(param_fp32);
     auto m_fp32_ptr = reinterpret_cast<float*>(m_fp32);
     auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
