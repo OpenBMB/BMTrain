@@ -88,12 +88,25 @@ class AdamOptimizer(torch.optim.Optimizer):
                         grad = p.grad
                         
                     if p.dtype == torch.half:
-                        F.adam(
+                        C.f_adam(
                             state["_param_fp32"],    # fp32
                             p,                      # fp16
                             grad,                 # fp16
                             state['exp_avg'],       # fp16: m
                             state["exp_avg_sq"],    # fp32: v
+                            group['betas'][0], group['betas'][1],
+                            group['eps'],
+                            0.0 if state["step"] <= self._hold_steps else group['lr'],
+                            scale,
+                            group['weight_decay'],
+                            state['step']
+                        )
+                    elif p.dtype == torch.bfloat16:
+                        C.f_adam_bf16(
+                            state["_param_fp32"],    # fp32
+                            p,                      # bf16
+                            grad,                 # bf16
+                            state['exp_avg'],       # fp32: m
                             group['betas'][0], group['betas'][1],
                             group['eps'],
                             0.0 if state["step"] <= self._hold_steps else group['lr'],
