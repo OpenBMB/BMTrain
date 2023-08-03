@@ -51,21 +51,6 @@ def zero_post_backward(module, grad_inputs, grad_outputs):
             module._backward_block_ctxs[module._layer_id].exit(True)
             config['load_stream'].record_event(config['load_event'])
 
-    if torch_version < '2.0.1' and not config['pipe_enabled']:
-        if not module._is_first_layer:
-            identity_post_backward(module, grad_inputs, grad_outputs)
-
-class PipePreFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, inputs, stage_id):
-        pre_inputs = recv_activations(stage_id - 1, config['pipe_comm'])
-        pre_inputs.requires_grad_()
-        return pre_inputs 
-
-    @staticmethod
-    def backward(ctx, grads):
-        return grads, None
-
 
 class PipePreFunction(torch.autograd.Function):
     @staticmethod
