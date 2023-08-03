@@ -65,7 +65,6 @@ class PipePreFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grads):
         return grads, None
->>>>>>> 28993b5bcde452488b7c3b162f5b5c91996607d4
 
 
 class PipePreFunction(torch.autograd.Function):
