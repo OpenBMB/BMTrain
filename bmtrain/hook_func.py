@@ -3,8 +3,7 @@ from .global_var import config
 from .checkpointing import CheckpointBlockContext
 from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
 
-#torch_version = torch.__version__
-torch_version = '1.9.0'
+torch_version = torch.__version__
 
 def zero_pre_forward(module, inputs):
     enter = True
@@ -51,7 +50,6 @@ def zero_post_backward(module, grad_inputs, grad_outputs):
             module._backward_block_ctxs[module._layer_id].exit(True)
             config['load_stream'].record_event(config['load_event'])
 
-
 class PipePreFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, inputs, stage_id):
@@ -90,43 +88,14 @@ def pipe_post_backward(module, grad_inputs, grad_outputs):
 
     if torch_version < '2.0.1':
         if not module._is_first_layer:
-            identity_post_backward(module, grad_outputs, grad_inputs)
-
-def checkpoint_pre_forward(module, inputs):
-    if not config['pipe_enabled']:
-        module._inputs = inputs
-        module._cuda_rng_state = torch.cuda.get_rng_state()
-    else:
-        if module._micro_idx == 0:
-            module._inputs = [inputs]
-            module._cuda_rng_state = [torch.cuda.get_rng_state()]
-        else:
-            module._inputs.append(inputs)
-            module._cuda_rng_state.append(torch.cuda.get_rng_state())
-
-def checkpoint_pre_backward(module, grad_outputs):
-    inputs = module._inputs if not config['pipe_enabled'] else module._inputs[module._micro_idx]
-    cuda_rng_state = module._cuda_rng_state if not config['pipe_enabled'] else module._cuda_rng_state[module._micro_idx]
-    with torch.random.fork_rng(devices=[torch.cuda.current_device()], enabled=True):
-        with torch.enable_grad():
-            torch.cuda.set_rng_state(cuda_rng_state)
-            #inputs[0].retain_grad()
-            out = module._module(*inputs)
-            torch.autograd.backward(out, *grad_outputs)
-
-            if not config['pipe_enabled']:
-                zero_post_backward(module, grad_outputs, (inputs[0].grad,) )
-            else:
-                zero_post_backward(module, grad_outputs, (inputs[0].grad,) )
-                pipe_post_backward(module, (inputs[0].grad,), grad_outputs)
+            identity_post_backward(module, grad_inputs, grad_outputs)
 
 def identity_post_backward(module, grad_inputs, grad_outputs):
     if config['pipe_enabled']:
-        pipe_grad = pipe_pre_backward(module._pre_module, grad_outputs)
-        grad_outputs = pipe_grad if pipe_grad is not None else grad_outputs
-    zero_pre_backward(module._pre_module, grad_outputs)
-    if config['use_checkpoint']:
-        checkpoint_pre_backward(module._pre_module, grad_outputs)
+        pipe_grad = pipe_pre_backward(module._pre_module, grad_inputs)
+        grad_inputs = pipe_grad if pipe_grad is not None else grad_inputs
+    zero_pre_backward(module._pre_module, grad_inputs)
+    return grad_inputs 
 
 class PipeAllGatherFunction(torch.autograd.Function):
     @staticmethod

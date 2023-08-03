@@ -17,6 +17,7 @@ from . import hook_func
 
 import copy
 import inspect
+from torch.utils.checkpoint import checkpoint
 
 torch_version = hook_func.torch_version
 
@@ -309,10 +310,7 @@ class CheckpointBlock(torch.nn.Module):
     
     def forward(self, *args):
         if config["use_checkpoint"]:
-            with torch.no_grad():
-                out = self._module(*args)  
-                out.requires_grad_()
-                return out
+            return checkpoint(self._module, *args)
         else:
             return self._module(*args)
 
@@ -580,13 +578,7 @@ class TransformerBlockList(torch.nn.Module):
                 module.register_forward_hook(hook_func.zero_post_forward)
                 if torch_version >= '2.0.1':
                     module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
-
-            if config["use_checkpoint"]:
-                module.register_forward_pre_hook(hook_func.checkpoint_pre_forward)
-                if torch_version >= '2.0.1':
-                    module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
-
-            if config["zero_level"] > 0 and not config["use_checkpoint"]:
+            if config["zero_level"] > 0: 
                 module.register_full_backward_hook(hook_func.zero_post_backward)
 
             module._backward_block_ctxs = self._backward_block_ctxs

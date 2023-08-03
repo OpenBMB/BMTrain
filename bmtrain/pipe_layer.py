@@ -355,8 +355,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
 
             module.register_forward_pre_hook(hook_func.pipe_pre_forward)
             module.register_forward_pre_hook(hook_func.zero_pre_forward)
-            if config['use_checkpoint']:
-                module.register_forward_pre_hook(hook_func.checkpoint_pre_forward)
 
             module.register_forward_hook(hook_func.zero_post_forward)
             module.register_forward_hook(hook_func.pipe_post_forward)
@@ -364,12 +362,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
             if torch_version >= '2.0.1':
                 module.register_full_backward_pre_hook(hook_func.pipe_pre_backward)
                 module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
-            if config['use_checkpoint']:
-                if torch_version >= '2.0.1':
-                    module.register_full_backward_pre_hook(hook_func.checkpoint_pre_backward)
-            else:
-                module.register_full_backward_hook(hook_func.zero_post_backward)
-                module.register_full_backward_hook(hook_func.pipe_post_backward)
+            module.register_full_backward_hook(hook_func.zero_post_backward)
+            module.register_full_backward_hook(hook_func.pipe_post_backward)
 
             module.stage_id = self.stage_id
             module.stages = self.stages
