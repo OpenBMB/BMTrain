@@ -6,6 +6,7 @@
 #include <pybind11/pybind11.h>
 #include<iostream>
 #include<cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <vector>
 #include <thread>
 #include <algorithm>
