@@ -453,6 +453,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
                             hidden_state = self.identity(hidden_state)
                 outputs.append(hidden_state)
 
+            if torch_version < '2.0.1':
+                outputs[-1] = self.identity(outputs[-1])
+
             last_hidden = torch.cat(outputs, dim=0)
             outputs = hook_func.PipePostFunction.apply(last_hidden)
 
