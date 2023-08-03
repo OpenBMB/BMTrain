@@ -111,9 +111,9 @@ void adam_bf16_launcher(
     uintptr_t stream
 ) {
     if (n <= 0) return;
-    auto g_ptr = reinterpret_cast<half*>(g_bf16);
-    auto m_ptr = reinterpret_cast<half*>(m_bf16);
-    auto param_h_ptr = reinterpret_cast<half*>(param_bf16);
+    auto g_ptr = reinterpret_cast<nv_bfloat16*>(g_bf16);
+    auto m_ptr = reinterpret_cast<nv_bfloat16*>(m_bf16);
+    auto param_h_ptr = reinterpret_cast<nv_bfloat16*>(param_bf16);
     auto param_fp32_ptr = reinterpret_cast<float*>(param_fp32);
     auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
     int32_t threads = 1024;
