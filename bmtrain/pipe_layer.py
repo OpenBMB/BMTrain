@@ -349,8 +349,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.pipe_idx = topo.pipe_idx 
         for idx, module in enumerate(modules):
             if not isinstance(module, CheckpointBlock):
-                module = CheckpointBlock(module)
+                module = CheckpointBlock(module, "PIPE")
 
+            module._mode = "PIPE"
             module.stage_id = self.stage_id
             module.stages = self.stages
 

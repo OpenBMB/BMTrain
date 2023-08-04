@@ -59,6 +59,7 @@ class CheckpointBlock(torch.nn.Module):
 
     Args:
         model (torch.nn.Module): The model to be checkpointed. All kinds of modules are supported.
+        mode (str): run in BLOCK or ZERO or PIPE
     
     Examples:
         >>> transformer_block = TransformerBlock(...)
@@ -67,7 +68,7 @@ class CheckpointBlock(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module):
+    def __init__(self, inner_module : torch.nn.Module, mode="BLOCK"):
         super().__init__()
         self._module = inner_module
         self._inputs = None
@@ -194,6 +195,7 @@ class CheckpointBlock(torch.nn.Module):
         self._is_last_layer = True
         self._pre_module = None
         self._next_module = None
+        self._mode = mode #BLOCK or ZERO or PIPE
 
     def set_pre_module(self, module):
         self._pre_module = module
@@ -206,6 +208,8 @@ class CheckpointBlock(torch.nn.Module):
         else:
             out = self._module(pre_out, *args[1:])
         post_out = hook_func.PostHookFunc.apply(self, out)
+        if isinstance(post_out, list):
+            return tuple(post_out)
         return post_out
 
     def __getattr__(self,name:str):
@@ -463,8 +467,9 @@ class TransformerBlockList(torch.nn.Module):
         self._modules = {}
         for i, module in enumerate(modules):
             if not isinstance(module, CheckpointBlock):
-                module = CheckpointBlock(module)
+                module = CheckpointBlock(module, "ZERO")
 
+            module._mode = "ZERO"
             module._is_last_layer = True if i == len(modules) -1 else False
             module._is_first_layer = True if i == 0 else False
 
