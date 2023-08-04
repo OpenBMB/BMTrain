@@ -192,6 +192,12 @@ class CheckpointBlock(torch.nn.Module):
 
         self._is_first_layer = True
         self._is_last_layer = True
+        self._pre_module = None
+        self._next_module = None
+
+    def set_pre_module(self, module):
+        self._pre_module = module
+        module._next_module = self
     
     def forward(self, *args):
         pre_out = hook_func.PreHookFunc.apply(self, args[0])
@@ -430,7 +436,6 @@ class CheckpointBlock(torch.nn.Module):
     def __repr__(self):
         return self._module.__repr__()
         
-
 class TransformerBlockList(torch.nn.Module):
     r"""
     TransformerBlockList is a list of CheckpointBlocks.
@@ -456,18 +461,17 @@ class TransformerBlockList(torch.nn.Module):
         super().__init__()
         
         self._modules = {}
-        self._backward_block_ctxs = [None for _ in range(len(modules))]
         for i, module in enumerate(modules):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
 
-            module._backward_block_ctxs = self._backward_block_ctxs
-            module._layer_id = i
             module._is_last_layer = True if i == len(modules) -1 else False
             module._is_first_layer = True if i == 0 else False
 
             self._modules[str(i)] = module
             self.add_module(str(i), module)
+            if i > 0:
+                self._modules[str(i)].set_pre_module(self._modules[str(i-1)])
     
         self.num_hidden = num_hidden
 

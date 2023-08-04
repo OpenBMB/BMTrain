@@ -25,24 +25,24 @@ def zero_post_forward(module, inputs, outputs):
 def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if config['zero_level'] == 2 else 0
     if not config['pipe_enabled']:
-        module._backward_block_ctxs[module._layer_id] = CheckpointBlockContext(module, module._layer_dict, backward_flag)
-        module._backward_block_ctxs[module._layer_id].enter(True)
+        module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, backward_flag)
+        module._backward_block_ctx.enter(True)
         if not module._is_last_layer:
-            module._backward_block_ctxs[module._layer_id + 1].exit(True)
+            module._next_module._backward_block_ctx.exit(True)
             config['load_stream'].record_event(config['load_event'])
     else:
         if module._micro_idx == config['micros'] - 1:
-            module._backward_block_ctxs[module._layer_id] = CheckpointBlockContext(module, module._layer_dict, backward_flag, pipe=True)
-            module._backward_block_ctxs[module._layer_id].enter(True)
+            module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, backward_flag, pipe=True)
+            module._backward_block_ctx.enter(True)
 
 def zero_post_backward(module, grad_inputs, grad_outputs):
     if not config['pipe_enabled']:
-        if module._layer_id == 0:
-            module._backward_block_ctxs[0].exit(True)
+        if module._is_first_layer:
+            module._backward_block_ctx.exit(True)
             config['load_stream'].record_event(config['load_event'])
     else:
         if module._micro_idx == 0:
-            module._backward_block_ctxs[module._layer_id].exit(True)
+            module._backward_block_ctx.exit(True)
             config['load_stream'].record_event(config['load_event'])
 
 class PipePreFunction(torch.autograd.Function):
