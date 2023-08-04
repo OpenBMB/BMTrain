@@ -16,8 +16,6 @@ from . import debug
 from .block_layer import CheckpointBlock, round_up, _get_param_kw
 from . import hook_func
 
-torch_version = hook_func.torch_version
-
 class OpMicroForward(torch.autograd.Function):
     @staticmethod
     def forward(ctx, placeholder, self : 'PipelineTransformerBlockList', micro_idx, block_ctx_list, layers_dict, save_list, hidden_state, *args):
@@ -353,24 +351,10 @@ class PipelineTransformerBlockList(torch.nn.Module):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
 
-            module.register_forward_pre_hook(hook_func.pipe_pre_forward)
-            module.register_forward_pre_hook(hook_func.zero_pre_forward)
-
-            module.register_forward_hook(hook_func.zero_post_forward)
-            module.register_forward_hook(hook_func.pipe_post_forward)
-
-            if torch_version >= '2.0.1':
-                module.register_full_backward_pre_hook(hook_func.pipe_pre_backward)
-                module.register_full_backward_pre_hook(hook_func.zero_pre_backward)
-            module.register_full_backward_hook(hook_func.zero_post_backward)
-            module.register_full_backward_hook(hook_func.pipe_post_backward)
-
             module.stage_id = self.stage_id
             module.stages = self.stages
 
             self._modules[str(idx)] = module
-            if idx > 0:
-                module._pre_module = self._modules[str(idx-1)] 
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)
 
@@ -388,11 +372,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.prev_rank = pipe_group[self.pipe_idx, self.stage_id - 1] if self.stage_id > 0 else -1
         # self.micro_batches = config['num_micro_batches']
 
-        if torch_version < '2.0.1':
-            self.identity = torch.nn.Identity()
-            self.identity.register_full_backward_hook(hook_func.identity_post_backward)
-            self.identity._pre_module = self._modules[str(self.layer_ids[-1])]
-            
         self.save_list = [(i, i) for i in range(len(self.layer_ids))]
             
     def __len__(self) -> int:
@@ -442,9 +421,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
                 for idx,layer_id in enumerate(self.layer_ids):
                     self._modules[str(layer_id)]._micro_idx = micro_idx
                     hidden_state = self._modules[str(layer_id)](hidden_state, *arg)
-                    if torch_version < '2.0.1':
-                        if idx == len(self.layer_ids) - 1:
-                            hidden_state = self.identity(hidden_state)
                 outputs.append(hidden_state)
 
             last_hidden = torch.cat(outputs, dim=0)
