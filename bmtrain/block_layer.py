@@ -202,6 +202,9 @@ class CheckpointBlock(torch.nn.Module):
         module._next_module = self
     
     def forward(self, *args):
+        #input must be requires_grad, otherwise autograd.backward will make an error
+        self.input_requires_grad = args[0].requires_grad 
+        args[0].requires_grad_()
         pre_out = hook_func.PreHookFunc.apply(self, args[0])
         if config["use_checkpoint"]:
             out = checkpoint(self._module, pre_out, *args[1:])
