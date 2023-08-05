@@ -6,7 +6,7 @@ from .distributed import all_gather, broadcast, all_reduce, send_activations, re
 def zero_pre_forward(module, inputs):
     enter = True
     pipe = False
-    if module._mode is "PIPE":
+    if module._mode == "PIPE":
         enter = module._micro_idx == 0
         pipe = True
     if enter:
@@ -16,7 +16,7 @@ def zero_pre_forward(module, inputs):
 
 def zero_post_forward(module, inputs, outputs):
     exit = True
-    if module._mode is "PIPE":
+    if module._mode == "PIPE":
         exit = module._micro_idx == config['micros'] - 1
 
     if exit:
@@ -24,7 +24,7 @@ def zero_post_forward(module, inputs, outputs):
 
 def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if config['zero_level'] == 2 else 0
-    if module._mode is not "PIPE":
+    if module._mode != "PIPE":
         module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, backward_flag)
         module._backward_block_ctx.enter(True)
         if not module._is_last_layer and module._next_module is not None and module._next_module._backward_block_ctx is not None:
@@ -36,7 +36,7 @@ def zero_pre_backward(module, grad_outputs):
             module._backward_block_ctx.enter(True)
 
 def zero_post_backward(module, grad_inputs, grad_outputs):
-    if module._mode is not "PIPE":
+    if module._mode != "PIPE":
         if module._is_first_layer:
             module._backward_block_ctx.exit(True)
             config['load_stream'].record_event(config['load_event'])
@@ -113,7 +113,7 @@ class PreHookFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, module, x):
         ctx.module = module
-        if module._mode is "PIPE":
+        if module._mode == "PIPE":
             pipe_out = pipe_pre_forward(module, (x,))
             x = pipe_out[0] if pipe_out is not None else x
         zero_pre_forward(module, x)
@@ -122,7 +122,7 @@ class PreHookFunc(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grads):
         zero_post_backward(ctx.module, grads, None)
-        if ctx.module._mode is "PIPE":
+        if ctx.module._mode == "PIPE":
             pipe_post_backward(ctx.module, grads, None)
         return None, grads
 
@@ -131,14 +131,14 @@ class PostHookFunc(torch.autograd.Function):
     def forward(ctx, module, out):
         ctx.module = module
         zero_post_forward(module, None, out)
-        if module._mode is "PIPE":
+        if module._mode == "PIPE":
             pipe_post_forward(module, None, out)
         return out
 
     @staticmethod
     def backward(ctx, grads):
         zero_pre_backward(ctx.module, grads)
-        if ctx.module._mode is "PIPE":
+        if ctx.module._mode == "PIPE":
             pipe_grads = pipe_pre_backward(ctx.module, (grads, ))
             grads = pipe_grads[0] if pipe_grads is not None else grads 
         return None, grads
