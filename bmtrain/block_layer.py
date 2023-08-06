@@ -201,15 +201,15 @@ class CheckpointBlock(torch.nn.Module):
         self._pre_module = module
         module._next_module = self
     
-    def forward(self, *args):
+    def forward(self, hidden_state, return_hidden_state=False, hidden_states=[], *args):
         #input must be requires_grad, otherwise autograd.backward will make an error
-        self.input_requires_grad = args[0].requires_grad 
-        args[0].requires_grad_()
-        pre_out = hook_func.PreHookFunc.apply(self, args[0])
+        self.input_requires_grad = hidden_state.requires_grad 
+        hidden_state.requires_grad_()
+        pre_out = hook_func.PreHookFunc.apply(self, hidden_state, return_hidden_state, hidden_states)
         if config["use_checkpoint"]:
-            out = checkpoint(self._module, pre_out, *args[1:])
+            out = checkpoint(self._module, pre_out, *args)
         else:
-            out = self._module(pre_out, *args[1:])
+            out = self._module(pre_out, *args)
         post_out = hook_func.PostHookFunc.apply(self, out)
         if isinstance(post_out, list):
             return tuple(post_out)
@@ -519,8 +519,7 @@ class TransformerBlockList(torch.nn.Module):
         others = args[self.num_hidden:]
         hidden_states = []
         for i in range(len(self)):
-            hidden_states.append(outputs[0])
-            outputs = self._modules[str(i)](*outputs, *others)
+            outputs = self._modules[str(i)](*outputs, return_hidden_states, hidden_states, *others)
             outputs = (outputs,)
 
         if return_hidden_states:

@@ -81,41 +81,16 @@ def pipe_post_backward(module, grad_inputs, grad_outputs):
 
     module._micro_idx -= 1
 
-class PipeAllGatherFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, hidden_state):
-        hidden_state_list = all_gather(hidden_state.clone(), config["pipe_comm"])
-        hidden_state_list.requires_grad_()
-        return hidden_state_list
-
-    @staticmethod
-    def backward(ctx, grads):
-        grads = broadcast(grads, 0, config['pipe_comm'])
-        topo = config['topology']
-        return grads.chunk(topo.stages, dim=0)[topo.stage_id] 
-
-class PipePostFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, last_hidden):
-        last_hidden = broadcast(last_hidden, config["pipe_size"] - 1, config["pipe_comm"])
-        last_hidden = last_hidden.chunk(config['topology'].stages, dim=0)
-        outputs = last_hidden[config['topology'].stage_id]
-        outputs.requires_grad_()
-        return outputs
-
-    @staticmethod
-    def backward(ctx, grads):
-        grad_list = all_gather(grads, config["pipe_comm"])
-        grad_list = grad_list.flatten(start_dim=0, end_dim=1)
-        return grad_list
-
 class PreHookFunc(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, module, x):
+    def forward(ctx, module, x, return_hidden_states=False, hidden_states=[]):
         ctx.module = module
         if module._mode == "PIPE":
             pipe_out = pipe_pre_forward(module, (x,))
             x = pipe_out[0] if pipe_out is not None else x
+       
+        if return_hidden_states:
+            hidden_states.append(x)
         zero_pre_forward(module, x)
         return x
 
@@ -124,7 +99,7 @@ class PreHookFunc(torch.autograd.Function):
         zero_post_backward(ctx.module, grads, None)
         if ctx.module._mode == "PIPE":
             pipe_post_backward(ctx.module, grads, None)
-        return None, grads
+        return None, grads, None, None
 
 class PostHookFunc(torch.autograd.Function):
     @staticmethod
