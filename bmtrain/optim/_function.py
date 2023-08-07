@@ -115,22 +115,22 @@ def adam_cpu_bf16(param_fp32: torch.Tensor, param_bf16: torch.Tensor, g_bf16: to
                     bias_correction2,
                 )
     
-def adam_bf16(param_fp32: torch.Tensor, param_bf16: torch.Tensor, g_bf16: torch.Tensor, m_bf16: torch.Tensor,
+def adam_bf16(param_fp32: torch.Tensor, param_bf16: torch.Tensor, g_bf16: torch.Tensor, m_fp32: torch.Tensor,
              v_fp32: torch.Tensor, beta1: float, beta2: float, eps: float, lr: float, scale: float,
              weight_decay: float, step: int) -> None:
     assert CHECK_INPUT(param_fp32), "param_fp32 must be contiguous and on cuda"
     assert CHECK_INPUT(param_bf16), "param_bf16 must be contiguous and on cuda"
     assert CHECK_INPUT(g_bf16), "g_bf16 must be contiguous and on cuda"
-    assert CHECK_INPUT(m_bf16), "m_bf16 must be contiguous and on cuda"
+    assert CHECK_INPUT(m_fp32), "m_fp32 must be contiguous and on cuda"
     assert CHECK_INPUT(v_fp32), "v_fp32 must be contiguous and on cuda"
     assert param_fp32.dtype == torch.float32, "param_fp32 must be float32 tensor"
     assert param_bf16.dtype == torch.bfloat16, "param_fp16 must be float16 tensor"
     assert g_bf16.dtype == torch.bfloat16, "g_bf16 must be bfloat16 tensor"
-    assert m_bf16.dtype == torch.bfloat16, "m_bf16 must be bfloat16 tensor"
+    assert m_fp32.dtype == torch.float32, "m_fp32 must be bfloat16 tensor"
     assert v_fp32.dtype == torch.float32, "v_fp32 must be float32 tensor"
     assert param_fp32.numel() == param_bf16.numel(), "param_fp32 and param_bf16 must have the same number of elements"
     assert param_fp32.numel() == g_bf16.numel(), "param_fp32 and g_fp16 must have the same number of elements"
-    assert param_fp32.numel() == m_bf16.numel(), "param_fp32 and m_bf16 must have the same number of elements"
+    assert param_fp32.numel() == m_fp32.numel(), "param_fp32 and m_m_fp32 must have the same number of elements"
     assert param_fp32.numel() == v_fp32.numel(), "param_fp32 and v_fp32 must have the same number of elements"
     bias_correction1 = 1 - beta1 ** step
     bias_correction2 = 1 - beta2 ** step
@@ -140,7 +140,7 @@ def adam_bf16(param_fp32: torch.Tensor, param_bf16: torch.Tensor, g_bf16: torch.
         param_fp32.data_ptr(),
         param_bf16.data_ptr(),
         g_bf16.data_ptr(),
-        m_bf16.data_ptr(),
+        m_fp32.data_ptr(),
         v_fp32.data_ptr(),
         beta1, beta2,
         eps, lr,
