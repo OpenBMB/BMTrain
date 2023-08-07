@@ -401,5 +401,6 @@ void adam_cpu_bf16_launcher(
     auto m_fp32_ptr = reinterpret_cast<float*>(m_fp32);
     auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
     auto param_bf16_ptr = reinterpret_cast<uint16_t*>(param_bf16);
+    auto g_bf16_ptr  = reinterpret_cast<uint16_t*>(g_bf16);
     adam_cpu_bf16_0(n, param_fp32_ptr, param_bf16_ptr, g_bf16_ptr, m_fp32_ptr, v_fp32_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
 }

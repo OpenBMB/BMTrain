@@ -2,26 +2,24 @@
 #include <cuda_bf16.h>
 #include <cstdint>
 
-namespace{
 __inline__ __device__ bool isnan_(half v) {
-#if __CUDA_ARCH__ >= 700 || __CUDA_ARCH__ == 600
-    return __hisnan(v);
-#else
+    #if __CUDA_ARCH__ >= 700 || __CUDA_ARCH__ == 600
+        return __hisnan(v);
+    #else
+        return !__heq(v, v);
+    #endif
+    }
     
-    return !__heq(v, v);
-#endif
-}
-
-#if __CUDA_ARCH__ >= 800
 __inline__ __device__ bool isnan_(nv_bfloat16 v) {
-    return __hisnan(v);
-}
-#else
-__inline__ __device__ bool isnan_(nv_bfloat16 v) {
-    return !__heq(v, v);
-}
-#endif
-
+    #if __CUDA_ARCH__ >=800
+        float tmp = (float)v;
+        return __hisnan(__float2half(tmp));
+    #else
+        float tmp = (float)v; 
+        return !__heq(__float2half(tmp), __float2half(tmp)); 
+    #endif
+    }
+    
 __inline__ __device__ int8_t warpReduceAny(int8_t x) {
     for (int offset = warpSize/2; offset > 0; offset /= 2) 
         x |= __shfl_down_sync(0xFFFFFFFF, x, offset);
@@ -87,7 +85,8 @@ __global__ void bmt_has_nan_inf_3(
     int8_t r = 0;
     for (int i = gid; i < n; i += span) {
         nv_bfloat16 v = inp[i];
-        if (__hisinf(v) || isnan_(v)) {
+        float tmp = (float)v; 
+        if (isinf(tmp) || isnan(tmp)) { 
             r = 1;
             break;
         }
@@ -96,8 +95,6 @@ __global__ void bmt_has_nan_inf_3(
     if (threadIdx.x == 0) {
         mid[blockIdx.x] = r;
     }
-}
-
 }
 
 void has_nan_inf_launcher(
@@ -128,7 +125,7 @@ void has_nan_inf_bf16_launcher(
     std::uintptr_t stream
 ) {
     if (n <= 0) return;
-    auto g_ptr = reinterpret_cast<bfloat16*>(g_bf16);
+    auto g_ptr = reinterpret_cast<nv_bfloat16*>(g_bf16);
     auto mid_ptr = reinterpret_cast<uint8_t*>(mid);
     auto out_ptr = reinterpret_cast<uint8_t*>(out);
     int32_t threads = 1024;

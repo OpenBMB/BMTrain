@@ -2,7 +2,7 @@
 
 PYBIND11_MODULE(C, m) {
     m.def("has_nan_inf_launcher",&has_nan_inf_launcher,"has nan inf");
-    m.def("has_nan_inf_bf16_launcher",&has_nan_inf_bf16_launcher,"has nan inf bf16")
+    m.def("has_nan_inf_bf16_launcher",&has_nan_inf_bf16_launcher,"has nan inf bf16");
     m.def("adam_launcher", &adam_launcher, "adam function cpu");
     m.def("adam_bf16_launcher", &adam_bf16_launcher, "adam function cpu");
     m.def("adam_cpu_launcher", &adam_cpu_launcher, "adam function cpu");
