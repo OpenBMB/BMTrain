@@ -13,7 +13,8 @@ def check_overflow(param_groups):
         for p in group['params']:
             if p.grad is not None and p.dtype == torch.half: # TODO support other types
                 has_inf_nan(p.grad, has_inf_or_nan)
-
+            elif p.grad is not None and p.dtype == torch.bfloat16:
+                has_inf_nan_bf16(p.grad, has_inf_or_nan)
     if "comm" in config:
         nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
 

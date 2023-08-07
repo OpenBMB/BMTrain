@@ -71,7 +71,7 @@ inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F
 }
 
 
-
+// fp32 -> fp16
 inline uint16_t fp16_ieee_from_fp32_value(float f) {
     // const float scale_to_inf = 0x1.0p+112f;
     // const float scale_to_zero = 0x1.0p-110f;
@@ -102,7 +102,28 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
             (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign)
           );
   }
-  
+
+// fp32 -> bf16
+inline float bf16_ieee_from_fp32_value(float f){
+    uint32_t w = fp32_to_bits(f);
+    uint32_t sign = w & UINT32_C(0x80000000);
+    uint32_t exp = w & UINT32_C(0x7F800000);
+    uint32_t mantissa = w & UINT32_C(0x007FFFFF);
+    uint16_t bf16 = static_cast<uint16_t>(sign >> 16) | static_cast<uint16_t>(exp >> 16) | static_cast<uint16_t>(mantissa >> 16);
+    return fp32_from_bits(static_cast<uint32_t>(bf16) << 16);
+} 
+
+// bf16 -> fp32
+inline float bf16_ieee_to_fp32_value(u_int16_t h){
+    uint32_t w = static_cast<uint32_t>(h) << 16;
+    uint32_t sign = w & UINT32_C(0x80000000);
+    uint32_t exp = w & UINT32_C(0x7F800000);
+    uint32_t mantissa = w & UINT32_C(0x007FFFFF);
+    uint32_t fp32 = sign << 16 | exp << 16 | mantissa << 16;
+    return fp32_from_bits(fp32);
+}
+
+// fp16 -> fp32 
 inline float fp16_ieee_to_fp32_value(uint16_t h) {
 
   const uint32_t w = (uint32_t)h << 16;
@@ -125,6 +146,7 @@ inline float fp16_ieee_to_fp32_value(uint16_t h) {
                                           : fp32_to_bits(normalized_value));
   return  fp32_from_bits(result);
 }
+
 
 void adam_cpu_0(
     int64_t n,
@@ -160,6 +182,46 @@ void adam_cpu_0(
         }
         });
 }
+
+void adam_cpu_bf16_0{
+    int64_t n,
+    float* param_fp32_ptr,
+    uint16_t* param_bf16_ptr,
+    uint16_t* g_bf16_ptr,
+    float* m_fp32_ptr,
+    float* v_fp32_ptr,
+    float beta1, float beta2,
+    float eps, float lr,
+    float scale,
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2
+}{
+    int64_t span = 1;
+    parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+    for (int64_t j = start; j < end; j += span) {
+        for (int64_t i = j; i < end; i++) {
+            float g = bf16_ieee_to_fp32_value(g_fp16_ptr[i]) / scale;
+            float m = m_fp32_ptr[i];
+            float v = v_fp32_ptr[i];
+            float p = param_fp32_ptr[i];
+            m = beta1 * m + (1 - beta1) * g;
+            v = beta2 * v + (1 - beta2) * g * g;
+            p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
+            param_fp32_ptr[i] = p;
+            param_bf16_ptr[i] = bf16_ieee_from_fp32_value(p);
+            m_fp32_ptr[i] = m;
+            v_fp32_ptr[i] = v;
+                    }
+            break; // must break here
+        }
+        });
+}
+
+static void __attribute__ ((__ta))
+
+
+
 
 static void __attribute__ ((__target__ ("avx,fma,f16c"))) adam_cpu_1(
     int64_t n,

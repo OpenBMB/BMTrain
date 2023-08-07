@@ -12,6 +12,14 @@ __inline__ __device__ bool isnan_(half v) {
 #endif
 }
 
+__inline__ __device__ bool isnan_(bfloat16 v) {
+#if __CUDA_ARCH__ >= 800
+    return __hisnan(v);
+#else
+    return !__heq(v, v);
+#endif
+}
+
 __inline__ __device__ int8_t warpReduceAny(int8_t x) {
     for (int offset = warpSize/2; offset > 0; offset /= 2) 
         x |= __shfl_down_sync(0xFFFFFFFF, x, offset);
@@ -65,6 +73,29 @@ __global__ void bmt_has_nan_inf_2(
     }
 }
 
+// grid <min(ceil(n/1024), 1024)>,        thread<1024>
+__global__ void bmt_has_nan_inf_3(
+    int32_t n,
+    const bfloat16* inp,        // (n,) 
+    uint8_t* mid            // (1024,)
+) {
+    int32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+    int32_t span = blockDim.x * gridDim.x;
+
+    int8_t r = 0;
+    for (int i = gid; i < n; i += span) {
+        half v = inp[i];
+        if (__hisinf(v) || isnan_(v)) {
+            r = 1;
+            break;
+        }
+    }
+    r = blockReduceAny(r);
+    if (threadIdx.x == 0) {
+        mid[blockIdx.x] = r;
+    }
+}
+
 }
 
 void has_nan_inf_launcher(
@@ -84,5 +115,25 @@ void has_nan_inf_launcher(
     dim3 clamp_grid_size = dim3(min((n + threads - 1) / threads, 1024), 1, 1);
     
     bmt_has_nan_inf_1<<<clamp_grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, mid_ptr);
+    bmt_has_nan_inf_2<<<1, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(mid_ptr, out_ptr);
+}
+
+void has_nan_inf_bf16_launcher(
+    int32_t n,
+    std::uintptr_t g_bf16,
+    std::uintptr_t mid,
+    std::uintptr_t out,
+    std::uintptr_t stream
+) {
+    if (n <= 0) return;
+    auto g_ptr = reinterpret_cast<bfloat16*>(g_bf16);
+    auto mid_ptr = reinterpret_cast<uint8_t*>(mid);
+    auto out_ptr = reinterpret_cast<uint8_t*>(out);
+    int32_t threads = 1024;
+    dim3 block_size = dim3(threads, 1, 1);
+    dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
+    dim3 clamp_grid_size = dim3(min((n + threads - 1) / threads, 1024), 1, 1);
+    
+    bmt_has_nan_inf_3<<<clamp_grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, mid_ptr);
     bmt_has_nan_inf_2<<<1, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(mid_ptr, out_ptr);
 }
