@@ -1,12 +1,12 @@
 from utils import *
 
 import torch
-import bmtrain.optim._cuda as G
+import bmtrain.loss._function as F
 import random
 
 def check(x, v):
     out = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
-    G.f_has_inf_nan(x, out)
+    F.has_inf_nan(x, out)
     assert_eq(out.item(), v)
 
 def test_main():

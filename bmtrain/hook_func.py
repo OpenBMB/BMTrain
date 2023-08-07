@@ -83,27 +83,27 @@ def pipe_post_backward(module, grad_inputs, grad_outputs):
 
 class PreHookFunc(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, module, x, return_hidden_states=False, hidden_states=[]):
+    def forward(ctx, module, *x):
         ctx.module = module
         if module._mode == "PIPE":
-            pipe_out = pipe_pre_forward(module, (x,))
-            x = pipe_out[0] if pipe_out is not None else x
+            pipe_out = pipe_pre_forward(module, x)
+            x = pipe_out if pipe_out is not None else x
        
         if module.return_hidden_states:
-            module.hidden_states.append(x)
+            module.hidden_states.append(x[0])
         zero_pre_forward(module, x)
         return x
 
     @staticmethod
-    def backward(ctx, grads):
+    def backward(ctx, *grads):
         zero_post_backward(ctx.module, grads, None)
         if ctx.module._mode == "PIPE":
             pipe_post_backward(ctx.module, grads, None)
-        return None, grads, None, None
+        return None, *grads
 
 class PostHookFunc(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, module, out):
+    def forward(ctx, module, *out):
         ctx.module = module
         zero_post_forward(module, None, out)
         if module._mode == "PIPE":
@@ -111,9 +111,11 @@ class PostHookFunc(torch.autograd.Function):
         return out
 
     @staticmethod
-    def backward(ctx, grads):
+    def backward(ctx, *grads):
         zero_pre_backward(ctx.module, grads)
         if ctx.module._mode == "PIPE":
-            pipe_grads = pipe_pre_backward(ctx.module, (grads, ))
+            pipe_grads = pipe_pre_backward(ctx.module, grads)
             grads = pipe_grads[0] if pipe_grads is not None else grads 
-        return None, grads
+            if not isinstance(grads, tuple):
+                return None, grads
+        return None, *grads
