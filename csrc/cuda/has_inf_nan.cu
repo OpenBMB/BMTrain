@@ -12,13 +12,15 @@ __inline__ __device__ bool isnan_(half v) {
 #endif
 }
 
-__inline__ __device__ bool isnan_(bfloat16 v) {
 #if __CUDA_ARCH__ >= 800
+__inline__ __device__ bool isnan_(nv_bfloat16 v) {
     return __hisnan(v);
-#else
-    return !__heq(v, v);
-#endif
 }
+#else
+__inline__ __device__ bool isnan_(nv_bfloat16 v) {
+    return !__heq(v, v);
+}
+#endif
 
 __inline__ __device__ int8_t warpReduceAny(int8_t x) {
     for (int offset = warpSize/2; offset > 0; offset /= 2) 
@@ -76,7 +78,7 @@ __global__ void bmt_has_nan_inf_2(
 // grid <min(ceil(n/1024), 1024)>,        thread<1024>
 __global__ void bmt_has_nan_inf_3(
     int32_t n,
-    const bfloat16* inp,        // (n,) 
+    const nv_bfloat16* inp,        // (n,) 
     uint8_t* mid            // (1024,)
 ) {
     int32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -84,7 +86,7 @@ __global__ void bmt_has_nan_inf_3(
 
     int8_t r = 0;
     for (int i = gid; i < n; i += span) {
-        half v = inp[i];
+        nv_bfloat16 v = inp[i];
         if (__hisinf(v) || isnan_(v)) {
             r = 1;
             break;

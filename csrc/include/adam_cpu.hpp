@@ -4,8 +4,8 @@
 #include <cstdint>
 #include<sched.h>
 #include <pybind11/pybind11.h>
-#include<iostream>
-#include<cuda_fp16.h>
+#include <iostream>
+#include <cuda_fp16.h>
 #include <cuda_bf16.h>
 #include <vector>
 #include <thread>
@@ -69,7 +69,6 @@ inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F
         f(begin, end);
     }
 }
-
 
 // fp32 -> fp16
 inline uint16_t fp16_ieee_from_fp32_value(float f) {
@@ -183,7 +182,7 @@ void adam_cpu_0(
         });
 }
 
-void adam_cpu_bf16_0{
+void adam_cpu_bf16_0(
     int64_t n,
     float* param_fp32_ptr,
     uint16_t* param_bf16_ptr,
@@ -196,12 +195,12 @@ void adam_cpu_bf16_0{
     float weight_decay,
     float bias_correction1,
     float bias_correction2
-}{
+){
     int64_t span = 1;
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
     for (int64_t j = start; j < end; j += span) {
         for (int64_t i = j; i < end; i++) {
-            float g = bf16_ieee_to_fp32_value(g_fp16_ptr[i]) / scale;
+            float g = bf16_ieee_to_fp32_value(g_bf16_ptr[i]) / scale;
             float m = m_fp32_ptr[i];
             float v = v_fp32_ptr[i];
             float p = param_fp32_ptr[i];
@@ -217,11 +216,6 @@ void adam_cpu_bf16_0{
         }
         });
 }
-
-static void __attribute__ ((__ta))
-
-
-
 
 static void __attribute__ ((__target__ ("avx,fma,f16c"))) adam_cpu_1(
     int64_t n,
@@ -359,9 +353,6 @@ static void __attribute__ ((__target__ ("avx512f"))) adam_cpu_2(
         });
 }
 
-
-
-
 void adam_cpu_launcher(
     int64_t n,
     std::uintptr_t param_fp32,
@@ -410,4 +401,5 @@ void adam_cpu_bf16_launcher(
     auto m_fp32_ptr = reinterpret_cast<float*>(m_fp32);
     auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
     auto param_bf16_ptr = reinterpret_cast<uint16_t*>(param_bf16);
+    adam_cpu_bf16_0(n, param_fp32_ptr, param_bf16_ptr, g_bf16_ptr, m_fp32_ptr, v_fp32_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
 }

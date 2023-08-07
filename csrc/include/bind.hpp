@@ -3,6 +3,7 @@
 #include "adam_cpu.hpp"
 
 void has_nan_inf_launcher(int32_t n,std::uintptr_t g_fp16,std::uintptr_t mid,std::uintptr_t out,std::uintptr_t stream);
+void has_nan_inf_bf16_launcher(int32_t n,std:uintptr_t g_bf16,std::uintptr_t mid,std::uintptr_t out,std::uintptr_t stream);
 
 void cross_entropy_backward_launcher(
     int32_t m, int32_t n,
@@ -58,7 +59,7 @@ void adam_bf16_launcher(
     std::uintptr_t param_fp32,
     std::uintptr_t param_bf16,
     std::uintptr_t g_bf16,
-    std::uintptr_t m_bf16,
+    std::uintptr_t m_fp32,
     std::uintptr_t v_fp32,
     float beta1, float beta2,
     float eps, float lr,
