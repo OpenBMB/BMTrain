@@ -175,7 +175,10 @@ class PipelineTransformerBlockList(torch.nn.Module):
             micro_hidden_states = []
             for idx,layer_id in enumerate(self.layer_ids):
                 self._modules[str(layer_id)]._micro_idx = micro_idx
-                hidden_state = self._modules[str(layer_id)](hidden_state, return_hidden_states, micro_hidden_states, *arg)
+                if return_hidden_states:
+                    self._modules[str(layer_id)].return_hidden_states = return_hidden_states
+                    self._modules[str(layer_id)].hidden_states = micro_hidden_states
+                hidden_state = self._modules[str(layer_id)](hidden_state, *arg)
             outputs.append(hidden_state)
             if return_hidden_states:
                 hidden_states.append(torch.stack(micro_hidden_states, dim=0))

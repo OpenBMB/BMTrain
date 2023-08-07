@@ -89,8 +89,8 @@ class PreHookFunc(torch.autograd.Function):
             pipe_out = pipe_pre_forward(module, (x,))
             x = pipe_out[0] if pipe_out is not None else x
        
-        if return_hidden_states:
-            hidden_states.append(x)
+        if module.return_hidden_states:
+            module.hidden_states.append(x)
         zero_pre_forward(module, x)
         return x
 

@@ -196,21 +196,26 @@ class CheckpointBlock(torch.nn.Module):
         self._pre_module = None
         self._next_module = None
         self._mode = mode #BLOCK or ZERO or PIPE
+        self.return_hidden_states = False
+        self.hidden_states = []
 
     def set_pre_module(self, module):
         self._pre_module = module
         module._next_module = self
     
-    def forward(self, hidden_state, return_hidden_state=False, hidden_states=[], *args):
+    def forward(self, *args): 
         #input must be requires_grad, otherwise autograd.backward will make an error
+        hidden_state = args[0]
         self.input_requires_grad = hidden_state.requires_grad 
         hidden_state.requires_grad_()
-        pre_out = hook_func.PreHookFunc.apply(self, hidden_state, return_hidden_state, hidden_states)
+
+        pre_out = hook_func.PreHookFunc.apply(self, hidden_state)
         if config["use_checkpoint"]:
-            out = checkpoint(self._module, pre_out, *args)
+            out = checkpoint(self._module, pre_out, *args[1:])
         else:
-            out = self._module(pre_out, *args)
+            out = self._module(pre_out, *args[1:])
         post_out = hook_func.PostHookFunc.apply(self, out)
+
         if isinstance(post_out, list):
             return tuple(post_out)
         return post_out
@@ -515,12 +520,14 @@ class TransformerBlockList(torch.nn.Module):
 
     def forward(self, *args, return_hidden_states = False):
         self.return_hidden_states = return_hidden_states
-        outputs = args[:self.num_hidden]
-        others = args[self.num_hidden:]
         hidden_states = []
         for i in range(len(self)):
-            outputs = self._modules[str(i)](*outputs, return_hidden_states, hidden_states, *others)
-            outputs = (outputs,)
+            if return_hidden_states:
+                self._modules[str(i)].return_hidden_states = return_hidden_states
+                self._modules[str(i)].hidden_states = hidden_states
+            outputs = self._modules[str(i)]._call_impl(*args)
+            outputs = (outputs, )
+            args = outputs + args[1:]
 
         if return_hidden_states:
             hidden_states = [
