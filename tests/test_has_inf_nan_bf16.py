@@ -5,13 +5,13 @@ import random
 
 def check(x, v):
     out = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
-    G.has_inf_nan(x, out)
+    G.has_inf_nan_bf16(x, out)
     assert_eq(out.item(), v)
 
 def test_main():
     try:
         for i in list(range(1, 100)) + [1000]*10 + [10000]*10 + [100000]*10 + [1000000]*10:
-            x = torch.rand((i,)).half().cuda()
+            x = torch.rand((i,)).bfloat16().cuda()
             check(x, 0)
             p = random.randint(0, i-1)
             x[p] = x[p] / 0
