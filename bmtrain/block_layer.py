@@ -50,7 +50,7 @@ def _get_param_kw(param : DistributedParameter):
         group_name = "_g_" + param.group
     return type_name + grad_name + group_name
 
-class BMTBlock(torch.nn.Module):
+class CheckpointBlock(torch.nn.Module):
     """ A bmtrain block containing two memory-saving methods of ZeRO-2/3 and checkpoint.
 
     Checkpoint block is used to save the occupation of GPU memory in training.
@@ -63,7 +63,7 @@ class BMTBlock(torch.nn.Module):
     
     Examples:
         >>> transformer_block = TransformerBlock(...)
-        >>> checkpoint_block = BMTBlock(transformer_block)
+        >>> checkpoint_block = CheckpointBlock(transformer_block)
         >>> y1, ... = checkpoint_block(x)
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
@@ -238,7 +238,7 @@ class BMTBlock(torch.nn.Module):
         object.__delattr__(self, name)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        raise RuntimeError("._save_to_state_dict() of BMTBlock should not be called")
+        raise RuntimeError("._save_to_state_dict() of CheckpointBlock should not be called")
     
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         # gather here
@@ -451,7 +451,7 @@ class BMTBlock(torch.nn.Module):
         
 class TransformerBlockList(torch.nn.Module):
     r"""
-    TransformerBlockList is a list of BMTBlocks.
+    TransformerBlockList is a list of CheckpointBlocks.
 
     This is designed to reduce the communication overhead by overlapping the computation and reduce_scatter operation during backward pass.
 
@@ -468,15 +468,15 @@ class TransformerBlockList(torch.nn.Module):
         >>> hidden_state = transformer_module_list(hidden_state, ...)
 
     """
-    _modules: Dict[str, BMTBlock]
+    _modules: Dict[str, CheckpointBlock]
 
-    def __init__(self, modules: Iterable[BMTBlock], num_hidden=1, sqrt=False) -> None:
+    def __init__(self, modules: Iterable[CheckpointBlock], num_hidden=1, sqrt=False) -> None:
         super().__init__()
         
         self._modules = {}
         for i, module in enumerate(modules):
-            if not isinstance(module, BMTBlock):
-                module = BMTBlock(module)
+            if not isinstance(module, CheckpointBlock):
+                module = CheckpointBlock(module)
 
             module._mode = "ZERO"
             module._is_last_layer = True if i == len(modules) -1 else False
@@ -514,9 +514,9 @@ class TransformerBlockList(torch.nn.Module):
     def __len__(self) -> int:
         return len(self._modules)
 
-    def __iter__(self) -> Iterator[BMTBlock]:
+    def __iter__(self) -> Iterator[CheckpointBlock]:
         return iter(self._modules.values())
-    def __getitem__(self, index: Union[int, str]) -> BMTBlock:
+    def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
         return self._modules[str(index)]
 
     def forward(self, *args, return_hidden_states = False):
