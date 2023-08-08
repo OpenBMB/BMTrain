@@ -13,6 +13,10 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode=arch=compute_61,code=sm_61 -g
 
 if(NOT DEFINED ENV{BUILD_DOCKER_ENV} OR "$ENV{BUILD_DOCKER_ENV}" STREQUAL "0")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode=arch=compute_86,code=sm_86")
+    set(AVX_FLAGS "${AVX_FLAGS} -march=native")
+else()
+    message("Building in docker environment, skipping compute_86 and enable all avx flag")
+    set(AVX_FLAGS "${AVX_FLAGS} -mavx -mfma -mf16c -mavx512f")
 endif()
 
 set(CMAKE_BUILD_RPATH $ORIGIN)
@@ -36,7 +40,6 @@ message (STATUS "CMAKE_INSTALL_RPATH: ${CMAKE_INSTALL_RPATH}")
 file(GLOB_RECURSE SOURCES "csrc/*.cpp")
 file(GLOB_RECURSE CUDA_SOURCES "csrc/cuda/*.cu")
 
-set(AVX_FLAGS "${AVX_FLAGS} -march=native")
 
 pybind11_add_module(C ${SOURCES} ${CUDA_SOURCES})
 
