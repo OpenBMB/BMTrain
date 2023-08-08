@@ -34,7 +34,7 @@ def main():
 
     model1 = model1.cuda().to(dtype=torch.bfloat16)
     model2 = model2.cuda().to(dtype=torch.bfloat16)
-    model3 = model3.cuda().to(dtype=torch.bfloat16)
+    model3 = model3.cuda()
 
     opt1 = bmt.optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
     opt2 = bmt.optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-3)
@@ -46,10 +46,10 @@ def main():
         opt3.zero_grad()
 
         for p1, p2, p3 in zip(model1.parameters(), model2.parameters(), model3.parameters()):
-            grad_bf16 = torch.randn_like(p1).to(dtype=torch.bfloat16) 
-            p1.grad = grad_bf16
-            p2.grad = grad_bf16
-            p3.grad = grad_bf16
+            grad = torch.randn_like(p1)
+            p1.grad = grad.to(dtype=torch.bfloat16)
+            p2.grad = grad.to(dtype=torch.bfloat16)
+            p3.grad = grad.float()
 
         opt1.step()
         opt2.step()
