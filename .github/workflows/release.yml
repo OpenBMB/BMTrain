@@ -13,6 +13,16 @@ jobs:
         python-version: ['36', '37', '38', '39']
 
     steps:
+
+    - name: Check the disk space and clear unnecessary library
+      run: |
+        rm -rf /home/runner/work/BMTrain/BMTrain/dist
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        df -hl   
+
     - name: Checkout code
       uses: actions/checkout@v3
 
@@ -28,7 +38,7 @@ jobs:
     - name: Run Docker image and execute script
       run: |
         version=${{ matrix.python-version }}
-        docker run -e CUDACXX=/usr/local/cuda/bin/nvcc -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:/opt/rh/devtoolset-7/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-7/root/usr/lib64:/opt/rh/devtoolset-7/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./wheel/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./sdist/;for file in wheel/*-linux_x86_64.whl; do mv \"\$file\" \"\${file//-linux_x86_64/-manylinux2014_x86_64}\"; done"
+        docker run -e BUILD_DOCKER_ENV=1 -e CUDACXX=/usr/local/cuda/bin/nvcc -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:/opt/rh/devtoolset-7/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-7/root/usr/lib64:/opt/rh/devtoolset-7/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./wheel/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./sdist/;for file in wheel/*-linux_x86_64.whl; do mv \"\$file\" \"\${file//-linux_x86_64/-manylinux2014_x86_64}\"; done"
       
     - name: Archive distribution files
       uses: actions/upload-artifact@v2
@@ -60,12 +70,11 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         body_path: "Release.txt"
-        files: ｜
+        files: |
           dist/sdist/*.tar.gz
           dist/wheel/*.whl
         prerelease: false
         token: ${{ secrets.RELEASE_TOKEN }}
-        release_tag: ${{ steps.create_release.outputs.tag }}
-        github_token: ${{ secrets.GITHUB_TOKEN }}
+        tag_name: ${{ steps.create_release.outputs.tag }}
       env:
         GITHUB_REPOSITORY: MayDomine/BMTrain
