@@ -13,7 +13,7 @@ from .checkpointing import (
         CheckpointBlockContext
 )
 from . import debug
-from .block_layer import BMTBlock, round_up, _get_param_kw
+from .block_layer import CheckpointBlock, round_up, _get_param_kw
 
 class PipePreFunction(torch.autograd.Function):
     @staticmethod
@@ -21,29 +21,60 @@ class PipePreFunction(torch.autograd.Function):
         hidden_state_list = all_gather(hidden_state.clone(), config["pipe_comm"])
         hidden_state_list.requires_grad_()
 
+        batch_related = args[-1]
+        batch_related_origin = [True if i in args[-1] else False for i in range(len(args[:-1]))]
+        batch_related_rule = []
+        args = args[:-1]
+
         batch_size = hidden_state.shape[0]
         num_micros = config["micros"]
         args_list = [[] for _ in range(num_micros)]
+        input_requires_grad = []
         for arg in args:
             if torch.is_tensor(arg):
                 arg_all = all_gather(arg, config['pipe_comm'])
-                if arg.shape[0] == batch_size:
+                if arg.dim() == hidden_state.dim() and arg.shape[0] == batch_size:
+                    batch_related_rule.append(True)
                     arg_all = arg_all.flatten(0, 1).chunk(num_micros, dim=0)
-                    arg_all = [tensor.detach().requires_grad_(arg.requires_grad) for tensor in arg_all]
+                    arg_all = [tensor.requires_grad_(arg.requires_grad) for tensor in arg_all]
                 else:
-                    arg_all = [arg_all[0].detach().requires_grad_(arg.requires_grad) for i in range(num_micros)]
+                    batch_related_rule.append(False)
+                    arg_all = [arg_all[0].requires_grad_(arg.requires_grad) for i in range(num_micros)]
+                input_requires_grad.append(arg.requires_grad)
             else:
+                batch_related_rule.append(False)
                 arg_all = [arg for _ in range(num_micros)]
+                input_requires_grad.append(False)
             for i in range(num_micros):
                 args_list[i].append(arg_all[i])
-
+        ctx.input_requires_grad = input_requires_grad
+        ctx.args_list = args_list
+        if len(batch_related) == 0:
+            ctx.batch_related = batch_related_rule
+        else:
+            ctx.batch_related = batch_related_origin
         return hidden_state_list, args_list
 
     @staticmethod
-    def backward(ctx, grads):
+    def backward(ctx, grads, arg_grads):
         grads = broadcast(grads, 0, config['pipe_comm'])
         topo = config['topology']
-        return grads.chunk(topo.stages, dim=0)[topo.stage_id], None 
+        arg_grads = []
+        num_micros = config['micros']
+        for idx,requires_grad in enumerate(ctx.input_requires_grad):
+            if requires_grad:
+                grad = torch.cat([ctx.args_list[m][idx].grad for m in range(num_micros)], dim=0)
+                grad = all_reduce(grad, "sum", config["pipe_comm"])
+                split_size = topo.stages if ctx.batch_related[idx] else num_micros
+                grad = grad.chunk(split_size)
+                if ctx.batch_related[idx]:
+                    arg_grads.append(grad[topo.stage_id])
+                else:
+                    arg_grads.append(grad[0])
+            else:
+                arg_grads.append(None)
+        arg_grads.append(None) #for append(batch_related)
+        return grads.chunk(topo.stages, dim=0)[topo.stage_id], *arg_grads
 
 class PipePostFunction(torch.autograd.Function):
     @staticmethod
@@ -112,9 +143,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
         >>> hidden_state = transformer_module_list(hidden_state, ...)
 
     """
-    _modules: Dict[str, BMTBlock]
+    _modules: Dict[str, CheckpointBlock]
 
-    def __init__(self, modules: Iterable[BMTBlock], num_hidden=1) -> None:
+    def __init__(self, modules: Iterable[CheckpointBlock], num_hidden=1) -> None:
         super().__init__()
         self.num_hidden = num_hidden 
         self._modules = {}
@@ -126,8 +157,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.stage_id = topo.stage_id
         self.pipe_idx = topo.pipe_idx 
         for idx, module in enumerate(modules):
-            if not isinstance(module, BMTBlock):
-                module = BMTBlock(module)
+            if not isinstance(module, CheckpointBlock):
+                module = CheckpointBlock(module)
 
             module._mode = "PIPE"
             module.stage_id = self.stage_id
@@ -156,17 +187,18 @@ class PipelineTransformerBlockList(torch.nn.Module):
     def __len__(self) -> int:
         return len(self._modules) 
 
-    def __iter__(self) -> Iterator[BMTBlock]:
+    def __iter__(self) -> Iterator[CheckpointBlock]:
         return iter(self._modules.values())
 
-    def __getitem__(self, index: Union[int, str]) -> BMTBlock:
+    def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
         return self._modules[str(index)]
 
     def forward(self, hidden_state, *args, batch_related=[], return_hidden_states=False):
         self.return_hidden_states = return_hidden_states
         batch_size = hidden_state.shape[0]
         num_micros = config["micros"]
-        hidden_state_list, args_list = PipePreFunction.apply(hidden_state)
+        args = args + (batch_related, )
+        hidden_state_list, args_list = PipePreFunction.apply(hidden_state, *args)
 
         hidden_state_list = hidden_state_list.flatten(0, 1).chunk(num_micros, dim=0)
         outputs = []
