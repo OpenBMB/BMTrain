@@ -4,6 +4,7 @@ import random
 import torch.distributed as dist
 import os
 from .utils import print_dict
+import ctypes
 from .global_var import config
 from . import nccl
 from .synchronize import synchronize
@@ -51,9 +52,17 @@ def init_distributed(
     port = os.environ["MASTER_PORT"]
     master = addr+":"+port
     timeout = datetime.timedelta(seconds=1800)
-    rendezvous_iterator = dist.rendezvous(
-        init_method, rank, world_size, timeout=timeout
-    )
+    try:
+        rendezvous_iterator = dist.rendezvous(
+            init_method, rank, world_size, timeout=timeout
+        )   
+    except RuntimeError:
+        import nvidia.nccl
+        path = os.path.join(os.path.dirname(nvidia.nccl.__file__), "lib")
+        for file_so in os.listdir(path):
+            if file_so.endswith(".so"):
+                ctypes.CDLL(os.path.join(path, file_so))
+
     store, rank, world_size = next(rendezvous_iterator)
     store.set_timeout(timeout)
     store = dist.PrefixStore("bmtrain", store)
