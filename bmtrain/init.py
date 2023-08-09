@@ -6,8 +6,15 @@ import os
 from .utils import print_dict
 import ctypes
 from .global_var import config
-from . import nccl
+
+try:
+    from . import nccl
+except:
+    from .utils import load_nccl_pypi
+    load_nccl_pypi()
 from .synchronize import synchronize
+
+
 def init_distributed(
         init_method : str = "env://",
         seed : int = 0,
@@ -52,16 +59,9 @@ def init_distributed(
     port = os.environ["MASTER_PORT"]
     master = addr+":"+port
     timeout = datetime.timedelta(seconds=1800)
-    try:
-        rendezvous_iterator = dist.rendezvous(
-            init_method, rank, world_size, timeout=timeout
-        )   
-    except RuntimeError:
-        import nvidia.nccl
-        path = os.path.join(os.path.dirname(nvidia.nccl.__file__), "lib")
-        for file_so in os.listdir(path):
-            if file_so.endswith(".so"):
-                ctypes.CDLL(os.path.join(path, file_so))
+    rendezvous_iterator = dist.rendezvous(
+        init_method, rank, world_size, timeout=timeout
+    )   
 
     store, rank, world_size = next(rendezvous_iterator)
     store.set_timeout(timeout)
@@ -173,3 +173,4 @@ class topology:
 
 def is_initialized() -> bool:
     return config["initialized"]
+
