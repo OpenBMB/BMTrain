@@ -16,7 +16,8 @@ __inline__ __device__ bool isnan_(nv_bfloat16 v) {
         return __hisnan(__float2half(tmp));
     #else
         float tmp = (float)v; 
-        return !__heq(__float2half(tmp), __float2half(tmp)); 
+        return !__heq(__float2half(tmp), __float2half(tmp));
+    printf("you can not use bf16 if __CUDA_ARCH__ < 800\n");
     #endif
     }
     
