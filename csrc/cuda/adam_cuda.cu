@@ -54,8 +54,8 @@ __global__ void adam_fp32_accum_bf16(
     int32_t col = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (col < n) {
-        float local_g = __nv_bfloat162float(g[col]) / scale; // real_g
-        float local_m = beta1 * __nv_bfloat162float(m[col]) + (1 - beta1) * local_g; // real_m
+        float local_g = __bfloat162float(g[col]) / scale; // real_g
+        float local_m = beta1 * __bfloat162float(m[col]) + (1 - beta1) * local_g; // real_m
         float local_v = beta2 * v[col] + (1 - beta2) * local_g * local_g; // real_v
         float local_p = param[col];
         local_p = local_p - lr * local_m / bias_correction1 / (sqrtf(local_v / bias_correction2 / scale) + eps) - lr * weight_decay * local_p; 
