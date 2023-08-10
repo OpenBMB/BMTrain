@@ -10,8 +10,8 @@ def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.T
     assert m_fp32.is_contiguous(), "m_fp32 must be contiguous"
     assert v_fp32.is_contiguous(), "v_fp32 must be contiguous"
     assert param_fp32.dtype == torch.float32, "param_fp32 must be float32 tensor"
-    assert param_fp16.dtype == torch.float16, "param_fp16 must be float16 tensor"
-    assert g_fp16.dtype == torch.float16, "g_fp16 must be float16 tensor"
+    assert param_fp16.dtype == torch.float16 or param_fp16.dtype == torch.bfloat16, "param_fp16 must be float16/bfloat16 tensor"
+    assert g_fp16.dtype == torch.float16 or g_fp16.dtype == torch.bfloat16, "g_fp16 must be float16/bfloat16 tensor"
     assert m_fp32.dtype == torch.float32, "m_fp32 must be float32 tensor"
     assert v_fp32.dtype == torch.float32, "v_fp32 must be float32 tensor"
     assert param_fp32.device == torch.device("cpu"), "param_fp32 must be a cpu tensor"
@@ -25,20 +25,21 @@ def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.T
     assert param_fp32.numel() == v_fp32.numel(), "param_fp32 and v_fp32 must have the same number of elements"
     bias_correction1 = 1 - beta1 ** step
     bias_correction2 = 1 - beta2 ** step
-    C.adam_cpu_launcher(
-                    param_fp32.numel(),
-                    param_fp32.data_ptr(),
-                    param_fp16.data_ptr(),
-                    g_fp16.data_ptr(),
-                    m_fp32.data_ptr(),
-                    v_fp32.data_ptr(),
-                    beta1, beta2,
-                    eps, lr,
-                    scale,
-                    weight_decay,
-                    bias_correction1,
-                    bias_correction2,
-                )
+    launcher = C.adam_cpu_launcher if g_fp16.dtype == torch.float16 else C.adam_cpu_bf16_launcher
+    launcher(
+        param_fp32.numel(),
+        param_fp32.data_ptr(),
+        param_fp16.data_ptr(),
+        g_fp16.data_ptr(),
+        m_fp32.data_ptr(),
+        v_fp32.data_ptr(),
+        beta1, beta2,
+        eps, lr,
+        scale,
+        weight_decay,
+        bias_correction1,
+        bias_correction2,
+    )
 
 def adam(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.Tensor, m_fp16: torch.Tensor,
              v_fp32: torch.Tensor, beta1: float, beta2: float, eps: float, lr: float, scale: float,

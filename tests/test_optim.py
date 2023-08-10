@@ -37,9 +37,9 @@ def main(dtype):
     model2 = model2.cuda().to(dtype)
     model3 = model3.cuda()
 
-    opt1 = bmt.optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
-    opt2 = bmt.optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-3)
-    opt3 = torch.optim.Adam(model3.parameters(), weight_decay=1e-3)
+    opt1 = bmt.optim.AdamOptimizer(model1.parameters(), lr=1)
+    opt2 = bmt.optim.AdamOffloadOptimizer(model2.parameters(), lr=1)
+    opt3 = torch.optim.Adam(model3.parameters(), lr=1)
 
     for _ in range(100):
         opt1.zero_grad()
@@ -57,10 +57,10 @@ def main(dtype):
         opt3.step()
 
         for p1, p2, p3 in zip(model1.parameters(), model2.parameters(), model3.parameters()):
-            diff1 = torch.abs(p1 - p2).max() 
-            diff2 = torch.abs(p1 - p3).max()
-            diff3 = torch.abs(p2 - p3).max()
-            print(diff1, diff2, diff3)
+            diff1 = torch.abs(p1 - p2).max().item() 
+            diff2 = torch.abs(p1 - p3).max().item()
+            diff3 = torch.abs(p2 - p3).max().item()
+            print(f"{diff1:4.6f}, {diff2:4.6f}, {diff3:4.6f}")
             assert_lt(diff1, 1)
             assert_lt(diff2, 1)
             assert_lt(diff3, 1)

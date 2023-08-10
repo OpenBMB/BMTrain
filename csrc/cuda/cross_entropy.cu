@@ -1,5 +1,4 @@
 #include <cuda_fp16.h>
-#include <cuda_bf16.h>
 #include "reduce.cuh"
 #include <cstdint>
 #include<cuda_runtime_api.h>
