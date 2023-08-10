@@ -216,7 +216,7 @@ class CheckpointBlock(torch.nn.Module):
 
         pre_out = hook_func.PreHookFunc.apply(self, *grad_tensors)
         for i in range(len(grad_index)):
-            arg_list[grad_index[i]] = grad_tensors[i]
+            arg_list[grad_index[i]] = pre_out[i]
 
         if self.use_checkpoint:
             out = checkpoint(self._module, *arg_list)
