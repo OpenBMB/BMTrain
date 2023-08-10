@@ -1,6 +1,6 @@
 from typing import Optional, Union, List, Dict, Tuple
 import torch
-from ..loss._function import has_inf_nan, has_inf_nan_bf16
+from ..loss._function import has_inf_nan
 from ..utils import print_rank
 from ..lr_scheduler.warmup import WarmupLRScheduler
 from .. import nccl
@@ -11,10 +11,9 @@ def check_overflow(param_groups):
     has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
     for group in param_groups:
         for p in group['params']:
-            if p.grad is not None and p.dtype == torch.half: 
-                has_inf_nan(p.grad, has_inf_or_nan)
-            elif p.grad is not None and p.dtype == torch.bfloat16:
-                has_inf_nan_bf16(p.grad, has_inf_or_nan) # TODO support other types
+            if p.grad is not None:
+                if p.dtype != torch.float:
+                    has_inf_nan(p.grad, has_inf_or_nan)
     if "comm" in config:
         nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
 

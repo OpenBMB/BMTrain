@@ -12,12 +12,10 @@ tq = tqdm([
     ("requires_grad", 1),
     ("requires_grad_multi_gpu", 2),
     ("has_inf_nan", 1),
-    ("has_inf_nan_bf16", 1),
     ("dropout", 1),
     ("loss_func", 1),
 
-    ("optim_fp16", 1),
-    ("optim_bf16", 1),
+    ("optim", 1),
 
     ("multi_return", 2),
     ("middle_hidden", 4),

@@ -8,9 +8,9 @@ def check(x, v):
     G.has_inf_nan(x, out)
     assert_eq(out.item(), v)
 
-def test_main():
+def test_main(dtype):
     for i in list(range(1, 100)) + [1000]*10 + [10000]*10 + [100000]*10 + [1000000]*10:
-        x = torch.rand((i,)).half().cuda()
+        x = torch.rand((i,)).to(dtype).cuda()
         check(x, 0)
         p = random.randint(0, i-1)
         x[p] = x[p] / 0
@@ -29,4 +29,5 @@ def test_main():
     print("That's right")
 
 if __name__ == "__main__":
-    test_main()
+    test_main(torch.float16)
+    test_main(torch.bfloat16)

@@ -2,23 +2,18 @@
 from .. import C 
 import torch
 CHECK_INPUT = lambda x: x.is_contiguous() and x.is_cuda
-def has_inf_nan(g_fp16: torch.Tensor, out: torch.Tensor) -> None:
-    assert g_fp16.dtype == torch.float16, "g_fp16 must be a half tensor"
+def has_inf_nan(g_half: torch.Tensor, out: torch.Tensor) -> None:
     assert out.dtype == torch.uint8, "out must be a uint8 tensor"
-    assert CHECK_INPUT(g_fp16), "g_fp16 must be contiguous and on cuda"
+    assert CHECK_INPUT(g_half), "g_fp16 must be contiguous and on cuda"
     assert CHECK_INPUT(out), "out must be contiguous and on cuda"
     mid = torch.zeros(1024, device=out.device, dtype=out.dtype)
     stream = torch.cuda.current_stream().cuda_stream
-    C.has_nan_inf_launcher(g_fp16.numel(), g_fp16.data_ptr(), mid.data_ptr(), out.data_ptr(), stream)
-
-def has_inf_nan_bf16(g_bf16: torch.Tensor, out: torch.Tensor) -> None:
-    assert g_bf16.dtype == torch.bfloat16, "g_bf16 must be a bfloat16 tensor"
-    assert out.dtype == torch.uint8, "out must be a uint8 tensor"
-    assert CHECK_INPUT(g_bf16), "g_bf16 must be contiguous and on cuda"
-    assert CHECK_INPUT(out), "out must be contiguous and on cuda"
-    mid = torch.zeros(1024, device=out.device, dtype=out.dtype)
-    stream = torch.cuda.current_stream().cuda_stream
-    C.has_nan_inf_bf16_launcher(g_bf16.numel(), g_bf16.data_ptr(), mid.data_ptr(), out.data_ptr(), stream)
+    if g_half.dtype == torch.float16:
+        C.has_nan_inf_launcher(g_half.numel(), g_half.data_ptr(), mid.data_ptr(), out.data_ptr(), stream)
+    elif g_half.dtype == torch.bfloat16:
+        C.has_nan_inf_bf16_launcher(g_half.numel(), g_half.data_ptr(), mid.data_ptr(), out.data_ptr(), stream)
+    else:
+        raise ValueError(f"has_inf_nan not supported for dtype {g_half.dtype}")
 
 def cross_entropy_forward(m: int, n: int, input: torch.Tensor, target: torch.Tensor,
                             softmax: torch.Tensor, output: torch.Tensor, ignore_index: int) -> None:

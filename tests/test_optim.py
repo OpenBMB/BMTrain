@@ -20,7 +20,7 @@ class TestModule(torch.nn.Module):
         x = self.fc5(x)
         return x
 
-def main():
+def main(dtype):
     model1 = TestModule()
     model2 = TestModule()
     model3 = TestModule()
@@ -33,8 +33,8 @@ def main():
     model2.load_state_dict(state_dict)
     model3.load_state_dict(state_dict)
 
-    model1 = model1.cuda().to(dtype=torch.bfloat16)
-    model2 = model2.cuda().to(dtype=torch.bfloat16)
+    model1 = model1.cuda().to(dtype)
+    model2 = model2.cuda().to(dtype)
     model3 = model3.cuda()
 
     opt1 = bmt.optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
@@ -48,8 +48,8 @@ def main():
 
         for p1, p2, p3 in zip(model1.parameters(), model2.parameters(), model3.parameters()):
             grad = torch.randn_like(p1)
-            p1.grad = grad.to(dtype=torch.bfloat16)
-            p2.grad = grad.to(dtype=torch.bfloat16)
+            p1.grad = grad.to(dtype)
+            p2.grad = grad.to(dtype)
             p3.grad = grad.float()
 
         opt1.step()
@@ -66,4 +66,5 @@ def main():
             assert_lt(diff3, 1)
 
 if __name__ == "__main__":
-    main()
+    main(torch.float16)
+    main(torch.bfloat16)
