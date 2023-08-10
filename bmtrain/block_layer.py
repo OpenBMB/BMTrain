@@ -205,13 +205,24 @@ class CheckpointBlock(torch.nn.Module):
         module._next_module = self
     
     def forward(self, *args): 
-        #input must be requires_grad, otherwise autograd.backward will make an error
-        args[0].requires_grad_()
-        pre_out = hook_func.PreHookFunc.apply(self, *args)
+        grad_tensors = []
+        grad_index = []
+        arg_list = list(args)
+        for i, arg in enumerate(args):
+            if arg is not None and arg.requires_grad:
+                grad_tensors.append(arg)
+                grad_index.append(i)
+        grad_tensors = tuple(grad_tensors)
+
+        pre_out = hook_func.PreHookFunc.apply(self, *grad_tensors)
+        for i in range(len(grad_index)):
+            arg_list[grad_index[i]] = pre_out[i]
+
         if self.use_checkpoint:
-            out = checkpoint(self._module, *pre_out)
+            out = checkpoint(self._module, *arg_list)
         else:
-            out = self._module(*pre_out)
+            out = self._module(*arg_list)
+
         tuple_out = (out, ) if isinstance(out, torch.Tensor) else out
         post_out = hook_func.PostHookFunc.apply(self, *tuple_out)
         if isinstance(out, torch.Tensor) and isinstance(post_out, tuple):
