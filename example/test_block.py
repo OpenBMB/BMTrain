@@ -2,21 +2,21 @@ import torch
 import torch.nn.functional as F
 import bmtrain as bmt
 from bmtrain.global_var import config 
-from . import Attention 
+from layers import TransformerEncoder
 
 
 gb = 1024.0 * 1024.0 * 1024.0
 
-bmt.init_distributed(zero_level=2)
+bmt.init_distributed(zero_level=3)
 
 linears = []
 for i in range(10), :
-    linears.append(bmt.CheckpointBlock(Attention(
+    linears.append(bmt.CheckpointBlock(TransformerEncoder(
                     dim_model=8192, 
                     dim_head=128, 
-                    num_head=64
-                    dropout_p=0.0,
-                    use_flash_attn=True,
+                    num_heads=64,
+                    dim_ff=20480,
+                    bias=False,
                     dtype=torch.half
                     ), 
                 use_checkpoint=False)
@@ -28,13 +28,16 @@ device = torch.device('cuda')
 bmt.synchronize()
 if config['rank'] == 0:
 	print('before forward', torch.cuda.memory_allocated(device) / gb)
-
-x = torch.randn(4096, 8192, dtype=torch.float16, device=device).requires_grad_()
+batch_size=1
+seq_len=4096
+x = torch.randn(batch_size, seq_len, 8192, dtype=torch.float16, device=device).requires_grad_()
 bmt.synchronize()
 if config['rank'] == 0:
 	print('init input', torch.cuda.memory_allocated(device) / gb)
-
-y = linears(x)
+enc_length = torch.randint(128, seq_len, (batch_size,)).long().cuda()
+mask = torch.arange(seq_len).unsqueeze(0) <= torch.arange(seq_len).unsqueeze(1)
+mask = mask.unsqueeze(0).unsqueeze(0)
+y = linears(x,mask)
 bmt.synchronize()
 if config['rank'] == 0:
 	print('after forward', torch.cuda.memory_allocated(device) / gb)

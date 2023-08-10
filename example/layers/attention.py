@@ -3,31 +3,30 @@ import torch
 import bmtrain as bmt
 from layers import Linear
 import math
-
+from .flash_triton import FlashAttnFunc
 class Attention(bmt.DistributedModule):
     def __init__(
         self,
         dim_model: int,
-        num_heads: int,
         dim_head: int,
+        num_heads: int,
+        bias: bool = False,
         dtype: torch.dtype = torch.half,
         dropout_p: Optional[float] = None,
-        scale: bool = True,
-        use_flash_attn: bool = False,
+        use_flash_attn: bool = True,
     ) -> None:
         super().__init__()
 
         self.dim_model = dim_model
         self.num_heads = num_heads
         self.num_kv_heads = num_heads
-        self.head_groups = num_heads // num_kv_heads
         self.dim_head = dim_head
 
-        self.project_q = Linear(self.dim_model, self.num_heads * self.dim_head, dtype=dtype, scale=scale)
-        self.project_k = Linear(self.dim_model, self.num_kv_heads * self.dim_head, dtype=dtype, scale=scale)
-        self.project_v = Linear(self.dim_model, self.num_kv_heads * self.dim_head, dtype=dtype, scale=scale)
+        self.project_q = Linear(self.dim_model, self.num_heads * self.dim_head, dtype=dtype, )
+        self.project_k = Linear(self.dim_model, self.num_kv_heads * self.dim_head, dtype=dtype, )
+        self.project_v = Linear(self.dim_model, self.num_kv_heads * self.dim_head, dtype=dtype, )
 
-        self.attention_out = Linear(self.num_heads * self.dim_head, self.dim_model, dtype=dtype, scale=scale)
+        self.attention_out = Linear(self.num_heads * self.dim_head, self.dim_model, dtype=dtype, )
 
 
         if dropout_p is not None:
@@ -45,7 +44,6 @@ class Attention(bmt.DistributedModule):
         hidden_q: torch.Tensor,
         hidden_kv: torch.Tensor,
         attention_mask: torch.BoolTensor,
-        position_bias: torch.Tensor,
     ):
         """This model inherits from bmt.DistributedModule.
         Args:
@@ -80,13 +78,11 @@ class Attention(bmt.DistributedModule):
                 # h_q, h_k, h_v, attention_mask=attention_mask, length_mask=length_mask, context_mask=context_mask
             # )
         if attention_mask is not None:
-            assert pos_bias_type == "rotary"
-            h_q, h_k = position_bias(h_q, h_k, -3)
             h_q = h_q.view(batch_size, len_q, self.num_heads, self.dim_head)  # .permute(0, 2, 1, 3)
             h_k = h_k.view(batch_size, len_k, self.num_kv_heads, self.dim_head)  # .permute(0, 2, 1, 3)
             h_v = h_v.view(batch_size, len_k, self.num_kv_heads, self.dim_head)  # .permute(0, 2, 1, 3)
-            mask = attention_mask.unsqueeze(dim=1).contiguous()
-            mask_bias = torch.zeros_like(mask, device="cuda", dtype=torch.float16)  # 创建与mask形状相同的全零张量
+            mask = attention_mask
+            mask_bias = torch.zeros_like(attention_mask, device="cuda", dtype=torch.float16)  # 创建与mask形状相同的全零张量
             mask_bias[mask == False] -= torch.inf
             score = FlashAttnFunc.apply(h_q, h_k, h_v, mask_bias, False, None)
 
@@ -95,10 +91,7 @@ class Attention(bmt.DistributedModule):
 
         score = self.attention_out(score)
 
-        if use_cache:
-            return score, (h_k, h_v)
-        else:
-            return score
+        return score
 
 #class Attention(bmt.DistributedModule):
 #    def __init__(self, 

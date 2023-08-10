@@ -23,7 +23,7 @@ class TransformerEncoder(bmt.DistributedModule):
         ):
         bmt.inspect.record_tensor(hidden, "hidden")
         x = self.ln_attn(hidden)
-        x = self.attn(x, x, mask, position_bias)
+        x = self.attn(x, x, mask)
         hidden = hidden + x
 
         x = self.ln_ff(hidden)

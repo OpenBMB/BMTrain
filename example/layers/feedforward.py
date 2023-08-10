@@ -13,6 +13,5 @@ class Feedforward(bmt.DistributedModule):
         self.relu = torch.nn.ReLU()
     
     def forward(self, input : torch.Tensor) -> torch.Tensor:
-#return self.w_out(self.relu(self.w_in(input)))
         gate_out = self.relu(self.gate(input))
         return self.w_out(self.w_in(input) * gate_out)
