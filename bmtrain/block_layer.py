@@ -209,7 +209,7 @@ class CheckpointBlock(torch.nn.Module):
         grad_index = []
         arg_list = list(args)
         for i, arg in enumerate(args):
-            if arg is not None and arg.requires_grad:
+            if arg is not None and isinstance(arg, torch.Tensor) and arg.requires_grad:
                 grad_tensors.append(arg)
                 grad_index.append(i)
         grad_tensors = tuple(grad_tensors)
