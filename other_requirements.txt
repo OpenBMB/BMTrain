@@ -4,4 +4,3 @@ jieba
 tensorboard
 setuptools_rust
 transformers
-pybind11

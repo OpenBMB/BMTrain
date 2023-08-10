@@ -1,3 +1,4 @@
+from utils import *
 import torch
 import bmtrain as bmt
 
@@ -61,6 +62,9 @@ def main():
             diff2 = torch.abs(p1.float() - p3).max()
             diff3 = torch.abs(p2.float() - p3).max()
             print(diff1, diff2, diff3)
+            assert_lt(diff1, 1)
+            assert_lt(diff2, 1)
+            assert_lt(diff3, 1)
 
 if __name__ == "__main__":
     main()

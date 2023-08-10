@@ -1,25 +1,17 @@
-#include <cuda_fp16.h>
-#include <cuda_bf16.h>
 #include <cstdint>
+#include <cuda_fp16.h>
+#if __CUDA_ARCH__ >= 800
+    #include <cuda_bf16.h>
+#endif
 
+namespace{
 __inline__ __device__ bool isnan_(half v) {
     #if __CUDA_ARCH__ >= 700 || __CUDA_ARCH__ == 600
         return __hisnan(v);
     #else
         return !__heq(v, v);
     #endif
-    }
-    
-__inline__ __device__ bool isnan_(nv_bfloat16 v) {
-    #if __CUDA_ARCH__ >=800
-        float tmp = (float)v;
-        return __hisnan(__float2half(tmp));
-    #else
-        float tmp = (float)v; 
-        return !__heq(__float2half(tmp), __float2half(tmp));
-    printf("you can not use bf16 if __CUDA_ARCH__ < 800\n");
-    #endif
-    }
+}
     
 __inline__ __device__ int8_t warpReduceAny(int8_t x) {
     for (int offset = warpSize/2; offset > 0; offset /= 2) 
@@ -40,7 +32,7 @@ __inline__ __device__ float blockReduceAny(int8_t x) {
 }
 
 // grid <min(ceil(n/1024), 1024)>,        thread<1024>
-__global__ void bmt_has_nan_inf_1(
+__global__ void bmt_has_nan_inf_fp16(
     int32_t n,
     const half* inp,        // (n,) 
     uint8_t* mid            // (1024,)
@@ -63,7 +55,7 @@ __global__ void bmt_has_nan_inf_1(
 }
 
 // grid <1>,        thread<1024>
-__global__ void bmt_has_nan_inf_2(
+__global__ void bmt_has_nan_inf_reduce(
     const uint8_t* mid,    // (1024,) 
     uint8_t* out
 ) {
@@ -75,19 +67,20 @@ __global__ void bmt_has_nan_inf_2(
 }
 
 // grid <min(ceil(n/1024), 1024)>,        thread<1024>
-__global__ void bmt_has_nan_inf_3(
+__global__ void bmt_has_nan_inf_bf16(
     int32_t n,
-    const nv_bfloat16* inp,        // (n,) 
+    const uintptr_t inp,        // (n,) 
     uint8_t* mid            // (1024,)
 ) {
+#if __CUDA_ARCH__ >= 800
+    const __nv_bfloat16* bf_inp = reinterpret_cast<const __nv_bfloat16*>(inp);
     int32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     int32_t span = blockDim.x * gridDim.x;
 
     int8_t r = 0;
     for (int i = gid; i < n; i += span) {
-        nv_bfloat16 v = inp[i];
-        float tmp = (float)v; 
-        if (isinf(tmp) || isnan(tmp)) { 
+        __nv_bfloat16 v = bf_inp[i];
+        if (__hisinf(v) || __hisnan(v)) { 
             r = 1;
             break;
         }
@@ -96,6 +89,9 @@ __global__ void bmt_has_nan_inf_3(
     if (threadIdx.x == 0) {
         mid[blockIdx.x] = r;
     }
+#endif
+}
+
 }
 
 void has_nan_inf_launcher(
@@ -114,8 +110,8 @@ void has_nan_inf_launcher(
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
     dim3 clamp_grid_size = dim3(min((n + threads - 1) / threads, 1024), 1, 1);
     
-    bmt_has_nan_inf_1<<<clamp_grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, mid_ptr);
-    bmt_has_nan_inf_2<<<1, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(mid_ptr, out_ptr);
+    bmt_has_nan_inf_fp16<<<clamp_grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, mid_ptr);
+    bmt_has_nan_inf_reduce<<<1, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(mid_ptr, out_ptr);
 }
 
 void has_nan_inf_bf16_launcher(
@@ -126,7 +122,6 @@ void has_nan_inf_bf16_launcher(
     std::uintptr_t stream
 ) {
     if (n <= 0) return;
-    auto g_ptr = reinterpret_cast<nv_bfloat16*>(g_bf16);
     auto mid_ptr = reinterpret_cast<uint8_t*>(mid);
     auto out_ptr = reinterpret_cast<uint8_t*>(out);
     int32_t threads = 1024;
@@ -134,6 +129,6 @@ void has_nan_inf_bf16_launcher(
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
     dim3 clamp_grid_size = dim3(min((n + threads - 1) / threads, 1024), 1, 1);
     
-    bmt_has_nan_inf_3<<<clamp_grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, mid_ptr);
-    bmt_has_nan_inf_2<<<1, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(mid_ptr, out_ptr);
+    bmt_has_nan_inf_bf16<<<clamp_grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_bf16, mid_ptr);
+    bmt_has_nan_inf_reduce<<<1, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(mid_ptr, out_ptr);
 }
