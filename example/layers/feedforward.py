@@ -8,9 +8,11 @@ class Feedforward(bmt.DistributedModule):
 
         self.w_in = Linear(dim_model, dim_ff, bias = bias, dtype=dtype)
         self.w_out = Linear(dim_ff, dim_model, bias = bias, dtype=dtype)
+        self.gate = Linear(dim_model, dim_ff, bias = bias, dtype=dtype)
 
         self.relu = torch.nn.ReLU()
     
     def forward(self, input : torch.Tensor) -> torch.Tensor:
-
-        return self.w_out(self.relu(self.w_in(input)))
+#return self.w_out(self.relu(self.w_in(input)))
+        gate_out = self.relu(self.gate(input))
+        return self.w_out(self.w_in(input) * gate_out)
