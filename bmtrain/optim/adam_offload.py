@@ -97,8 +97,6 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
             # wait for transfer to host
             event.synchronize()
 
-            state["step"] += 1
-
             # update parameters
             if param.dtype == torch.float32:
                 state["_grad_fp32"].mul_(1.0 / scale)
@@ -120,14 +118,16 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     amsgrad=False,
                     beta1=beta1,
                     beta2=beta2,
-                    lr=0.0 if state["step"] <= self._hold_steps else lr,
+                    lr=0.0 if state["step"] < self._hold_steps else lr,
                     weight_decay=weight_decay,
                     eps=eps,
                     **other_kwargs
                 )
                 # transfer parameters back to device asynchronously
                 param.copy_(state["_param_fp32"], non_blocking=True)
+                state["step"] += 1
             else:
+                state["step"] += 1
                 if ('maximize' in group) and (group['maximize'] is True):
                     grad = -state["_grad_fp16"]
                 else:
@@ -139,13 +139,14 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     state["exp_avg"].view(-1),
                     state["exp_avg_sq"].view(-1),
                     beta1, beta2,
-                    eps,  0.0 if state["step"] <= self._hold_steps else lr,
+                    eps,  0.0 if state["step"] < self._hold_steps else lr,
                     scale,
                     weight_decay,
                     state["step"]
                 )
                 # transfer parameters back to device asynchronously
                 param.copy_(state["_param_fp16"], non_blocking=True)
+
 
         return loss
 

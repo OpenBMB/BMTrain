@@ -149,20 +149,20 @@ void adam_cpu_0(
 ){
     int64_t span = 1;
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-    for (int64_t j = start; j < end; j += span) {
-        for (int64_t i = j; i < end; i++) {
-            float g = fp16_ieee_to_fp32_value(g_fp16_ptr[i]) / scale;
-            float m = m_fp32_ptr[i];
-            float v = v_fp32_ptr[i];
-            float p = param_fp32_ptr[i];
-            m = beta1 * m + (1 - beta1) * g;
-            v = beta2 * v + (1 - beta2) * g * g;
-            p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
-            param_fp32_ptr[i] = p;
-            param_fp16_ptr[i] = fp16_ieee_from_fp32_value(p);
-            m_fp32_ptr[i] = m;
-            v_fp32_ptr[i] = v;
-                    }
+        for (int64_t j = start; j < end; j += span) {
+            for (int64_t i = j; i < end; i++) {
+                float g = fp16_ieee_to_fp32_value(g_fp16_ptr[i]) / scale;
+                float m = m_fp32_ptr[i];
+                float v = v_fp32_ptr[i];
+                float p = param_fp32_ptr[i];
+                m = beta1 * m + (1 - beta1) * g;
+                v = beta2 * v + (1 - beta2) * g * g;
+                p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
+                param_fp32_ptr[i] = p;
+                param_fp16_ptr[i] = fp16_ieee_from_fp32_value(p);
+                m_fp32_ptr[i] = m;
+                v_fp32_ptr[i] = v;
+            }
             break; // must break here
         }
     });
@@ -184,20 +184,20 @@ void adam_cpu_bf16_0(
 ){
     int64_t span = 1;
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-    for (int64_t j = start; j < end; j += span) {
-        for (int64_t i = j; i < end; i++) {
-            float g = bf16_to_fp32_value(g_bf16_ptr[i]) / scale;
-            float m = m_fp32_ptr[i];
-            float v = v_fp32_ptr[i];
-            float p = param_fp32_ptr[i];
-            m = beta1 * m + (1 - beta1) * g;
-            v = beta2 * v + (1 - beta2) * g * g;
-            p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
-            param_fp32_ptr[i] = p;
-            param_bf16_ptr[i] = bf16_from_fp32_value(p);
-            m_fp32_ptr[i] = m;
-            v_fp32_ptr[i] = v;
-                    }
+        for (int64_t j = start; j < end; j += span) {
+            for (int64_t i = j; i < end; i++) {
+                float g = bf16_to_fp32_value(g_bf16_ptr[i]) / scale;
+                float m = m_fp32_ptr[i];
+                float v = v_fp32_ptr[i];
+                float p = param_fp32_ptr[i];
+                m = beta1 * m + (1 - beta1) * g;
+                v = beta2 * v + (1 - beta2) * g * g;
+                p = p - lr * m  / bias_correction1 / (sqrtf(v / bias_correction2) + eps) - lr * weight_decay * p;
+                param_fp32_ptr[i] = p;
+                param_bf16_ptr[i] = bf16_from_fp32_value(p);
+                m_fp32_ptr[i] = m;
+                v_fp32_ptr[i] = v;
+            }
             break; // must break here
         }
     });
