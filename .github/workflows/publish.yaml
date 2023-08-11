@@ -3,6 +3,7 @@ name: Build and Publish to PyPI
 on:
   push:
     tags:
+
       - "v*.*.*"
 
 jobs:
@@ -10,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['36', '37', '38', '39']
+        python-version: ['37', '38', '39', '310', '311']
 
   
     steps:
@@ -34,20 +35,19 @@ jobs:
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     - name: Pull Docker image
-      run: docker pull maydomine/bmtrain-manylinux:cu110
-
+      run: docker pull pytorch/manylinux-cuda113:latest
     - name: Run Docker image and execute script
       run: |
         version=${{ matrix.python-version }}
-        docker run -e BUILD_DOCKER_ENV=1 -e CUDACXX=/usr/local/cuda/bin/nvcc -e PATH="/workspace/cmake-3.26.4-linux-x86_64/bin:/opt/rh/devtoolset-7/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-7/root/usr/lib64:/opt/rh/devtoolset-7/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i maydomine/bmtrain-manylinux:cu110 /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/python setup.py bdist_wheel -d ./wheel/;/opt/python/cp${version}*/bin/python setup.py sdist -d ./sdist/;for file in wheel/*-linux_x86_64.whl; do mv \"\$file\" \"\${file//-linux_x86_64/-manylinux2014_x86_64}\"; done"
+        docker run -e BUILD_DOCKER_ENV=1 -e CUDACXX=/usr/local/cuda-11.3/bin/nvcc -e PATH="/opt/rh/devtoolset-9/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-9/root/usr/lib64:/opt/rh/devtoolset-9/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i pytorch/manylinux-cuda113:latest /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/pip install build; /opt/python/cp${version}*/bin/python -m build .;for file in dist/*-linux_x86_64.whl; do mv \"\$file\" \"\${file//-linux_x86_64/-manylinux2014_x86_64}\"; done"
         
     - name: Archive distribution files
       uses: actions/upload-artifact@v2
       with:
         name: dist
         path: |
-          sdist/*.tar.gz
-          wheel/*.whl
+          dist/*.tar.gz
+          dist/*.whl
 
   publish:
     needs: build
@@ -73,4 +73,4 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
       run: |
         cd dist
-        python -m twine upload sdist/*.tar.gz wheel/*.whl
+        python -m twine upload *.tar.gz *.whl
