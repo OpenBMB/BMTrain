@@ -11,9 +11,8 @@ def has_inf_nan(g_half: torch.Tensor, out: torch.Tensor) -> None:
     if g_half.dtype == torch.float16:
         C.has_nan_inf_fp16_launcher(g_half.numel(), g_half.data_ptr(), mid.data_ptr(), out.data_ptr(), stream)
     elif g_half.dtype == torch.bfloat16:
-        # print(C.is_bf16_supported())
-        # if not C.is_bf16_supported():
-        #     raise NotImplementedError(f"bfloat16 is not supported on current GPU")
+        if not C.is_bf16_supported():
+            raise NotImplementedError(f"bfloat16 is not supported on current GPU")
         C.has_nan_inf_bf16_launcher(g_half.numel(), g_half.data_ptr(), mid.data_ptr(), out.data_ptr(), stream)
     else:
         raise ValueError(f"has_inf_nan not supported for dtype {g_half.dtype}")
