@@ -10,11 +10,17 @@ class TransformerEncoder(bmt.DistributedModule):
         ) -> None:
         super().__init__()
 
-        self.ln_attn = Layernorm(dim_model, dtype=dtype)
-        self.attn = Attention(dim_model, dim_head, num_heads, bias=bias, dtype=dtype)
+        self.ln_attn = bmt.CheckpointBlock(Layernorm(dim_model, dtype=dtype), use_checkpoint=False)
+        self.attn = bmt.CheckpointBlock(
+                Attention(dim_model, dim_head, num_heads, bias=bias, dtype=dtype),
+                use_checkpoint=False
+                )
 
-        self.ln_ff = Layernorm(dim_model, dtype=dtype)
-        self.ff = Feedforward(dim_model, dim_ff, bias=bias, dtype=dtype)
+        self.ln_ff = bmt.CheckpointBlock(Layernorm(dim_model, dtype=dtype), use_checkpoint=False)
+        self.ff = bmt.CheckpointBlock(
+                Feedforward(dim_model, dim_ff, bias=bias, dtype=dtype),
+                use_checkpoint=True
+            )
     
     def forward(self,
             hidden : torch.Tensor,      # (batch, seq_len, dim_model)
@@ -23,7 +29,7 @@ class TransformerEncoder(bmt.DistributedModule):
         ):
         bmt.inspect.record_tensor(hidden, "hidden")
         x = self.ln_attn(hidden)
-        x = self.attn(x, x, mask)
+        x = self.attn(x, x, mask, position_bias)
         hidden = hidden + x
 
         x = self.ln_ff(hidden)
