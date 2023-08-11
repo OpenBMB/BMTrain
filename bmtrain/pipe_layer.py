@@ -174,8 +174,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
             self._modules[str(layer_id)]._is_last_stage = True if self.stage_id == self.stages-1 else False
             self._modules[str(layer_id)]._is_first_layer = True if i == 0 else False
             self._modules[str(layer_id)]._is_last_layer = True if i == len(self.layer_ids)-1 else False
-            if i > 0:
-                self._modules[str(layer_id)].set_pre_module(self._modules[str(layer_id-1)])
+#if i > 0:
+#self._modules[str(layer_id)].set_pre_module(self._modules[str(layer_id-1)])
 
         self.partition_modules(self.layer_ids)
         self.next_rank = pipe_group[self.pipe_idx, self.stage_id + 1] if self.stage_id < config['pipe_size'] - 1 else -1

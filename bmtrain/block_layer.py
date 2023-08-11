@@ -50,6 +50,32 @@ def _get_param_kw(param : DistributedParameter):
         group_name = "_g_" + param.group
     return type_name + grad_name + group_name
 
+class BMTBlockContext:
+    def __init__(self):
+        self._pre_module = None
+        self._first = True
+
+    def link_module(self, module):
+        if not self._first and module._ref_count == -1:
+            self._pre_module = module
+            module._ref_count = 1
+            return
+            
+        if self._pre_module is None:
+            module._ref_count = 1
+            module._is_first_layer = True
+        else:
+            if module._ref_count == 0:
+                module._is_first_layer = False
+            self._pre_module.set_next_module(module)
+            self._pre_module._is_last_layer = False
+        self._pre_module = module
+        self._first = False
+
+    def clear(self):
+        self._pre_module = None
+        self._first = True
+
 class CheckpointBlock(torch.nn.Module):
     """ A bmtrain block containing two memory-saving methods of ZeRO-2/3 and checkpoint.
 
@@ -68,12 +94,14 @@ class CheckpointBlock(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, block_context=None):
         super().__init__()
         self._module = inner_module
         self._inputs = None
         self._layer_dict = {}
+        self._forward_block_ctx = None
         self._backward_block_ctx = None
+        self._forward_enter_count = 0
         # build large parameter&grad here
         self._param_info = []
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
@@ -194,24 +222,49 @@ class CheckpointBlock(torch.nn.Module):
         self.use_checkpoint = use_checkpoint
         self._is_first_layer = True
         self._is_last_layer = True
-        self._pre_module = None
-        self._next_module = None
+        self._pre_module = []
+        self._next_module = []
+        self._ref_count = 0
         self._mode = "BLOCK" #BLOCK or ZERO or PIPE
         self.return_hidden_states = False
         self.hidden_states = []
+        self.block_context = block_context
+        if block_context is None:
+            self.block_context = config['block_context'][config['rank']]
 
     def set_pre_module(self, module):
-        self._pre_module = module
-        module._next_module = self
+        self._ref_count += 1
+        if module is not None:
+            module._next_module.append(self)
+            self._is_first_layer = False
+            module._is_last_layer = False
+
+    def set_next_module(self, module):
+        self._next_module.append(module)
+        module._ref_count += 1
     
     def forward(self, *args): 
-        #input must be requires_grad, otherwise autograd.backward will make an error
-        args[0].requires_grad_()
-        pre_out = hook_func.PreHookFunc.apply(self, *args)
+        if self._mode != "PIPE":
+            self.block_context.link_module(self)
+
+        grad_tensors = []
+        grad_index = []
+        arg_list = list(args)
+        for i, arg in enumerate(args):
+            if arg is not None and isinstance(arg, torch.Tensor) and arg.requires_grad:
+                grad_tensors.append(arg)
+                grad_index.append(i)
+        grad_tensors = tuple(grad_tensors)
+
+        pre_out = hook_func.PreHookFunc.apply(self, *grad_tensors)
+        for i in range(len(grad_index)):
+            arg_list[grad_index[i]] = pre_out[i]
+
         if self.use_checkpoint:
-            out = checkpoint(self._module, *pre_out)
+            out = checkpoint(self._module, *arg_list)
         else:
-            out = self._module(*pre_out)
+            out = self._module(*arg_list)
+
         tuple_out = (out, ) if isinstance(out, torch.Tensor) else out
         post_out = hook_func.PostHookFunc.apply(self, *tuple_out)
         if isinstance(out, torch.Tensor) and isinstance(post_out, tuple):
@@ -484,8 +537,6 @@ class TransformerBlockList(torch.nn.Module):
 
             self._modules[str(i)] = module
             self.add_module(str(i), module)
-            if i > 0:
-                self._modules[str(i)].set_pre_module(self._modules[str(i-1)])
     
         self.num_hidden = num_hidden
 

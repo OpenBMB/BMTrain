@@ -396,6 +396,7 @@ def test_main(test_fp16=True, test_fp32=True):
     def add_to_check_list(m, l, o):
         key, value = train((m, models[m]), (l, loss_funcs[l]), (o, optimizers[o]))
         ret[key] = value
+        config['block_context'][config['rank']].clear()
 
     if test_fp16:
         kwargs["dtype"] = torch.half

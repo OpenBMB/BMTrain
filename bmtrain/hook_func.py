@@ -10,39 +10,51 @@ def zero_pre_forward(module, inputs):
         enter = module._micro_idx == 0
         pipe = True
     if enter:
-        forward_flag = 1 if config['zero_level'] == 2 else 0
-        module._forward_block_ctx = CheckpointBlockContext(module, module._layer_dict, forward_flag, pipe=pipe)
-        module._forward_block_ctx.enter()
+        zero_level = config['zero_level']
+        forward_flag = 1 if zero_level == 2 else 0
+        if zero_level == 2 and module._ref_count > 1:
+            forward_flag = 2 # repeating forward in same layer
+        module._forward_block_ctx = CheckpointBlockContext(module, module._layer_dict, pipe=pipe)
+        module._forward_block_ctx.enter(forward_flag)
 
 def zero_post_forward(module, inputs, outputs):
+    forward_flag = 1 if config['zero_level'] == 2 else 0
     exit = True
     if module._mode == "PIPE":
         exit = module._micro_idx == config['micros'] - 1
 
     if exit:
-        module._forward_block_ctx.exit()
+        module._forward_block_ctx.exit(forward_flag)
 
 def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if config['zero_level'] == 2 else 0
     if module._mode != "PIPE":
-        module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, backward_flag)
-        module._backward_block_ctx.enter(True)
-        if not module._is_last_layer and module._next_module is not None and module._next_module._backward_block_ctx is not None:
-            module._next_module._backward_block_ctx.exit(True)
-            config['load_stream'].record_event(config['load_event'])
+        module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict)
+        module._backward_block_ctx.enter(backward_flag, True)
+        if not module._is_last_layer and len(module._next_module) > 0 and module._next_module[-1]._backward_block_ctx is not None:
+            if module._next_module[-1]._ref_count == 1:
+                module._next_module[-1]._ref_count = 0
+                module._next_module.pop()._backward_block_ctx.exit(backward_flag, True)
+                config['load_stream'].record_event(config['load_event'])
+            else:
+                module._next_module[-1]._ref_count -= 1
+            
     else:
         if module._micro_idx == config['micros'] - 1:
-            module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, backward_flag, pipe=True)
-            module._backward_block_ctx.enter(True)
+            module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, pipe=True)
+            module._backward_block_ctx.enter(backward_flag, True)
 
 def zero_post_backward(module, grad_inputs, grad_outputs):
+    backward_flag = 2 if config['zero_level'] == 2 else 0
     if module._mode != "PIPE":
-        if module._is_first_layer:
-            module._backward_block_ctx.exit(True)
+        if module._is_first_layer and module._ref_count == 1:
+            module._backward_block_ctx.exit(backward_flag, True)
+            module._ref_count = -1
             config['load_stream'].record_event(config['load_event'])
     else:
         if module._micro_idx == 0:
-            module._backward_block_ctx.exit(True)
+            module._ref_count = -1 if module._is_first_layer else 0
+            module._backward_block_ctx.exit(backward_flag, True)
             config['load_stream'].record_event(config['load_event'])
 
 class PipePreFunction(torch.autograd.Function):

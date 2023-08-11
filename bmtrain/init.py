@@ -7,6 +7,8 @@ from .utils import print_dict
 from .global_var import config
 from . import nccl
 from .synchronize import synchronize
+from .block_layer import BMTBlockContext
+
 def init_distributed(
         init_method : str = "env://",
         seed : int = 0,
@@ -72,6 +74,9 @@ def init_distributed(
     config["zero_level"] = zero_level
     config["topology"] = topology(config)
     config["zero_rank"] = config["topology"].get_group_rank("zero") if pipe_size > 1 else config['rank']
+    config["block_context"] = []
+    for i in range(world_size):
+        config["block_context"].append(BMTBlockContext())
     cpus_this_worker = None
     
     all_available_cpus = sorted(list(os.sched_getaffinity(0)))
