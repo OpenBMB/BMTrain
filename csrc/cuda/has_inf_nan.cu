@@ -1,7 +1,7 @@
 #include <cstdint>
 #include <cuda_fp16.h>
 #if __CUDA_ARCH__ >= 800
-    #include <cuda_bf16.h>
+#include <cuda_bf16.h>
 #endif
 
 namespace{

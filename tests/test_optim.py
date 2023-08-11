@@ -49,12 +49,15 @@ def main(dtype):
     opt4 = bmt.optim.AdamOptimizer(model4.parameters(), lr=1)
     opt5 = bmt.optim.AdamOffloadOptimizer(model5.parameters(), lr=1)
 
+    optim_manager = bmt.optim.OptimManager(loss_scale=4)
+    optim_manager.add_optimizer(opt1)
+    optim_manager.add_optimizer(opt2)
+    optim_manager.add_optimizer(opt3)
+    optim_manager.add_optimizer(opt4)
+    optim_manager.add_optimizer(opt5)
+
     for _ in range(100):
-        opt1.zero_grad()
-        opt2.zero_grad()
-        opt3.zero_grad()
-        opt4.zero_grad()
-        opt5.zero_grad()
+        optim_manager.zero_grad()
 
         for p1, p2, p3, p4, p5 in zip(model1.parameters(), model2.parameters(), model3.parameters(), model4.parameters(), model5.parameters()):
             grad = torch.randn_like(p1)
@@ -64,11 +67,7 @@ def main(dtype):
             p4.grad = grad.float()
             p5.grad = grad.float()
 
-        opt1.step()
-        opt2.step()
-        opt3.step()
-        opt4.step()
-        opt5.step()
+        optim_manager.step()
         torch.cuda.synchronize()
 
         for p1, p2, p3, p4, p5 in zip(model1.parameters(), model2.parameters(), model3.parameters(), model4.parameters(), model5.parameters()):
@@ -85,5 +84,7 @@ def main(dtype):
             assert_lt(diff5, 0.00001)
 
 if __name__ == "__main__":
+    bmt.init_distributed()
     main(torch.float16)
+    print("==============================================================================")
     main(torch.bfloat16)

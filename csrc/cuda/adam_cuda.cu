@@ -1,6 +1,8 @@
-#include <cuda_fp16.h>
-#include <cuda_bf16.h>
 #include <cstdint>
+#include <cuda_fp16.h>
+#if __CUDA_ARCH__ >= 800
+#include <cuda_bf16.h>
+#endif
 
 namespace {
 // blocks <n // 1024>,      threads<min(n, 1024)>
@@ -9,8 +11,8 @@ __global__ void adam_fp32_accum(
     const half *g,        // (n)
     half *m,        // (n)
     float *v,        // (n)
-    float* param,   // (n)
-    half* param_h,  // (n)
+    float *param,   // (n)
+    half *param_h,  // (n)
     float beta1,
     float beta2,
     float eps,
@@ -37,11 +39,11 @@ __global__ void adam_fp32_accum(
 
 __global__ void adam_fp32_accum_bf16(
     int32_t n,
-    const nv_bfloat16 *g,        // (n)
-    nv_bfloat16 *m,        // (n)
+    const std::uintptr_t g_ptr,        // (n)
+    float *m,        // (n)
     float *v,        // (n)
-    float* param,   // (n)
-    nv_bfloat16* param_h,  // (n)
+    float *param,   // (n)
+    std::uintptr_t param_h_ptr,  // (n)
     float beta1,
     float beta2,
     float eps,
@@ -51,21 +53,23 @@ __global__ void adam_fp32_accum_bf16(
     float bias_correction1,
     float bias_correction2
 ) {
+#if __CUDA_ARCH__ >= 800
+    const __nv_bfloat16* g = reinterpret_cast<const __nv_bfloat16*>(g_ptr);
+    __nv_bfloat16* param_h = reinterpret_cast<__nv_bfloat16*>(param_h_ptr);
     int32_t col = blockIdx.x * blockDim.x + threadIdx.x;
-
     if (col < n) {
         float local_g = __bfloat162float(g[col]) / scale; // real_g
-        float local_m = beta1 * __bfloat162float(m[col]) + (1 - beta1) * local_g; // real_m
+        float local_m = beta1 * m[col] + (1 - beta1) * local_g; // real_m
         float local_v = beta2 * v[col] + (1 - beta2) * local_g * local_g; // real_v
         float local_p = param[col];
-        local_p = local_p - lr * local_m / bias_correction1 / (sqrtf(local_v / bias_correction2 / scale) + eps) - lr * weight_decay * local_p; 
+        local_p = local_p - lr * local_m / bias_correction1 / (sqrtf(local_v / bias_correction2) + eps) - lr * weight_decay * local_p; 
     
         param_h[col] = __float2bfloat16(local_p);
         param[col] = local_p;
         v[col] = local_v;
-        m[col] = __float2bfloat16(local_m); 
+        m[col] = local_m; 
     }
-       
+#endif
 }
 
 }
@@ -113,13 +117,11 @@ void adam_bf16_launcher(
     uintptr_t stream
 ) {
     if (n <= 0) return;
-    auto g_ptr = reinterpret_cast<nv_bfloat16*>(g_bf16);
-    auto m_ptr = reinterpret_cast<nv_bfloat16*>(m_fp32);
-    auto param_h_ptr = reinterpret_cast<nv_bfloat16*>(param_bf16);
+    auto m_ptr = reinterpret_cast<float*>(m_fp32);
     auto param_fp32_ptr = reinterpret_cast<float*>(param_fp32);
     auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
     int32_t threads = 1024;
     dim3 block_size = dim3(threads, 1, 1);
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
-    adam_fp32_accum_bf16<<<grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, m_ptr, v_fp32_ptr, param_fp32_ptr, param_h_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
+    adam_fp32_accum_bf16<<<grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_bf16, m_ptr, v_fp32_ptr, param_fp32_ptr, param_bf16, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
 }
