@@ -7,11 +7,7 @@ from .utils import print_dict
 import ctypes
 from .global_var import config
 
-try:
-    from . import nccl
-except:
-    from .utils import load_nccl_pypi
-    load_nccl_pypi()
+from . import nccl
 from .synchronize import synchronize
 
 
