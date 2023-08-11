@@ -9,7 +9,7 @@ class TestSubModule(bmt.DistributedModule):
         self.fc1 = bmt.BMTrainModelWrapper(torch.nn.Linear(768, 3072))
         self.fc2 = bmt.BMTrainModelWrapper(torch.nn.Linear(3072, 1024))
         self.fc3 = bmt.BMTrainModelWrapper(torch.nn.Linear(1024, 768))
-        self.param = bmt.DistributedParameter(torch.empty(1237))
+        self.param = bmt.DistributedParameter(torch.zeros(1237))
         self.fc4 = bmt.BMTrainModelWrapper(torch.nn.Linear(768, 300))
         self.fc5 = bmt.BMTrainModelWrapper(torch.nn.Linear(300, 768))
         self.dropout = torch.nn.Dropout(0.0)
