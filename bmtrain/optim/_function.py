@@ -25,7 +25,12 @@ def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.T
     assert param_fp32.numel() == v_fp32.numel(), "param_fp32 and v_fp32 must have the same number of elements"
     bias_correction1 = 1 - beta1 ** step
     bias_correction2 = 1 - beta2 ** step
-    launcher = C.adam_cpu_launcher if g_fp16.dtype == torch.float16 else C.adam_cpu_bf16_launcher
+    if g_fp16.dtype == torch.float16:
+        launcher = C.adam_cpu_fp16_launcher
+    elif g_fp16.dtype == torch.bfloat16:
+        if not C.is_bf16_supported():
+            raise NotImplementedError(f"bfloat16 is not supported on current GPU")
+        launcher = C.adam_cpu_bf16_launcher
     launcher(
         param_fp32.numel(),
         param_fp32.data_ptr(),
@@ -61,7 +66,7 @@ def adam_fp16(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.
     bias_correction1 = 1 - beta1 ** step
     bias_correction2 = 1 - beta2 ** step
     stream = torch.cuda.current_stream().cuda_stream
-    C.adam_launcher(
+    C.adam_fp16_launcher(
         param_fp32.numel(),
         param_fp32.data_ptr(),
         param_fp16.data_ptr(),
@@ -97,6 +102,8 @@ def adam_bf16(param_fp32: torch.Tensor, param_bf16: torch.Tensor, g_bf16: torch.
     bias_correction1 = 1 - beta1 ** step
     bias_correction2 = 1 - beta2 ** step
     stream = torch.cuda.current_stream().cuda_stream
+    if not C.is_bf16_supported():
+        raise NotImplementedError(f"bfloat16 is not supported on current GPU")
     C.adam_bf16_launcher(
         param_fp32.numel(),
         param_fp32.data_ptr(),

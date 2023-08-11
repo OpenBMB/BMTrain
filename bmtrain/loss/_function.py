@@ -9,8 +9,11 @@ def has_inf_nan(g_half: torch.Tensor, out: torch.Tensor) -> None:
     mid = torch.zeros(1024, device=out.device, dtype=out.dtype)
     stream = torch.cuda.current_stream().cuda_stream
     if g_half.dtype == torch.float16:
-        C.has_nan_inf_launcher(g_half.numel(), g_half.data_ptr(), mid.data_ptr(), out.data_ptr(), stream)
+        C.has_nan_inf_fp16_launcher(g_half.numel(), g_half.data_ptr(), mid.data_ptr(), out.data_ptr(), stream)
     elif g_half.dtype == torch.bfloat16:
+        # print(C.is_bf16_supported())
+        # if not C.is_bf16_supported():
+        #     raise NotImplementedError(f"bfloat16 is not supported on current GPU")
         C.has_nan_inf_bf16_launcher(g_half.numel(), g_half.data_ptr(), mid.data_ptr(), out.data_ptr(), stream)
     else:
         raise ValueError(f"has_inf_nan not supported for dtype {g_half.dtype}")
@@ -21,9 +24,7 @@ def cross_entropy_forward(m: int, n: int, input: torch.Tensor, target: torch.Ten
     CHECK_INPUT(target)
     CHECK_INPUT(softmax)
     CHECK_INPUT(output)
-    assert input.dtype == torch.float16, "input must be a half tensor"
     assert target.dtype == torch.int32, "target must be an int tensor"
-    assert softmax.dtype == torch.float16, "softmax must be a half tensor"
     assert output.dtype == torch.float32, "output must be a float tensor"
     assert input.numel() == softmax.numel(), "input and softmax must have the same number of elements"
     assert target.numel() == output.numel(), "target and output must have the same number of elements"
@@ -32,43 +33,14 @@ def cross_entropy_forward(m: int, n: int, input: torch.Tensor, target: torch.Ten
     softmax_ptr = softmax.data_ptr()
     output_ptr = output.data_ptr()
     cuda_stream = torch.cuda.current_stream().cuda_stream
-    C.cross_entropy_forward_launcher(m, n, input_ptr, target_ptr, softmax_ptr, output_ptr, ignore_index, cuda_stream)
-
-def cross_entropy_backward(m: int, n: int, grad_output: torch.Tensor, target: torch.Tensor,
-                             softmax: torch.Tensor, grad_input: torch.Tensor, ignore_index: int) -> None:
-    CHECK_INPUT(grad_output)
-    CHECK_INPUT(target)
-    CHECK_INPUT(softmax)
-    CHECK_INPUT(grad_input)
-    assert grad_output.dtype == torch.float32, "grad_output must be a float tensor"
-    assert target.dtype == torch.int32, "target must be an int tensor"
-    assert softmax.dtype == torch.float16, "softmax must be a half tensor"
-    assert grad_input.dtype == torch.float16, "grad_input must be a half tensor"
-    assert grad_input.numel() == softmax.numel(), "grad_input and softmax must have the same number of elements"
-    assert target.numel() == grad_output.numel(), "target and grad_output must have the same number of elements"
-    grad_output_ptr = grad_output.data_ptr()
-    target_ptr = target.data_ptr()
-    softmax_ptr = softmax.data_ptr()
-    grad_input_ptr = grad_input.data_ptr()
-    cuda_stream = torch.cuda.current_stream().cuda_stream
-    C.cross_entropy_backward_launcher(m, n, grad_output_ptr, target_ptr, softmax_ptr, grad_input_ptr, ignore_index, cuda_stream)
-
-def cross_entropy_forward_inplace(m: int, n: int, x: torch.Tensor, target: torch.Tensor,
-                                    output: torch.Tensor, ignore_index: int) -> None:
-    CHECK_INPUT(x)
-    CHECK_INPUT(target)
-    CHECK_INPUT(output)
-    assert x.dtype == torch.float16, "x must be a half tensor"
-    assert target.dtype == torch.int32, "target must be an int tensor"
-    assert output.dtype == torch.float32, "output must be a float tensor"
-    assert target.numel() == output.numel(), "target and output must have the same number of elements"
-    cuda_stream = torch.cuda.current_stream().cuda_stream
-    x_ptr = x.data_ptr()
-    output_ptr = output.data_ptr()
-    target_ptr = target.data_ptr()
-    output_ptr = output.data_ptr()
-    
-    C.cross_entropy_forward_inplace_launcher(m, n, x_ptr, target_ptr, output_ptr, ignore_index, cuda_stream)
+    if input.dtype == torch.float16:
+        C.cross_entropy_forward_fp16_launcher(m, n, input_ptr, target_ptr, softmax_ptr, output_ptr, ignore_index, cuda_stream)
+    elif input.dtype == torch.bfloat16:
+        if not C.is_bf16_supported():
+            raise NotImplementedError(f"bfloat16 is not supported on current GPU")
+        C.cross_entropy_forward_bf16_launcher(m, n, input_ptr, target_ptr, softmax_ptr, output_ptr, ignore_index, cuda_stream)
+    else:
+        raise ValueError(f"cross_entropy_forward not supported for dtype {input.dtype}")
 
 def cross_entropy_backward_inplace(m: int, n: int, grad_output: torch.Tensor, target: torch.Tensor,
                                      x: torch.Tensor, ignore_index: int) -> None:
@@ -77,12 +49,17 @@ def cross_entropy_backward_inplace(m: int, n: int, grad_output: torch.Tensor, ta
     CHECK_INPUT(x)
     assert grad_output.dtype == torch.float32, "grad_output must be a float tensor"
     assert target.dtype == torch.int32, "target must be an int tensor"
-    assert x.dtype == torch.float16, "x must be a half tensor"
     assert target.numel() == grad_output.numel(), "target and grad_output must have the same number of elements"
     cuda_stream = torch.cuda.current_stream().cuda_stream
     grad_output_ptr = grad_output.data_ptr()
     target_ptr = target.data_ptr()
     x_ptr = x.data_ptr()
 
-    C.cross_entropy_backward_inplace_launcher(m, n, grad_output_ptr, target_ptr, x_ptr, ignore_index, cuda_stream)
-
+    if x.dtype == torch.float16:
+        C.cross_entropy_backward_inplace_fp16_launcher(m, n, grad_output_ptr, target_ptr, x_ptr, ignore_index, cuda_stream)
+    elif x.dtype == torch.bfloat16:
+        if not C.is_bf16_supported():
+            raise NotImplementedError(f"bfloat16 is not supported on current GPU")
+        C.cross_entropy_backward_inplace_bf16_launcher(m, n, grad_output_ptr, target_ptr, x_ptr, ignore_index, cuda_stream)
+    else:
+        raise ValueError(f"cross_entropy_backward not supported for dtype {input.dtype}")

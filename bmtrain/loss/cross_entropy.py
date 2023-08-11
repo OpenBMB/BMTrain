@@ -32,36 +32,6 @@ class OpFusedCrossEntropy(torch.autograd.Function):
         )
         return (softmax, None, None)
 
-class OpFusedCrossEntropyInplace(torch.autograd.Function):
-    """
-    CrossEntropy dim = 1
-    """
-    @staticmethod
-    def forward(ctx, x : torch.Tensor, target : torch.Tensor, ignore_index: int):
-        assert x.ndim == 2
-        out = torch.empty(x.size(0), device=x.device, dtype=torch.float)
-        F.cross_entropy_forward_inplace(
-            x.size(0), x.size(1),
-            x, target,
-            out,
-            ignore_index,
-        ) # x is inplace modify to softmax result
-        ctx.ignore_index = ignore_index
-        ctx.save_for_backward(x, target)
-        return out # float tensor
-        
-    @staticmethod
-    def backward(ctx, grad_output : torch.Tensor):
-        grad_output = grad_output.contiguous()
-        softmax, target = ctx.saved_tensors
-        F.cross_entropy_backward_inplace(
-            softmax.size(0), softmax.size(1),
-            grad_output, target,
-            softmax,
-            ctx.ignore_index,
-        ) # softmax is inplace modify to grad_input
-        return (softmax, None, None)
-
 class FusedCrossEntropy(torch.nn.Module):
     r"""This criterion computes the cross entropy loss between input and target.
 
@@ -175,20 +145,15 @@ class FusedCrossEntropy(torch.nn.Module):
                  ignore_index: int = -100,
                  reduction: str = 'mean',
                  label_smoothing: float = 0.0, # TODO not supported yet
-                 inplace: bool = False,
                 ) -> None:
         super().__init__()
         self.weight = weight
         self.ignore_index = ignore_index
         self.reduction = reduction
         self.label_smoothing = label_smoothing
-        self.inplace = inplace
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        if self.inplace:
-            ret = OpFusedCrossEntropyInplace.apply(input, target.int(), self.ignore_index) # return float tensor
-        else:
-            ret = OpFusedCrossEntropy.apply(input, target.int(), self.ignore_index) # return float tensor
+        ret = OpFusedCrossEntropy.apply(input, target.int(), self.ignore_index) # return float tensor
 
         if self.weight is not None:
             if self.weight.dim() != 1 or self.weight.size(0) != input.size(1):

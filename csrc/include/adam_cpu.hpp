@@ -340,7 +340,7 @@ static void __attribute__ ((__target__ ("avx512f"))) adam_cpu_2(
     });
 }
 
-void adam_cpu_launcher(
+void adam_cpu_fp16_launcher(
     int64_t n,
     std::uintptr_t param_fp32,
     std::uintptr_t param_fp16,

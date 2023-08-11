@@ -1,8 +1,8 @@
 #include <cstdint>
+#include <cstdio>
+#include <cuda.h>
 #include <cuda_fp16.h>
-#if __CUDA_ARCH__ >= 800
-#include <cuda_bf16.h>
-#endif
+#include "bfloat16.cuh"
 
 namespace{
 __inline__ __device__ bool isnan_(half v) {
@@ -72,7 +72,7 @@ __global__ void bmt_has_nan_inf_bf16(
     const uintptr_t inp,        // (n,) 
     uint8_t* mid            // (1024,)
 ) {
-#if __CUDA_ARCH__ >= 800
+#ifdef BF16_SUPPORT
     const __nv_bfloat16* bf_inp = reinterpret_cast<const __nv_bfloat16*>(inp);
     int32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     int32_t span = blockDim.x * gridDim.x;
@@ -80,7 +80,11 @@ __global__ void bmt_has_nan_inf_bf16(
     int8_t r = 0;
     for (int i = gid; i < n; i += span) {
         __nv_bfloat16 v = bf_inp[i];
+        #if __CUDA_ARCH__ >= 800
         if (__hisinf(v) || __hisnan(v)) { 
+        #else
+        if (isinf(__bfloat162float(v)) || isnan(__bfloat162float(v))) {
+        #endif
             r = 1;
             break;
         }
@@ -94,7 +98,7 @@ __global__ void bmt_has_nan_inf_bf16(
 
 }
 
-void has_nan_inf_launcher(
+void has_nan_inf_fp16_launcher(
     int32_t n,
     std::uintptr_t g_fp16,
     std::uintptr_t mid,
@@ -131,4 +135,11 @@ void has_nan_inf_bf16_launcher(
     
     bmt_has_nan_inf_bf16<<<clamp_grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_bf16, mid_ptr);
     bmt_has_nan_inf_reduce<<<1, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(mid_ptr, out_ptr);
+}
+
+int is_bf16_supported() {
+#ifdef BF16_SUPPORT
+    return 1;
+#endif
+    return 0;
 }

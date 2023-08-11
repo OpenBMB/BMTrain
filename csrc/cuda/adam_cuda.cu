@@ -1,8 +1,7 @@
 #include <cstdint>
+#include <cuda.h>
 #include <cuda_fp16.h>
-#if __CUDA_ARCH__ >= 800
-#include <cuda_bf16.h>
-#endif
+#include "bfloat16.cuh"
 
 namespace {
 // blocks <n // 1024>,      threads<min(n, 1024)>
@@ -53,7 +52,7 @@ __global__ void adam_fp32_accum_bf16(
     float bias_correction1,
     float bias_correction2
 ) {
-#if __CUDA_ARCH__ >= 800
+#ifdef BF16_SUPPORT
     const __nv_bfloat16* g = reinterpret_cast<const __nv_bfloat16*>(g_ptr);
     __nv_bfloat16* param_h = reinterpret_cast<__nv_bfloat16*>(param_h_ptr);
     int32_t col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -74,7 +73,7 @@ __global__ void adam_fp32_accum_bf16(
 
 }
 
-void adam_launcher(
+void adam_fp16_launcher(
     int n,
     std::uintptr_t param_fp32,
     std::uintptr_t param_fp16,

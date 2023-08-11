@@ -87,4 +87,7 @@ if __name__ == "__main__":
     bmt.init_distributed()
     main(torch.float16)
     print("==============================================================================")
-    main(torch.bfloat16)
+    try:
+        main(torch.bfloat16)
+    except NotImplementedError: 
+        pass
