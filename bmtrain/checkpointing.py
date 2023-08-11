@@ -33,20 +33,19 @@ class ScopedTensorInspectorContext:
         self.prev_hidden = None
 
 class CheckpointBlockContext:
-    def __init__(self, block : 'CheckpointBlock', ctx_dict : dict = None, flag : int = 0, pipe = False) -> None:
+    def __init__(self, block : 'CheckpointBlock', ctx_dict : dict = None, pipe = False) -> None:
         self.block = block
         self.ctx_dict = ctx_dict
         self._param_buffer = {}
         self._grad_buffer = {}
         self._param_tensor = {}
         self._grad_tensor = {}
-        self.flag = flag
         self._need_release = False
         if pipe:
             self.comm = config["zero_comm"] 
         else:
             self.comm = config["comm"]
-    def enter(self, requires_grad=False):
+    def enter(self, flag=0, requires_grad=False):
         """
         gather parameters
         """
@@ -64,14 +63,14 @@ class CheckpointBlockContext:
                 local_param = self.block._storage_params[kw]    
            
                 storage_type = local_param.storage_type()
-                if self.flag != 2:
+                if flag != 2:
                     self._param_buffer[kw] = storage_type(val["partition_size"] * val["world_size"])
                     self._param_tensor[kw] = torch.tensor([], dtype=self._param_buffer[kw].dtype, device=self._param_buffer[kw].device).set_(self._param_buffer[kw])
 
                 if requires_grad and local_param.requires_grad:
                     self._grad_buffer[kw] = storage_type(val["partition_size"] * val["world_size"])
                     self._grad_tensor[kw] = torch.tensor([], dtype=self._grad_buffer[kw].dtype, device=self._grad_buffer[kw].device).set_(self._grad_buffer[kw]).zero_()
-            if self.flag != 2:
+            if flag != 2:
                 nccl.groupStart()
                 for kw, val in self.block._storage_info.items():
                     nccl.allGather(
@@ -86,7 +85,7 @@ class CheckpointBlockContext:
         
         # set wait stream for each storage
         for kw in self.block._storage_info.keys():
-            if self.flag != 2:
+            if flag != 2:
                 self._param_tensor[kw].record_stream(current_stream)
             if requires_grad and kw in self._grad_tensor:
                 self._grad_tensor[kw].record_stream(current_stream)
@@ -97,7 +96,7 @@ class CheckpointBlockContext:
             offset = param["offset"]
             shape = param["shape"]
 
-            if self.flag != 2:
+            if flag != 2:
                 dtype = self._param_buffer[kw_name].dtype
                 device = self._param_buffer[kw_name].device
                 param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self._param_buffer[kw_name], offset, shape)                
@@ -112,7 +111,7 @@ class CheckpointBlockContext:
     def __enter__(self):
         self.enter()
     
-    def exit(self, backward=False):
+    def exit(self, flag=0, backward=False):
         """
         Reduce scatter gradients
         """
@@ -171,7 +170,7 @@ class CheckpointBlockContext:
             param["parameter"].data = torch.tensor([], dtype=dtype, device=device).set_(self.block._storage_params[kw_name].storage(), begin, end)
             if param["parameter"].requires_grad and self.block._storage_params[kw_name].grad is not None:
                 param["parameter"].grad = torch.tensor([], dtype=dtype, device=device).set_(self.block._storage_params[kw_name].grad.storage(), begin, end)
-        if self.flag == 1:
+        if flag == 1:
             for i in self._param_buffer:
                 self.ctx_dict[i] = self._param_buffer[i]
         self._grad_tensor = {}
