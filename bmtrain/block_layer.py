@@ -72,6 +72,10 @@ class BMTBlockContext:
         self._pre_module = module
         self._first = False
 
+    def clear(self):
+        self._pre_module = None
+        self._first = True
+
 class CheckpointBlock(torch.nn.Module):
     """ A bmtrain block containing two memory-saving methods of ZeRO-2/3 and checkpoint.
 
