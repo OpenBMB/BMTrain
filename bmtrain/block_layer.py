@@ -242,11 +242,10 @@ class CheckpointBlock(torch.nn.Module):
     def set_next_module(self, module):
         self._next_module.append(module)
         module._ref_count += 1
-    
-    def forward(self, *args): 
+
+    def pre_hook(self, *args):
         if self._mode != "PIPE":
             self.block_context.link_module(self)
-
         grad_tensors = []
         grad_index = []
         arg_list = list(args)
@@ -259,12 +258,9 @@ class CheckpointBlock(torch.nn.Module):
         pre_out = hook_func.PreHookFunc.apply(self, *grad_tensors)
         for i in range(len(grad_index)):
             arg_list[grad_index[i]] = pre_out[i]
+        return arg_list
 
-        if self.use_checkpoint:
-            out = checkpoint(self._module, *arg_list)
-        else:
-            out = self._module(*arg_list)
-
+    def post_hook(self, out):
         tuple_out = (out, ) if isinstance(out, torch.Tensor) else out
         post_out = hook_func.PostHookFunc.apply(self, *tuple_out)
         if isinstance(out, torch.Tensor) and isinstance(post_out, tuple):
@@ -273,6 +269,16 @@ class CheckpointBlock(torch.nn.Module):
         if isinstance(post_out, list):
             return tuple(post_out)
         return post_out
+
+    def forward(self, *args): 
+        arg_list = self.pre_hook(*args)
+
+        if self.use_checkpoint:
+            out = checkpoint(self._module, *arg_list)
+        else:
+            out = self._module(*arg_list)
+
+        return self.post_hook(out)
 
     def __getattr__(self,name:str):
         if name=="_module":
