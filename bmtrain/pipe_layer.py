@@ -196,6 +196,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         batch_size = hidden_state.shape[0]
         num_micros = config["micros"]
         args = args + (batch_related, )
+        hidden_state.requires_grad_()
         hidden_state_list, args_list = PipePreFunction.apply(hidden_state, *args)
 
         hidden_state_list = hidden_state_list.flatten(0, 1).chunk(num_micros, dim=0)

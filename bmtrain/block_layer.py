@@ -254,12 +254,14 @@ class CheckpointBlock(torch.nn.Module):
         for i in range(len(grad_index)):
             arg_list[grad_index[i]] = pre_out[i]
 
-        if len(grad_tensors) == 0:
-            for param in self.parameters():
-                if param.requires_grad:
-                    param.register_hook(lambda grad: hook_func.zero_post_backward(self, grad, None))
+        if self._mode != "PIPE" and len(grad_tensors) == 0:
+            for param in self._param_info:
+                if param['parameter'].requires_grad:
+                    param['parameter'].register_hook(lambda grad: hook_func.zero_post_backward(self, grad, None))
                     break
             self.all_input_no_grad = True
+        else:
+            self.all_input_no_grad = False
         return arg_list
 
     def post_hook(self, out):
