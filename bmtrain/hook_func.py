@@ -51,6 +51,8 @@ def zero_post_backward(module, grad_inputs, grad_outputs):
             module._backward_block_ctx.exit(backward_flag, True)
             module._ref_count = -1
             config['load_stream'].record_event(config['load_event'])
+        if not module._is_first_layer and len(module._pre_module) > 0:
+            module._pre_module.pop()
     else:
         if module._micro_idx == 0:
             module._ref_count = -1 if module._is_first_layer else 0
