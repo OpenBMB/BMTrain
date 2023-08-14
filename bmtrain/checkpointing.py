@@ -163,8 +163,7 @@ class CheckpointBlockContext:
             device = self.block._storage_params[kw_name].device
             if "begin" not in param:
                 param["parameter"].data = torch.tensor([], dtype=dtype, device=device)
-                if not param['parameter'].requires_grad:
-                    param["parameter"].grad = None
+                param["parameter"].grad = None
                 continue
             begin = param["begin"]
             end = param["end"]
