@@ -32,7 +32,6 @@ class Linear(bmt.DistributedModule):
 
 def run(m, a, b):
     inp = torch.rand((1, 10, 256)).cuda()*100
-    inp.requires_grad_()
     bias = torch.rand(256).cuda()*100
     logits = m(inp, bias)
     loss = logits.sum()

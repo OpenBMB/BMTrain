@@ -231,6 +231,7 @@ class CheckpointBlock(torch.nn.Module):
         self.block_context = block_context
         if block_context is None:
             self.block_context = config['block_context'][config['rank']]
+        self.all_input_no_grad = False
 
     def set_pre_module(self, module):
         self._ref_count += 1
@@ -258,6 +259,13 @@ class CheckpointBlock(torch.nn.Module):
         pre_out = hook_func.PreHookFunc.apply(self, *grad_tensors)
         for i in range(len(grad_index)):
             arg_list[grad_index[i]] = pre_out[i]
+
+        if len(grad_tensors) == 0:
+            for param in self.parameters():
+                if param.requires_grad:
+                    param.register_hook(lambda grad: hook_func.zero_post_backward(self, grad, None))
+                    break
+            self.all_input_no_grad = True
         return arg_list
 
     def post_hook(self, out):
@@ -274,7 +282,7 @@ class CheckpointBlock(torch.nn.Module):
         arg_list = self.pre_hook(*args)
 
         if self.use_checkpoint:
-            out = checkpoint(self._module, *arg_list)
+            out = checkpoint(self._module, *arg_list, use_reentrant=False)
         else:
             out = self._module(*arg_list)
 
