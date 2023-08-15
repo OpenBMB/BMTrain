@@ -94,7 +94,7 @@ class CheckpointBlock(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, block_context=None):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, block_context=None, use_offload=False):
         super().__init__()
         self._module = inner_module
         self._inputs = None
@@ -107,9 +107,9 @@ class CheckpointBlock(torch.nn.Module):
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
         self._storage_info = {}
         self._ready = False
-        # sort parameters by name
+        # sort parameters by nam_next_modulee
         ordered_parameters = list(self._module.named_parameters())
-
+        assert not (use_checkpoint and use_offload)
         # calc total number of parameters
         for name, param in ordered_parameters:
             if not isinstance(param, DistributedParameter):
@@ -226,22 +226,20 @@ class CheckpointBlock(torch.nn.Module):
         self._next_module = []
         self._ref_count = 0
         self._mode = "BLOCK" #BLOCK or ZERO or PIPE
+        if use_offload:
+            self._mode = "OFFLOAD"
+            self._on_device = False
         self.return_hidden_states = False
         self.hidden_states = []
         self.block_context = block_context
         if block_context is None:
             self.block_context = config['block_context'][config['rank']]
 
-    def set_pre_module(self, module):
-        self._ref_count += 1
-        if module is not None:
-            module._next_module.append(self)
-            self._is_first_layer = False
-            module._is_last_layer = False
 
     def set_next_module(self, module):
         self._next_module.append(module)
         module._ref_count += 1
+        module._pre_module.append(self)
     
     def forward(self, *args): 
         if self._mode != "PIPE":
@@ -531,10 +529,8 @@ class TransformerBlockList(torch.nn.Module):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
 
-            module._mode = "ZERO"
             module._is_last_layer = True if i == len(modules) -1 else False
             module._is_first_layer = True if i == 0 else False
-
             self._modules[str(i)] = module
             self.add_module(str(i), module)
     

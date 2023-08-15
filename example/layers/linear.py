@@ -5,12 +5,14 @@ import bmtrain as bmt
 class CustomLinear(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, weight, bias=None):
-        ctx.save_for_backward(x, weight, bias)
+        ctx.input = {"input":x}
+        ctx.save_for_backward( weight, bias)
         return F.linear(x, weight, bias)
 
     @staticmethod
     def backward(ctx, grad_output):
-        x, weight, bias = ctx.saved_tensors
+        x = ctx.input["input"]
+        weight, bias = ctx.saved_tensors
         grad_x = grad_weight = grad_bias = None
         if x.requires_grad:
             grad_x = grad_output.matmul(weight)

@@ -27,8 +27,8 @@ for i in range(10), :
                     ) 
             )
 
-#linears = bmt.TransformerBlockList(linears)
-linears = torch.nn.ModuleList(linears)
+linears = bmt.TransformerBlockList(linears)
+# linears = torch.nn.ModuleList(linears)
 
 optimizer = bmt.optim.AdamOffloadOptimizer(linears.parameters(), weight_decay=1e-2)
 lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)

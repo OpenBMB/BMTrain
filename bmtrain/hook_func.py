@@ -2,10 +2,87 @@ import torch
 from .global_var import config
 from .checkpointing import CheckpointBlockContext
 from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
+from collections import deque
+
+def wrapper(module_name,act_cuda_dict):
+    def fn(m,inps,out):
+        inp = inps[0]
+        act_cuda_dict[module_name] = {}
+        act_cuda_dict[module_name]['shape'] = tuple(inp.shape)
+        act_cuda_dict[module_name]['numel'] = inp.numel()
+        act_cuda_dict[module_name]['inp'] = inp
+        act_cuda_dict[module_name]['dtype'] = inp.dtype 
+    return fn
+    
+def nearest_offload_module(module):
+    if module._mode == "OFFLOAD":
+        return [module]
+    queue = deque([(module, 0)])  # 使用队列来进行广度优先搜索
+    nearest_modules = []
+    nearest_depth = float('inf')
+    
+    while queue:
+        curr_module, curr_depth = queue.popleft()
+        
+        if curr_depth > nearest_depth:
+            break
+        
+        for m in curr_module._pre_module:
+            if m._mode == "OFFLOAD":
+                if curr_depth < nearest_depth:
+                    nearest_modules = [m]
+                    nearest_depth = curr_depth
+                elif curr_depth == nearest_depth:
+                    nearest_modules.append(m)
+            else:
+                queue.append((m, curr_depth + 1))
+    
+    return nearest_modules
+
+def make_cpu_storage(_act_cuda_dict, _offload_dict):
+    fp16_total = sum([v['numel'] for v in _act_cuda_dict.values() if v['dtype'] == torch.float16])
+    fp32_total = sum([v['numel'] for v in _act_cuda_dict.values() if v['dtype'] == torch.float32])
+    fp16_storage = torch.HalfStorage(fp16_total).pin_memory()
+    fp32_storage = torch.FloatStorage(fp32_total).pin_memory()
+    fp16_offset = 0
+    fp32_offset = 0
+    for key,val in _act_cuda_dict.items():
+        if val['dtype'] == torch.float16:
+            _offload_dict[key] = {}
+            _offload_dict[key]['inp'] = torch.tensor([], dtype=torch.float16, device="cpu") \
+                                        .set_(fp16_storage, fp16_offset, val['shape'])
+
+            fp16_offset += _act_cuda_dict[key]['numel']
+        elif val['dtype'] == torch.float32:
+            _offload_dict[key]['inp'] = torch.tensor([], dtype=torch.float32, device="cpu") \
+                                        .set_(fp32_storage, fp32_offset, val['shape'])
+
+            fp32_offset += _act_cuda_dict[key]['numel']
+def d2h_memcpy(_act_cuda_dict, _offload_dict):
+    for key,val in _act_cuda_dict.items():
+        shape, inp = val['shape'],val['inp']
+        cpu_inp = _offload_dict[key]['inp']
+        _offload_dict[key]['inp'] = cpu_inp.copy_(inp, non_blocking=True)
+
+def h2d_memcpy(_act_cuda_dict, _offload_dict):
+    for key,val in _act_cuda_dict.items():
+        shape, cuda_inp = val['shape'],val['inp']
+        cpu_inp = _offload_dict[key]['inp']
+        cuda_stor = cuda_inp.storage_type()(val['numel'])
+        cuda_inp.set_(cuda_stor, 0, shape)
+        cuda_inp.copy_(cpu_inp, non_blocking=True)
 
 def zero_pre_forward(module, inputs):
     enter = True
     pipe = False
+
+    if module._mode == "OFFLOAD":
+        act_dict = {}
+        for name, sub_module in module.named_modules():
+            if sub_module.__class__.__name__ == "Linear":
+                fn = wrapper(name, act_dict)
+                sub_module.register_forward_hook(fn)
+        module._act_cuda_dict = act_dict
     if module._mode == "PIPE":
         enter = module._micro_idx == 0
         pipe = True
@@ -22,13 +99,35 @@ def zero_post_forward(module, inputs, outputs):
     exit = True
     if module._mode == "PIPE":
         exit = module._micro_idx == config['micros'] - 1
-
+    elif module._mode == "OFFLOAD":
+        current_stream = torch.cuda.current_stream()
+        current_stream.wait_stream(config["calc_stream"])
+        if not hasattr(module, "_offload_dict"):
+            module._offload_dict = {}
+            make_cpu_storage(module._act_cuda_dict, module._offload_dict)
+        with torch.cuda.stream(config["offload_stream"]):
+            d2h_memcpy(module._act_cuda_dict, module._offload_dict)
+        current_stream = torch.cuda.current_stream()
+        current_stream.wait_stream(config["offload_stream"])
+        for key,val in module._act_cuda_dict.items():
+            module._act_cuda_dict[key]['inp'].data = torch.tensor([],dtype=val['inp'].dtype,device=val['inp'].device)
     if exit:
         module._forward_block_ctx.exit(forward_flag)
 
 def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if config['zero_level'] == 2 else 0
     if module._mode != "PIPE":
+        if module._mode != "OFFLOAD":
+            count = len([m for m in module._pre_module if m._mode=="OFFLOAD"])
+            if module._is_last_layer or module._next_module[0]._mode == "OFFLOAD":
+                for pre_module in nearest_offload_module(module):
+                    if pre_module._mode == "OFFLOAD":
+                        pre_module._on_device = True
+                        with torch.cuda.stream(config["offload_stream"]):
+                            h2d_memcpy(pre_module._act_cuda_dict, pre_module._offload_dict)
+        else:
+            current_stream = torch.cuda.current_stream()
+            current_stream.wait_stream(config["offload_stream"])
         module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict)
         module._backward_block_ctx.enter(backward_flag, True)
         if not module._is_last_layer and len(module._next_module) > 0 and module._next_module[-1]._backward_block_ctx is not None:
@@ -38,7 +137,6 @@ def zero_pre_backward(module, grad_outputs):
                 config['load_stream'].record_event(config['load_event'])
             else:
                 module._next_module[-1]._ref_count -= 1
-            
     else:
         if module._micro_idx == config['micros'] - 1:
             module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, pipe=True)
@@ -47,6 +145,16 @@ def zero_pre_backward(module, grad_outputs):
 def zero_post_backward(module, grad_inputs, grad_outputs):
     backward_flag = 2 if config['zero_level'] == 2 else 0
     if module._mode != "PIPE":
+        if not module._is_first_layer and len(module._pre_module) > 0:
+            module._pre_module.pop()
+        if module._mode == "OFFLOAD":
+            module._on_device = False
+            current_stream = torch.cuda.current_stream()
+            current_stream.wait_stream(config["calc_stream"])
+            with torch.cuda.stream(config["offload_stream"]):
+                for key,val in module._act_cuda_dict.items():
+                    inp = val['inp']
+                    inp.data = torch.tensor([], dtype=inp.dtype, device=inp.device)
         if module._is_first_layer and module._ref_count == 1:
             module._backward_block_ctx.exit(backward_flag, True)
             module._ref_count = -1

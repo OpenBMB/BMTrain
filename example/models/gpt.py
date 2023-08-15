@@ -15,10 +15,13 @@ class GPT(bmt.DistributedModule):
 
         self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         self.pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
-        
-        self.transformers = torch.nn.ModuleList([
-            TransformerEncoder(
-                dim_model, dim_head, num_heads, dim_ff, bias, dtype
+        ckpt_mask = [True for i in range(num_layers)] 
+        offload_mask = [False for i in range(num_layers)]
+        self.transformers = bmt.TransformerBlockList([
+            bmt.CheckpointBlock(
+                TransformerEncoder(
+                    dim_model, dim_head, num_heads, dim_ff, bias, dtype
+                ),use_checkpoint=True,
             )
             for _ in range(num_layers)
         ])
@@ -37,9 +40,7 @@ class GPT(bmt.DistributedModule):
         out = self.pos_emb(pos) + self.word_emb(input)
 
         # for layer in self.transformers:
-#out = self.transformers(out, mask_2d, None)
-        for trans in self.transformers:
-            out = trans(out, mask_2d)
+        out = self.transformers(out, mask_2d, None)
         out = self.layernorm(out)
 
         logits = self.word_emb(out, projection=True)

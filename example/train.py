@@ -6,18 +6,18 @@ import time
 def main():
     bmt.init_distributed(
         seed=0,
-        zero_level=2,
+        zero_level=3,
     )
 
     model = GPT(
-        num_layers=8,
-        vocab_size=10240, 
-        dim_model=2560,
-        dim_head=80,
+        num_layers=48,
+        vocab_size=80000, 
+        dim_model=4096,
+        dim_head=128,
         num_heads=32,
-        dim_ff=8192,
+        dim_ff=10240,
         max_distance=1024,
-        bias=True,
+        bias=False,
         dtype=torch.half
     )
 
@@ -51,7 +51,7 @@ def main():
             break
     
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
+    optimizer = bmt.optim.AdamOptimizer(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 
     optim_manager = bmt.optim.OptimManager(loss_scale=2**20)
@@ -62,7 +62,7 @@ def main():
     avg_time_recorder = bmt.utils.AverageRecorder()
     avg_loss_recorder = bmt.utils.AverageRecorder()
 
-    for iteration in range(1000):
+    for iteration in range(30):
         # load data
         st = time.time()
 

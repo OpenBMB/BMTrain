@@ -84,6 +84,7 @@ class Attention(bmt.DistributedModule):
             mask = attention_mask
             mask_bias = torch.zeros_like(attention_mask, device="cuda", dtype=torch.float16)  # 创建与mask形状相同的全零张量
             mask_bias[mask == False] -= torch.inf
+            mask_bias = mask_bias.unsqueeze(1)
             score = FlashAttnFunc.apply(h_q, h_k, h_v, mask_bias, False, None)
 
             score = score.view(batch_size, len_q, self.num_heads * self.dim_head)
