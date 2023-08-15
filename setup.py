@@ -5,12 +5,6 @@ import setuptools
 import warnings
 import sys
 import subprocess
-COMMON_NVCC_FLAGS = [
-    '-D__CUDA_NO_HALF_OPERATORS__',
-    '-D__CUDA_NO_HALF_CONVERSIONS__',
-    '-D__CUDA_NO_HALF2_OPERATORS__',
-    '--expt-relaxed-constexpr'
-]
 class CMakeExtension(Extension):
     def __init__(self, name, sourcedir=""):
         Extension.__init__(self, name, sources=[])
@@ -97,7 +91,7 @@ ext_modules = [
 ]
 setup(
     name='bmtrain',
-    version='0.2.3',
+    version='0.2.3.post1',
     author="Guoyang Zeng",
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",
@@ -107,6 +101,7 @@ setup(
 		"nvidia-nccl-cu11>=2.14.3"
     ],
     setup_requires=[
+        "pybind11",
         "nvidia-nccl-cu11>=2.14.3"
     ],
     ext_modules=ext_modules,

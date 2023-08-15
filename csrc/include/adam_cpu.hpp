@@ -38,14 +38,14 @@ inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F
     int64_t num_threads = 1;  // Default to serial execution
 
     if (grain_size > 0) {
-        num_threads = std::max(numiter / grain_size, static_cast<int64_t>(1));
+        num_threads = std::max((numiter+num_threads-1) / grain_size, static_cast<int64_t>(1));
     }
     else{
         cpu_set_t cpu_set;
         CPU_ZERO(&cpu_set);
         sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
         num_threads = CPU_COUNT(&cpu_set);
-        grain_size = std::max(numiter / num_threads, static_cast<int64_t>(1));
+        grain_size = std::max((numiter+num_threads-1) / num_threads, static_cast<int64_t>(1));
 
     }
 
@@ -55,7 +55,7 @@ inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F
         std::vector<std::thread> threads(num_threads);
         for (int64_t t = 0; t < num_threads; ++t) {
             threads[t] = std::thread([&, t]() {
-                int64_t left = begin + t * grain_size;
+                int64_t left = std::min(begin + t * grain_size, end);
                 int64_t right = std::min(begin + (t + 1) * grain_size, end);
                 f(left, right);
             });

@@ -50,6 +50,8 @@ class OptimManager:
         loss_scale : Optional[float] = None,
         loss_scale_factor : float = 2,
         loss_scale_steps : int = 1024,
+        min_loss_scale = 1,
+        max_loss_scale = float("inf"),
     ):
         if loss_scale is not None:
             self.loss_scale = loss_scale
@@ -60,6 +62,8 @@ class OptimManager:
         self.steps_since_last_scale = 0
         self.loss_scale_factor = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
         self.loss_scale_steps = loss_scale_steps
+        self.min_loss_scale = min_loss_scale
+        self.max_loss_scale = max_loss_scale
 
         self.optimizers = []
         self.lr_schedulers = []
@@ -112,7 +116,7 @@ class OptimManager:
 
         This function can also handle gradient overflow by reducing the loss scale when it occurs.
         """
-        if self.loss_scale_enabled and self.loss_scale > 1:
+        if self.loss_scale_enabled:
             has_overflow = False
             for optimizer in self.optimizers:
                 try:
@@ -123,7 +127,8 @@ class OptimManager:
             if has_overflow:
                 print_rank("Gradient overflow, change scale from %lf to %lf" % (self.loss_scale, self.loss_scale / self.loss_scale_factor))
                 with torch.no_grad():
-                    self._justify_scale(self.loss_scale / self.loss_scale_factor)
+                    if self.loss_scale > self.min_loss_scale:
+                        self._justify_scale(self.loss_scale / self.loss_scale_factor)
                     self.zero_grad()
                 return
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
@@ -140,7 +145,7 @@ class OptimManager:
         if self.loss_scale_enabled:
             self.steps_since_last_scale += 1
 
-            if self.steps_since_last_scale >= self.loss_scale_steps:
+            if self.steps_since_last_scale >= self.loss_scale_steps and self.loss_scale < self.max_loss_scale:
                 self._justify_scale(self.loss_scale * self.loss_scale_factor)
 
         current_stream = torch.cuda.current_stream()
