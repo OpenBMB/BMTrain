@@ -7,29 +7,62 @@ class Offload_Dict:
 
     def __init__(self):
         self._offload_dict = OrderedDict()
-        self.offset = 0
 
     def add(self, tensor):
-        self._offload_dict[id(tensor)] = {}
-        self._offload_dict[id(tensor)]["offset"] = self.offset
-        self._offload_dict[id(tensor)]["numel"] = tensor.numel()
-        self._offload_dict[module_name]['dtype'] = inp.dtype
+        tensor_id = id(tensor)
+        self._offload_dict[tensor_id] = {}
+        self._offload_dict[tensor_id]["numel"] = tensor.numel()
+        self._offload_dict[tensor_id]['dtype'] = tensor.dtype
+        self._offload_dict[tensor_id]["tensor"] = tensor
+        self._offload_dict[tensor_id]["shape"] = tensor.shape
+        self._device = "cuda"
+        return tensor_id
 
-    def make_cpu_storage(self, _cuda_dict):
-        with torch.cuda.stream(config["offload_stream"]):
-            
-def wrapper(module_name,act_cuda_dict):
-    def fn(m,inps,out):
-        if module_name not in act_cuda_dict:
-            act_cuda_dict[module_name] = m._inp_dict
-        inp = inps[0]
-        act_cuda_dict[module_name]['shape'] = tuple(inp.shape)
-        act_cuda_dict[module_name]['numel'] = inp.numel()
-        act_cuda_dict[module_name]['inp'] = inp
-        act_cuda_dict[module_name]['dtype'] = inp.dtype
-        m.riginp_dict = act_cuda_dict[module_name]
-    return fn
+    def make_cpu_storage(self):
+        fp16_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
+        fp32_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])
+        fp16_storage = torch.HalfStorage(fp16_total).pin_memory()
+        fp32_storage = torch.FloatStorage(fp32_total).pin_memory()
+        self.fp16_storage = fp16_storage
+        self.fp32_storage = fp32_storage 
+        self.fp16_total = fp16_total
+        self.fp32_total = fp32_total
 
+    def get(self, key):
+        return self._offload_dict[key]["tensor"]
+
+    def pop_all(self):
+        self._offload_dict = OrderedDict()
+
+    def h2d_memcpy(self):
+        for key,val in self._offload_dict.items():
+            self._offload_dict[key]['tensor'] = self._offload_dict[key]['tensor'].cuda(non_blocking=True)
+
+    def record_stream(self, stream):
+        for key, val in self._offload_dict.items():
+            self._offload_dict[key]['tensor'].record_stream(stream)
+
+    def d2h_memcpy(self):   
+        fp16_offset = 0
+        fp32_offset = 0
+        fp16_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
+        fp32_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])
+        assert fp16_total <= self.fp16_total
+        assert fp32_total <= self.fp32_total
+        fp16_storage = self.fp16_storage
+        fp32_storage = self.fp32_storage
+        for key,val in self._offload_dict.items():
+            assert val['dtype'] in [torch.float16, torch.float32]
+            storage = fp16_storage if val['dtype'] == torch.float16 else fp32_storage
+            offset = fp16_offset if val['dtype'] == torch.float16 else fp32_offset
+            cpu_tensor = torch.tensor([], dtype=val['dtype'], device="cpu") \
+                .set_(storage, offset, val['shape'])
+            self._offload_dict[key]['tensor'].record_stream(config['offload_stream'])
+            self._offload_dict[key]['tensor'] = cpu_tensor.copy_(self._offload_dict[key]['tensor'], non_blocking=True)
+            if val['dtype'] == torch.float16:
+                fp16_offset += self._offload_dict[key]['numel']
+            else:
+                fp32_offset += self._offload_dict[key]['numel']
 
 def nearest_offload_module(module):
     if module._mode == "OFFLOAD":
@@ -56,61 +89,38 @@ def nearest_offload_module(module):
     
     return nearest_modules
 
-def make_cpu_storage(_act_cuda_dict, _offload_dict):
-    for key,val in _act_cuda_dict.items():
-        if "dtype" not in val:
-            print(key)
-            print(val)
-    fp16_total = sum([v['numel'] for v in _act_cuda_dict.values() if v['dtype'] == torch.float16])
-    fp32_total = sum([v['numel'] for v in _act_cuda_dict.values() if v['dtype'] == torch.float32])
-    fp16_storage = torch.HalfStorage(fp16_total).pin_memory()
-    fp32_storage = torch.FloatStorage(fp32_total).pin_memory()
-    fp16_offset = 0
-    fp32_offset = 0
-    for key,val in _act_cuda_dict.items():
-        if val['dtype'] == torch.float16:
-            _offload_dict[key] = {}
-            _offload_dict[key]['inp'] = torch.tensor([], dtype=torch.float16, device="cpu") \
-                                        .set_(fp16_storage, fp16_offset, val['shape'])
 
-            fp16_offset += _act_cuda_dict[key]['numel']
-        elif val['dtype'] == torch.float32:
-            _offload_dict[key]['inp'] = torch.tensor([], dtype=torch.float32, device="cpu") \
-                                        .set_(fp32_storage, fp32_offset, val['shape'])
+def offload_wrapper(offload_dict):
+    def pack_hook(tensor):
+        if isinstance(tensor, torch.nn.Parameter):
+            return (tensor,) 
+        else:
+            key = offload_dict.add(tensor)
+            return (tensor.device, key)
+    def unpack_hook(packed):
+        if len(packed) == 2:
+            device, key = packed
+            tensor = offload_dict.get(key)
+            assert tensor.device == device
+            return tensor
+        else:
+            tensor, = packed
+            return tensor
+    return pack_hook, unpack_hook
 
-            fp32_offset += _act_cuda_dict[key]['numel']
-def d2h_memcpy(_act_cuda_dict, _offload_dict):
-    for key,val in _act_cuda_dict.items():
-        shape, inp = val['shape'],val['inp']
-        cpu_inp = _offload_dict[key]['inp']
-        _offload_dict[key]['inp'] = cpu_inp.copy_(inp, non_blocking=True)
-
-def h2d_memcpy(_act_cuda_dict, _offload_dict):
-    for key,val in _act_cuda_dict.items():
-        shape, cuda_inp = val['shape'],val['inp']
-        cpu_inp = _offload_dict[key]['inp']
-        cuda_stor = cuda_inp.storage_type()(val['numel'])
-        cuda_inp.record_stream(config["offload_stream"])
-        cuda_inp.set_(cuda_stor, 0, shape)
-        cuda_inp.copy_(cpu_inp, non_blocking=True)
-
-def pack_hook(tensor):
-    _offload_tensor(id_tensor) = {}
 def zero_pre_forward(module, inputs):
     enter = True
     pipe = False
-
     if module._mode == "OFFLOAD":
-        if not hasattr(module,"_act_cuda_dict"):
-            torch._C._autograd._push_saved_tensors_default_hooks(
-            pack_hook, unpack_hook
-            )
-            module._act_cuda_dict = {}
-            for name, sub_module in module.named_modules():
-                if sub_module.__class__.__name__ == "Linear":
-                    sub_module.offload = True
-                    fn = wrapper(name, module._act_cuda_dict)
-                    sub_module.register_forward_hook(fn)
+        module._offload_dict = Offload_Dict()
+        pack_hook, unpack_hook = offload_wrapper(module._offload_dict)
+        for n, m in module.named_modules():
+            if m.__class__.__name__ == "Linear":
+                m._offload_hook = (pack_hook, unpack_hook)
+        # torch._C._autograd._push_saved_tensors_default_hooks(
+        #     pack_hook, unpack_hook
+        # )
+            
     if module._mode == "PIPE":
         enter = module._micro_idx == 0
         pipe = True
@@ -128,20 +138,13 @@ def zero_post_forward(module, inputs, outputs):
     if module._mode == "PIPE":
         exit = module._micro_idx == config['micros'] - 1
     elif module._mode == "OFFLOAD":
-        torch._C._autograd._pop_saved_tensors_default_hooks()
+        # torch._C._autograd._pop_saved_tensors_default_hooks()
         current_stream = torch.cuda.current_stream()
         current_stream.wait_stream(config["calc_stream"])
         with torch.cuda.stream(config["offload_stream"]):
-            if not hasattr(module, "_offload_dict"):
-                module._offload_dict = {}
-                make_cpu_storage(module._act_cuda_dict, module._offload_dict)
-                d2h_memcpy(module._act_cuda_dict, module._offload_dict)
-        current_stream = torch.cuda.current_stream()
-        current_stream.wait_stream(config["offload_stream"])
-        cuda_stor = torch.UntypedStorage(1).cuda()
-        for key,val in module._act_cuda_dict.items():
-            module._act_cuda_dict[key]['inp'].set_(cuda_stor, 0, (1,))
-            
+            if not hasattr(module._offload_dict, "fp16_storage"):
+                module._offload_dict.make_cpu_storage()
+            module._offload_dict.d2h_memcpy()
     if exit:
         module._forward_block_ctx.exit(forward_flag)
 
@@ -155,10 +158,11 @@ def zero_pre_backward(module, grad_outputs):
                     if pre_module._mode == "OFFLOAD":
                         pre_module._on_device = True
                         with torch.cuda.stream(config["offload_stream"]):
-                            h2d_memcpy(pre_module._act_cuda_dict, pre_module._offload_dict)
+                            pre_module._offload_dict.h2d_memcpy()
         else:
             current_stream = torch.cuda.current_stream()
             current_stream.wait_stream(config["offload_stream"])
+            module._offload_dict.record_stream(config["calc_stream"])
         module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict)
         module._backward_block_ctx.enter(backward_flag, True)
         if not module._is_last_layer and len(module._next_module) > 0 and module._next_module[-1]._backward_block_ctx is not None:
@@ -182,12 +186,8 @@ def zero_post_backward(module, grad_inputs, grad_outputs):
             module._on_device = False
             current_stream = torch.cuda.current_stream()
             current_stream.wait_stream(config["calc_stream"])
-            cuda_stor = torch.UntypedStorage(1).cuda()
             with torch.cuda.stream(config["offload_stream"]):
-                for key,val in module._act_cuda_dict.items():
-                    inp = val['inp']
-                    inp.record_stream(config["offload_stream"])
-                    inp.set_(cuda_stor, 0, (1,)) 
+                module._offload_dict.pop_all()
         if module._is_first_layer and module._ref_count == 1:
             module._backward_block_ctx.exit(backward_flag, True)
             module._ref_count = -1
