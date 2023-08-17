@@ -50,7 +50,7 @@ BMTrain 是一个高效的大模型训练工具包，可以用于训练数百亿
 
 - 用 pip 安装（推荐）: ``pip install bmtrain``
 
-- 从源代码安装: 下载工具包，然后运行 ``python setup.py install``
+- 从源代码安装: 下载工具包，然后运行 ``pip install .`` (setup.py的安装方式将会在未来被setuptools弃用)
 
 安装 BMTrain 可能需要花费数分钟的时间，因为在安装时需要编译 c/cuda 源代码。
 我们推荐直接在训练环境中编译 BMTrain，以避免不同环境带来的潜在问题。

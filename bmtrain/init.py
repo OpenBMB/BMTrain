@@ -4,9 +4,13 @@ import random
 import torch.distributed as dist
 import os
 from .utils import print_dict
+import ctypes
 from .global_var import config
+
 from . import nccl
 from .synchronize import synchronize
+
+
 def init_distributed(
         init_method : str = "env://",
         seed : int = 0,
@@ -53,7 +57,8 @@ def init_distributed(
     timeout = datetime.timedelta(seconds=1800)
     rendezvous_iterator = dist.rendezvous(
         init_method, rank, world_size, timeout=timeout
-    )
+    )   
+
     store, rank, world_size = next(rendezvous_iterator)
     store.set_timeout(timeout)
     store = dist.PrefixStore("bmtrain", store)
@@ -164,3 +169,4 @@ class topology:
 
 def is_initialized() -> bool:
     return config["initialized"]
+
