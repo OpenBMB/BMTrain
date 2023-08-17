@@ -3,6 +3,6 @@ requires = [
     "setuptools",
     "pybind11",
     "nvidia-nccl-cu11 >= 2.14.3",
-	"cmake > 3.27.0"
+    "cmake > 3.27.0"
 ]
 build-backend = "setuptools.build_meta"

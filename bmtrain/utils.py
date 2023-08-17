@@ -24,7 +24,8 @@ def load_nccl_pypi():
     try:
         import nvidia.nccl
     except:
-        print("Run pip install nvidia-nccl-cu11 >=2.14.3 first")
+        raise ImportError("Run pip install nvidia-nccl-cu11 >=2.14.3 first")
+
     path = os.path.join(os.path.dirname(nvidia.nccl.__file__), "lib")
     for file_so in os.listdir(path):
         if file_so.endswith(".so"):
