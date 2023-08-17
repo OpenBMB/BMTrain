@@ -74,7 +74,8 @@ jobs:
           dist/*.tar.gz
           dist/*.whl
         prerelease: false
+        name: "BMTrain v0.2.3"
         token: ${{ secrets.RELEASE_TOKEN }}
         tag_name: ${{ steps.create_release.outputs.tag }}
       env:
-        GITHUB_REPOSITORY: MayDomine/BMTrain
+        GITHUB_REPOSITORY: OpenBMB/BMTrain
