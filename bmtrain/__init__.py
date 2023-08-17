@@ -16,9 +16,5 @@ from .pipe_layer import PipelineTransformerBlockList
 from . import debug
 from .store import save, load
 
-from . import benchmark
-from . import optim
-from . import inspect
-from . import lr_scheduler
 from . import loss
 from . import distributed
