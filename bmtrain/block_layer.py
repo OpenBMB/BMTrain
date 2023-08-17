@@ -278,7 +278,7 @@ class CheckpointBlock(torch.nn.Module):
         arg_list = self.pre_hook(*args)
 
         if self.use_checkpoint:
-            out = checkpoint(self._module, *arg_list, use_reentrant=False)
+            out = checkpoint(self._module, *arg_list, use_reentrant=not self.all_input_no_grad)
         else:
             out = self._module(*arg_list)
 
