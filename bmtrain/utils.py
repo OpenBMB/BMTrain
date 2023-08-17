@@ -28,7 +28,8 @@ def load_nccl_pypi():
 
     path = os.path.join(os.path.dirname(nvidia.nccl.__file__), "lib")
     for file_so in os.listdir(path):
-        if file_so.endswith(".so"):
+        file_split = file_so.split('.')
+        if file_split[-1] == "so" or (len(file_split)>1 and file_split[-2] == "so"):
             ctypes.CDLL(os.path.join(path, file_so))
     
     
