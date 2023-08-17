@@ -5,14 +5,12 @@ import bmtrain as bmt
 class CustomLinear(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, weight, bias=None):
-        ctx.input = {"input":x}
-        ctx.save_for_backward( weight, bias)
+        ctx.save_for_backward(x, weight, bias)
         return F.linear(x, weight, bias)
 
     @staticmethod
     def backward(ctx, grad_output):
-        x = ctx.input["input"]
-        weight, bias = ctx.saved_tensors
+        x, weight, bias = ctx.saved_tensors
         grad_x = grad_weight = grad_bias = None
         if x.requires_grad:
             grad_x = grad_output.matmul(weight)
@@ -37,8 +35,15 @@ class Linear(bmt.DistributedModule):
             self.register_parameter('bias', None)
     
     def forward(self, input):
-        return CustomLinear.apply(input, self.weight, self.bias)
-
+        if hasattr(self, "_offload_hook"):
+            pack, unpack = self._offload_hook
+            torch._C._autograd._push_saved_tensors_default_hooks(
+                pack, unpack
+            )
+        res =  CustomLinear.apply(input, self.weight, self.bias)
+        if hasattr(self, "_offload_hook"):
+            torch._C._autograd._pop_saved_tensors_default_hooks()
+        return res
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={}'.format(
             self.in_features, self.out_features, self.bias is not None

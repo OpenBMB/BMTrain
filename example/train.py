@@ -8,17 +8,19 @@ def main():
         seed=0,
         zero_level=3,
     )
-
+    offload = False
+    seq_len = True
     model = GPT(
         num_layers=48,
-        vocab_size=80000, 
+        vocab_size=80000,
         dim_model=4096,
         dim_head=128,
         num_heads=32,
         dim_ff=10240,
-        max_distance=1024,
+        max_distance=seq_len,
         bias=False,
-        dtype=torch.half
+        dtype=torch.half,
+        offload=offload
     )
 
     bmt.init_parameters(model)
@@ -31,10 +33,7 @@ def main():
     # data
     # generate dummy data for each rank
     torch.manual_seed(1234)
-
-    batch_size = 2
-    seq_len = 512
-
+    batch_size = 4
     for i in range(bmt.world_size()):
         sent = torch.randint(0, 10240, (batch_size, seq_len + 1))
         enc_length = torch.randint(128, seq_len, (batch_size,)).long().cuda()
@@ -50,7 +49,7 @@ def main():
         if i == bmt.rank():
             break
     
-    loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
+    loss_func = bmt.loss.FusedCrossEntropy(ignore_index=100)
     optimizer = bmt.optim.AdamOptimizer(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 
@@ -66,36 +65,36 @@ def main():
         # load data
         st = time.time()
 
-        with bmt.inspect.inspect_tensor() as inspector:
-            pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
-            logits = model(
-                enc_input,
-                pos,
-                pos < enc_length[:, None]
-            )
-            batch, seq_len, vocab_out_size = logits.size()
+        # with bmt.inspect.inspect_tensor() as inspector:
+        pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
+        logits = model(
+            enc_input,
+            pos,
+            pos < enc_length[:, None]
+        )
+        batch, seq_len, vocab_out_size = logits.size()
 
-            loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
-        
-            global_loss = bmt.sum_loss(loss).item()
+        loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
+    
+        global_loss = bmt.sum_loss(loss).item()
 
-            optim_manager.zero_grad()
+        optim_manager.zero_grad()
 
-            optim_manager.backward(loss)
+        optim_manager.backward(loss)
         
         # print inspected tensors in the forward & backward pass
         # print parameters of the model
-        if iteration % 100 == 0:
-            bmt.print_rank(
-                bmt.inspect.format_summary(
-                    inspector.get_summary()
-                )
-            )
-            bmt.print_rank(
-                bmt.inspect.format_summary(
-                    bmt.inspect.inspect_model(model, "*")
-                )
-            )
+        # if iteration % 100 == 0:
+        #     bmt.print_rank(
+        #         bmt.inspect.format_summary(
+        #             inspector.get_summary()
+        #         )
+        #     )
+        #     bmt.print_rank(
+        #         bmt.inspect.format_summary(
+        #             bmt.inspect.inspect_model(model, "*")
+        #         )
+        #     )
 
         optim_manager.step()
 

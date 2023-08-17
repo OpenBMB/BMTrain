@@ -32,7 +32,7 @@ class Offload_Dict:
         return self._offload_dict[key]["tensor"]
 
     def pop_all(self):
-        self._offload_dict = OrderedDict()
+        self._offload_dict.clear()
 
     def h2d_memcpy(self):
         for key,val in self._offload_dict.items():
@@ -65,8 +65,6 @@ class Offload_Dict:
                 fp32_offset += self._offload_dict[key]['numel']
 
 def nearest_offload_module(module):
-    if module._mode == "OFFLOAD":
-        return [module]
     queue = deque([(module, 0)])  # 使用队列来进行广度优先搜索
     nearest_modules = []
     nearest_depth = float('inf')
@@ -112,7 +110,8 @@ def zero_pre_forward(module, inputs):
     enter = True
     pipe = False
     if module._mode == "OFFLOAD":
-        module._offload_dict = Offload_Dict()
+        if not hasattr(module, "_offload_dict"):
+            module._offload_dict = Offload_Dict()
         pack_hook, unpack_hook = offload_wrapper(module._offload_dict)
         for n, m in module.named_modules():
             if m.__class__.__name__ == "Linear":
@@ -137,14 +136,14 @@ def zero_post_forward(module, inputs, outputs):
     exit = True
     if module._mode == "PIPE":
         exit = module._micro_idx == config['micros'] - 1
-    elif module._mode == "OFFLOAD":
+    elif module._mode != "OFFLOAD" and ((not module._is_first_layer) and module._pre_module[0]._mode == "OFFLOAD"):
+        for pre_module in module._pre_module:
+            if pre_module._mode == "OFFLOAD":
         # torch._C._autograd._pop_saved_tensors_default_hooks()
-        current_stream = torch.cuda.current_stream()
-        current_stream.wait_stream(config["calc_stream"])
-        with torch.cuda.stream(config["offload_stream"]):
-            if not hasattr(module._offload_dict, "fp16_storage"):
-                module._offload_dict.make_cpu_storage()
-            module._offload_dict.d2h_memcpy()
+                with torch.cuda.stream(config["offload_stream"]):
+                    if not hasattr(pre_module._offload_dict, "fp16_storage"):
+                        pre_module._offload_dict.make_cpu_storage()
+                    pre_module._offload_dict.d2h_memcpy()
     if exit:
         module._forward_block_ctx.exit(forward_flag)
 
@@ -184,10 +183,7 @@ def zero_post_backward(module, grad_inputs, grad_outputs):
             module._pre_module.pop()
         if module._mode == "OFFLOAD":
             module._on_device = False
-            current_stream = torch.cuda.current_stream()
-            current_stream.wait_stream(config["calc_stream"])
-            with torch.cuda.stream(config["offload_stream"]):
-                module._offload_dict.pop_all()
+            module._offload_dict.pop_all()
         if module._is_first_layer and module._ref_count == 1:
             module._backward_block_ctx.exit(backward_flag, True)
             module._ref_count = -1

@@ -85,8 +85,14 @@ class Attention(bmt.DistributedModule):
             mask_bias = torch.zeros_like(attention_mask, device="cuda", dtype=torch.float16)  # 创建与mask形状相同的全零张量
             mask_bias[mask == False] -= torch.inf
             mask_bias = mask_bias.unsqueeze(1)
+            # if hasattr(self, "_offload_hook"):
+            #     pack, unpack = self._offload_hook
+            #     torch._C._autograd._push_saved_tensors_default_hooks(
+            #         pack, unpack
+            #     )
             score = FlashAttnFunc.apply(h_q, h_k, h_v, mask_bias, False, None)
-
+            # if hasattr(self, "_offload_hook"):
+            #     torch._C._autograd._pop_saved_tensors_default_hooks()
             score = score.view(batch_size, len_q, self.num_heads * self.dim_head)
             
 

@@ -808,15 +808,13 @@ class FlashAttnFunc(torch.autograd.Function):
         o, lse, ctx.softmax_scale = _flash_attn_forward(
             q, k, v, bias=bias, causal=causal, softmax_scale=softmax_scale
         )
-        ctx.output = {"output":o}
-        ctx.save_for_backward(q, k, v, lse, bias)
+        ctx.save_for_backward(q, k, v, o, lse, bias)
         ctx.causal = causal
         return o
 
     @staticmethod
     def backward(ctx, do):
-        q, k, v, lse, bias = ctx.saved_tensors
-        o = ctx.output["output"]
+        q, k, v, o, lse, bias = ctx.saved_tensors
         assert not ctx.needs_input_grad[3], 'FlashAttention does not support bias gradient yet'
         # Triton's autotune causes the Tensor._version to change, and so Pytorch autograd
         # does a memcpy. To avoid this we run in inference_mode, which doesn't track the version.
