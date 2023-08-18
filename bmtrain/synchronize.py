@@ -38,7 +38,6 @@ def gather_result(result: torch.Tensor):
     if result.storage().size() != result.numel():
         # Create a clone of the original tensor if it's a slice
         result = result.clone()
-        
     output_cuda = True
     if not result.is_cuda:
         result = result.cuda()
