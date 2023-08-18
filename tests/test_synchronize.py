@@ -21,7 +21,7 @@ def test_main():
     tensor_slice_3 = tensor[:4, :4]
     result_slice_3 = bmt.gather_result(tensor_slice_3)
 
-    print(result, result_slice_1, result_slice_2, result_slice_3, sep='\n')
+    print(result, result_slice_0, result_slice_1, result_slice_2, result_slice_3, sep='\n')
 
 if __name__ == '__main__':
     bmt.init_distributed(pipe_size=1)
