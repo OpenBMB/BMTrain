@@ -1,50 +1,35 @@
 ---
-name: Bug report
-about: Create a report to help us improve
-title: "[BUILD ERR]"
-labels: Build ERR
+name: Bugs
+about: Any Bugs happen in runtime.
+title: "[BUG]"
+labels: bug
 assignees: ''
+### Bug Report
 
----
-
-### Build Error Report
-
-**Description of the Build Error**
-Please provide a clear and concise description of what the build error is.
-
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Describe the steps you took to trigger the build error.
-2. Make sure to include any commands you executed or files you modified.
-
-**Expected Behavior**
-Provide a clear and concise description of what you expected to happen.
-
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**Description of the Bug**
+Please provide a clear and concise description of what the bug is.
 
 **Environment Information**
-- Operating System version:
 - GCC version:
+- Torch version:
+- Linux system version:
 - CUDA version:
-- CMake version:
-- Pip version:
+- Torch's CUDA version (as per `torch.cuda.version()`):
 
-**Installation Method**
-Please indicate if the error occurred during source code installation or when using the `pip install .whl` method:
+**To Reproduce**
+Please provide the following details to reproduce the behavior:
+1. Describe your environment setup, including any specific version requirements.
+2. Clearly state the steps you took to trigger the error, including the specific code you executed.
+3. Identify the file and line number where the error occurred, along with the full traceback of the error. Make sure to have `NCCL_DEBUG=INFO` and `CUDA_LAUNCH_BLOCKING=True` set to get accurate debug information.
 
-**If Source Code Installation:**
-- Confirm that you used `pip install .` for installation and not `python setup.py`.
+**Expected Behavior**
+Describe what you expected to happen when you executed the code.
 
-**If Pip Install .whl Method:**
-- Provide the versions of pip, CUDA, GCC, and the operating system.
-- Confirm that you have installed `nvidia-nccl-cu11>=2.14.3` from PyPI.
-
-**Full Error Traceback**
-Provide the complete error traceback.
+**Screenshots**
+If applicable, please add screenshots to help explain your problem.
 
 **Additional Information**
 Provide any other relevant context or information about the problem here.
 
 **Confirmation**
-Please confirm that you have reviewed all of the above requirements and verified the information provided before submitting this report.
+Please confirm that you have reviewed all of the above requirements and verified the information provided before submitting this issue.
