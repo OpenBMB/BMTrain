@@ -25,20 +25,16 @@ def zero_post_forward(module, inputs, outputs):
 
     if exit:
         module._forward_block_ctx.exit(forward_flag)
+    if module._mode != "PIPE":
+        module._ref_count += 1
 
 def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if config['zero_level'] == 2 else 0
     if module._mode != "PIPE":
         module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict)
         module._backward_block_ctx.enter(backward_flag, True)
-        if not module._is_last_layer and len(module._next_module) > 0 and module._next_module[-1]._backward_block_ctx is not None:
-            if module._next_module[-1]._ref_count == 1:
-                module._next_module[-1]._ref_count = 0
-                module._next_module.pop()._backward_block_ctx.exit(backward_flag, True)
-                config['load_stream'].record_event(config['load_event'])
-            else:
-                module._next_module[-1]._ref_count -= 1
-            
+        if not module._is_last_layer: 
+            module.next_module().backward_release(backward_flag)
     else:
         if module._micro_idx == config['micros'] - 1:
             module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, pipe=True)
@@ -47,15 +43,10 @@ def zero_pre_backward(module, grad_outputs):
 def zero_post_backward(module, grad_inputs, grad_outputs):
     backward_flag = 2 if config['zero_level'] == 2 else 0
     if module._mode != "PIPE":
-        if module._is_first_layer and module._ref_count == 1:
-            module._backward_block_ctx.exit(backward_flag, True)
-            module._ref_count = -1
-            config['load_stream'].record_event(config['load_event'])
-        if not module._is_first_layer and len(module._pre_module) > 0:
-            module._pre_module.pop()
+        if module._is_first_layer: 
+            module.backward_release(backward_flag)
     else:
         if module._micro_idx == 0:
-            module._ref_count = -1 if module._is_first_layer else 0
             module._backward_block_ctx.exit(backward_flag, True)
             config['load_stream'].record_event(config['load_event'])
 
