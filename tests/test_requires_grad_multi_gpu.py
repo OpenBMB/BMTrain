@@ -2,7 +2,6 @@ from utils import *
 
 import bmtrain as bmt
 import torch
-from bmtrain import config
 from bmtrain.block_layer import CheckpointBlockContext,  CheckpointBlock, TransformerBlockList
 from bmtrain.pipe_layer import PipelineTransformerBlockList
 from typing import List
@@ -34,7 +33,6 @@ def run(m, a, b):
     logits = m(inp)
     loss = logits.sum()
     loss.backward()
-    config['block_context'][config['rank']].clear()
 
     sm = bmt.inspect.format_summary(
             bmt.inspect.inspect_model(m, '*')

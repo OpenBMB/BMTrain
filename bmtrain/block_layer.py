@@ -211,6 +211,7 @@ class CheckpointBlock(torch.nn.Module):
             pre_module._next_module.append(self)
             
     def pre_module(self):
+        assert len(self._next_module) == self._ref_count, "{} != {}".format(len(self._next_module), self._ref_count)
         return self._pre_module[self._ref_count-1]
 
     def next_module(self):
@@ -241,7 +242,6 @@ class CheckpointBlock(torch.nn.Module):
             self.all_param_no_grad = True
             for param in self._param_info:
                 if param['parameter'].requires_grad:
-                    param['parameter'].register_hook(lambda grad: hook_func.zero_post_backward(self, grad, None))
                     self.all_param_no_grad = False
                     break
             self.all_input_no_grad = True
@@ -254,13 +254,15 @@ class CheckpointBlock(torch.nn.Module):
         post_out = hook_func.PostHookFunc.apply(self, *tuple_out)
         if isinstance(out, torch.Tensor) and isinstance(post_out, tuple):
             return post_out[0]
-
-        if isinstance(post_out, list):
-            return tuple(post_out)
+        post_out = tuple(post_out)
         return post_out
 
     def forward(self, *args): 
         arg_list = self.pre_hook(*args)
+
+        if self.all_input_no_grad:
+            placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
+            return hook_func.OneStepNoGradFunc.apply(self, placeholder, *arg_list)
 
         if self.use_checkpoint:
             out = checkpoint(self._module, *arg_list, use_reentrant=not self.all_input_no_grad)
@@ -577,8 +579,7 @@ class TransformerBlockList(torch.nn.Module):
         hidden_states = []
         for i in range(len(self)):
             if return_hidden_states:
-                return_hidden_states.append(outputs)
-                self._modules[str(i)].hidden_states = hidden_states
+                hidden_states.append(outputs)
             outputs = self._modules[str(i)]._call_impl(*args)
             if not isinstance(outputs, tuple):
                 outputs = (outputs, )
