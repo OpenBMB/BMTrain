@@ -577,7 +577,7 @@ class TransformerBlockList(torch.nn.Module):
         hidden_states = []
         for i in range(len(self)):
             if return_hidden_states:
-                self._modules[str(i)].return_hidden_states = return_hidden_states
+                return_hidden_states.append(outputs)
                 self._modules[str(i)].hidden_states = hidden_states
             outputs = self._modules[str(i)]._call_impl(*args)
             if not isinstance(outputs, tuple):
@@ -591,6 +591,6 @@ class TransformerBlockList(torch.nn.Module):
             ]
 
         if return_hidden_states:
-            return outputs + tuple(hidden_states[:self.num_hidden])
+            return outputs + tuple(hidden_states)
         else:
             return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
