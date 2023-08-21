@@ -107,14 +107,12 @@ def all_gather(x : torch.Tensor, comm = None):
 class OpReduceScatter(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, input : torch.Tensor, op : str, comm : NCCLCommunicator = None, dim = 0):
+    def forward(ctx, input : torch.Tensor, op : str, comm : NCCLCommunicator = None):
         if comm is None:
             comm = config["comm"]
         ctx.comm = comm
-        ctx.dim = dim
-        if dim != 0:
-            assert input.shape[dim] % commCount(comm) == 0, "The dimension to reduce must be divisible by the number of communication processes"
-            input = input.transpose(0, dim)
+        rank = commRank(comm)
+        assert input.shape[0] % commCount(comm) == 0, "The dimension 0 must be divisible by the number of communication processes"
         if not input.is_contiguous():
             input = input.contiguous()
         if input.storage_offset() != 0 or input.storage().size() != input.numel():
@@ -128,27 +126,25 @@ class OpReduceScatter(torch.autograd.Function):
             comm
         )
         ctx.op = op
-        output = output.transpose(dim, 0)
         if op in ["sum", "avg"]:
             pass
         elif op in ["max", "min"]:
-            ctx.save_for_backward( input != output )
+            ctx.save_for_backward( output != input[rank * input.shape[0]:(rank + 1) * input.shape[0]] )
         else:
-            ctx.save_for_backward( output / input )
+            ctx.save_for_backward( output / input[rank * input.shape[0]:(rank + 1) * input.shape[0]] )
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         with torch.no_grad():
-            grad_output = OpAllGather.apply(grad_output, ctx.comm).transpose(1, ctx.dim).flatten(0,1).transpose(0, ctx.dim)
-        if ctx.op == "sum":
-            return grad_output, None, None
-        elif ctx.op == "avg":
-            return grad_output / commCount(ctx.comm), None, None
-        elif ctx.op in ["max", "min"]:
-            return torch.masked_fill(grad_output, ctx.saved_tensors[0], 0), None, None
+            grad_output = OpAllGather.apply(grad_output, ctx.comm).flatten(0,1)
+        if ctx.op in ["max", "min"]:
+            raise NotImplementedError("max min operation now do not support backward")
         else:
-            return grad_output * ctx.saved_tensors[0], None, None
+            if ctx.op == "avg":
+                grad_output /= commCount(ctx.comm)
+            return grad_output, None, None
+       
 
 def reduce_scatter(x : torch.Tensor, op : str = "sum", comm = None):
     """Reduces the input tensor from all processes.
