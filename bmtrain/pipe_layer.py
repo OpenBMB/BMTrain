@@ -9,7 +9,6 @@ from .distributed import all_gather, broadcast, all_reduce, send_activations, re
 from .global_var import config
 from . import nccl
 from .checkpointing import (
-        ScopedTensorInspectorContext,
         CheckpointBlockContext
 )
 from . import debug

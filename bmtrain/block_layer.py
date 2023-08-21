@@ -4,7 +4,6 @@ from .utils import round_up
 from .global_var import config
 import torch
 from . import nccl
-from .synchronize import wait_loader
 from .parameter import DistributedParameter, OpAllGather
 from .checkpointing import (
         CheckpointBlockContext
@@ -74,12 +73,10 @@ class CheckpointBlock(torch.nn.Module):
         self._layer_dict = {}
         self._forward_block_ctx = None
         self._backward_block_ctx = None
-        self._forward_enter_count = 0
         # build large parameter&grad here
         self._param_info = []
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
         self._storage_info = {}
-        self._ready = False
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
@@ -522,7 +519,6 @@ class TransformerBlockList(torch.nn.Module):
         super().__init__()
         
         self._modules = {}
-        release_list = []
         pre_module = None
         for i, module in enumerate(modules):
             if not isinstance(module, CheckpointBlock):

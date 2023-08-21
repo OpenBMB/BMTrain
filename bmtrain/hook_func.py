@@ -1,7 +1,6 @@
 import torch
 from .global_var import config
 from .checkpointing import CheckpointBlockContext
-from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
 
 def zero_pre_forward(module, inputs):
     enter = True

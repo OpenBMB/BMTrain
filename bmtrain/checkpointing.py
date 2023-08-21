@@ -1,10 +1,8 @@
 import torch
-from typing import Callable, TypeVar
-from functools import wraps
 from . import debug
 from . import nccl
 from .global_var import config
-from .synchronize import wait_loader, synchronize
+from .synchronize import wait_loader
 
 class ScopedDebugTensorList:
     def __init__(self) -> None:
