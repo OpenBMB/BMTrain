@@ -151,6 +151,7 @@ class GPT(torch.nn.Module):
             )
             for _ in range(num_layers)
         ])
+        self.run_unroll = False
 
         self.layernorm = torch.nn.LayerNorm(dim_model, dtype=dtype)
 
@@ -166,7 +167,7 @@ class GPT(torch.nn.Module):
         input_emb = self.pos_emb(pos) + self.word_emb(input)
 
         out = input_emb
-        if isinstance(self.transformers, torch.nn.ModuleList):
+        if isinstance(self.transformers, torch.nn.ModuleList) or self.run_unroll:
             for layer in self.transformers:
                 out = layer(out, mask_2d, None)
         else:
@@ -376,11 +377,20 @@ def test_main(test_fp16=True, test_fp32=True):
         bmt.load(pipe_model, ckpt_path)
         return model
 
+    def unroll_list_model():
+        model = GPT(**kwargs)
+        list_model = bmt.BMTrainModelWrapper(model)
+        list_model.transformers = bmt.TransformerBlockList([m for m in list_model.transformers])
+        bmt.load(list_model, ckpt_path)
+        model.run_unroll = True
+        return model
+
     models = {
         "torch": torch_model,
         "wrapper": wrap_model,
         "blocklist": list_model,
         "pipelist": pipe_model,
+        "unroll_blocklist": unroll_list_model,
     }
     loss_funcs = {
         "bmt_entropy": bmt.loss.FusedCrossEntropy,
@@ -406,6 +416,7 @@ def test_main(test_fp16=True, test_fp32=True):
         add_to_check_list("pipelist", "bmt_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "bmt_entropy", "bmt_adam_offload")
+        add_to_check_list("unroll_blocklist", "bmt_entropy", "bmt_adam")
         if bmt.rank() == 0:
             os.remove(ckpt_path)
         check(ret)
@@ -419,6 +430,7 @@ def test_main(test_fp16=True, test_fp32=True):
         add_to_check_list("pipelist", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam_offload")
         add_to_check_list("blocklist", "torch_entropy", "torch_adam")
+        add_to_check_list("unroll_blocklist", "bmt_entropy", "bmt_adam")
         if bmt.rank() == 0:
             os.remove(ckpt_path)
         check(ret)
