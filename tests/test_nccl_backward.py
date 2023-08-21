@@ -12,16 +12,6 @@ def test_main():
     for i in range(bmt.world_size()):
         if i != bmt.rank(): ref *= i+1
     assert_eq(x.grad, ref)
-def test_reducescatter():
-    x = torch.ones((24,), dtype=torch.half, device="cuda").requires_grad_(True)
-    y = bmt.distributed.reduce_scatter(x, "sum")
-    loss = y.sum()
-    loss.backward()
-    ref = torch.ones((24,), dtype=torch.half, device="cuda")
-    print(loss)
-    assert y[0] == bmt.world_size()
-    assert_all_eq(x.grad,ref)
-
 
 def test_reducescatter():
     world_size = bmt.world_size()

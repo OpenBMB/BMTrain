@@ -138,7 +138,7 @@ class OpReduceScatter(torch.autograd.Function):
     def backward(ctx, grad_output):
         with torch.no_grad():
             grad_output = OpAllGather.apply(grad_output, ctx.comm).flatten(0,1)
-        if ctx.op in ["max", "min"]:
+        if ctx.op in ["max", "min", "prod"]:
             raise NotImplementedError("max min operation now do not support backward")
         else:
             if ctx.op == "avg":
