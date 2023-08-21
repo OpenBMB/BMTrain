@@ -68,7 +68,7 @@ class CheckpointBlock(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, use_offload=False):
         super().__init__()
         self._module = inner_module
         self._inputs = None
