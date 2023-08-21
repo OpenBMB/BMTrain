@@ -220,6 +220,8 @@ def inspect_model(model : torch.nn.Module, param_name : str, prefix : str = ''):
                     p = _gather_value(param.data, param.storage().size(), param._original_shape)
                 else:
                     p = param
+                if p is None:
+                    continue
                 stats = {
                     'name': prefix + name,
                     'shape': tuple(p.size()),
