@@ -3,6 +3,8 @@ from .global_var import config
 from .checkpointing import CheckpointBlockContext
 from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
 from collections import deque,OrderedDict
+from contextlib import contextmanager
+
 class Offload_Dict:
 
     def __init__(self):
@@ -105,6 +107,17 @@ def offload_wrapper(offload_dict):
             tensor, = packed
             return tensor
     return pack_hook, unpack_hook
+
+@contextmanager
+def offload_context(module):
+    if hasattr(module, "_offload_hook"):
+        pack_hook, unpack_hook = module._offload_hook
+        torch._C._autograd._push_saved_tensors_default_hooks(
+            pack_hook, unpack_hook
+        )
+    yield
+    if hasattr(module, "_offload_hook"):
+        torch._C._autograd._pop_saved_tensors_default_hooks()
 
 def zero_pre_forward(module, inputs):
     enter = True
