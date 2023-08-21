@@ -2,6 +2,8 @@ import torch
 import bmtrain as bmt
 from models import GPT
 import time
+from bmtrain import optim
+from bmtrain import inspect
 
 def main():
     bmt.init_distributed(
@@ -53,7 +55,7 @@ def main():
     optimizer = bmt.optim.AdamOptimizer(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 
-    optim_manager = bmt.optim.OptimManager(loss_scale=2**20)
+    optim_manager = optim.OptimManager(loss_scale=2**20)
     optim_manager.add_optimizer(optimizer, lr_scheduler)
 
     bmt.synchronize()

@@ -4,10 +4,12 @@ import random
 import torch.distributed as dist
 import os
 from .utils import print_dict
+import ctypes
 from .global_var import config
+
 from . import nccl
 from .synchronize import synchronize
-from .block_layer import BMTBlockContext
+
 
 def init_distributed(
         init_method : str = "env://",
@@ -55,7 +57,8 @@ def init_distributed(
     timeout = datetime.timedelta(seconds=1800)
     rendezvous_iterator = dist.rendezvous(
         init_method, rank, world_size, timeout=timeout
-    )
+    )   
+
     store, rank, world_size = next(rendezvous_iterator)
     store.set_timeout(timeout)
     store = dist.PrefixStore("bmtrain", store)
@@ -75,9 +78,6 @@ def init_distributed(
     config["zero_level"] = zero_level
     config["topology"] = topology(config)
     config["zero_rank"] = config["topology"].get_group_rank("zero") if pipe_size > 1 else config['rank']
-    config["block_context"] = []
-    for i in range(world_size):
-        config["block_context"].append(BMTBlockContext())
     cpus_this_worker = None
     
     all_available_cpus = sorted(list(os.sched_getaffinity(0)))
@@ -170,3 +170,4 @@ class topology:
 
 def is_initialized() -> bool:
     return config["initialized"]
+

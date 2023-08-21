@@ -1,5 +1,6 @@
 import torch
 import bmtrain as bmt
+from bmtrain import optim
 
 class TestModule(torch.nn.Module):
     def __init__(self):
@@ -29,8 +30,8 @@ def main():
     model2 = model2.cuda()
     model3 = model3.cuda()
     
-    opt1 = bmt.optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
-    opt2 = bmt.optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-3)
+    opt1 = optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
+    opt2 = optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-3)
     opt3 = torch.optim.Adam(model3.parameters(), weight_decay=1e-3)
 
     for _ in range(100):

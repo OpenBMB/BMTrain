@@ -24,6 +24,7 @@ tq = tqdm([
 
     ("send_recv", 4),
     ("nccl_backward", 4),
+    ("no_grad", 1),
 
     ("training", 4),
 ])

@@ -1,6 +1,6 @@
 import torch
 import bmtrain as bmt
-from layers import Linear
+from bmtrain.nn import Linear
 
 class Feedforward(bmt.DistributedModule):
     def __init__(self, dim_model : int, dim_ff : int, bias : bool = True, dtype = None) -> None:

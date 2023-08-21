@@ -9,7 +9,6 @@ from .distributed import all_gather, broadcast, all_reduce, send_activations, re
 from .global_var import config
 from . import nccl
 from .checkpointing import (
-        ScopedTensorInspectorContext,
         CheckpointBlockContext
 )
 from . import debug
@@ -124,6 +123,44 @@ class PipePostFunction(torch.autograd.Function):
         else:
              return grad_list
 
+class StagePreFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, stage_id):
+        ctx.stage_id = stage_id
+        ctx.is_first_stage = stage_id == 0 
+        ctx.is_last_stage = stage_id == config['pipe_size'] - 1
+        if not ctx.is_first_stage:
+            input = recv_activations(stage_id - 1, config['pipe_comm'])
+            input.requires_grad_()
+            return input 
+        return input
+        
+    @staticmethod
+    def backward(ctx, grad_outputs):
+        if not ctx.is_first_stage:
+            send_data = grad_outputs[0] if isinstance(grad_outputs, tuple) else grad_outputs 
+            send_activations(send_data, ctx.stage_id - 1, config['pipe_comm'])
+        return grad_outputs, None
+
+class StagePostFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, outputs, stage_id):
+        ctx.stage_id = stage_id
+        ctx.is_first_stage = stage_id == 0 
+        ctx.is_last_stage = stage_id == config['pipe_size'] - 1
+        if not ctx.is_last_stage:
+            send_data = outputs[0] if isinstance(outputs, tuple) else outputs
+            send_activations(send_data.detach(), stage_id + 1, config['pipe_comm'])
+        return outputs
+        
+    @staticmethod
+    def backward(ctx, grad_outputs):
+        if not ctx.is_last_stage:
+            pre_grad_inputs = recv_activations(ctx.stage_id + 1, config['pipe_comm'])
+            return pre_grad_inputs, None
+        return grad_outputs, None
+
+
 class PipelineTransformerBlockList(torch.nn.Module):
     r"""
     TransformerBlockList is a list of CheckpointBlocks.
@@ -168,14 +205,18 @@ class PipelineTransformerBlockList(torch.nn.Module):
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)
 
+        pre_module = None
         for i,layer_id in enumerate(self.layer_ids):
-            self._modules[str(layer_id)].layer_id = layer_id
-            self._modules[str(layer_id)]._is_first_stage = True if self.stage_id == 0 else False
-            self._modules[str(layer_id)]._is_last_stage = True if self.stage_id == self.stages-1 else False
-            self._modules[str(layer_id)]._is_first_layer = True if i == 0 else False
-            self._modules[str(layer_id)]._is_last_layer = True if i == len(self.layer_ids)-1 else False
-#if i > 0:
-#self._modules[str(layer_id)].set_pre_module(self._modules[str(layer_id-1)])
+            module = self._modules[str(layer_id)]
+            module.set_pre_module(pre_module)
+            pre_module = module
+
+            module._is_first_stage = True if self.stage_id == 0 else False
+            module._is_last_stage = True if self.stage_id == self.stages-1 else False
+            module._is_first_layer = False
+            module._is_last_layer = False
+        self._modules[str(self.layer_ids[0])]._is_first_layer = True
+        self._modules[str(self.layer_ids[-1])]._is_last_layer = True
 
         self.partition_modules(self.layer_ids)
         self.next_rank = pipe_group[self.pipe_idx, self.stage_id + 1] if self.stage_id < config['pipe_size'] - 1 else -1
@@ -198,6 +239,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         batch_size = hidden_state.shape[0]
         num_micros = config["micros"]
         args = args + (batch_related, )
+        hidden_state.requires_grad_()
         hidden_state_list, args_list = PipePreFunction.apply(hidden_state, *args)
 
         hidden_state_list = hidden_state_list.flatten(0, 1).chunk(num_micros, dim=0)
@@ -206,12 +248,16 @@ class PipelineTransformerBlockList(torch.nn.Module):
 
         for micro_idx, (hidden_state, arg) in enumerate(zip(hidden_state_list, args_list)):
             micro_hidden_states = []
+
+            hidden_state = StagePreFunction.apply(hidden_state, self.stage_id)
+
             for idx,layer_id in enumerate(self.layer_ids):
                 self._modules[str(layer_id)]._micro_idx = micro_idx
                 if return_hidden_states:
-                    self._modules[str(layer_id)].return_hidden_states = return_hidden_states
-                    self._modules[str(layer_id)].hidden_states = micro_hidden_states
+                    micro_hidden_states.append(hidden_state)
                 hidden_state = self._modules[str(layer_id)](hidden_state, *arg)
+            hidden_state = StagePostFunction.apply(hidden_state, self.stage_id)
+
             outputs.append(hidden_state)
             if return_hidden_states:
                 hidden_states.append(torch.stack(micro_hidden_states, dim=0))
