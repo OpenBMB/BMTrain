@@ -7,6 +7,7 @@ import math
 import torch.nn.functional as F
 import bmtrain as bmt
 import os
+from bmtrain import inspect
 
 class Attention(torch.nn.Module):
     def __init__(self, 
@@ -249,7 +250,7 @@ def sub_train_torch(model, loss_func_cls, optimizer_cls):
         ))
         logs.append(global_loss)
 
-    summary = bmt.inspect.inspect_model(model, "*")
+    summary = inspect.inspect_model(model, "*")
     return logs, summary
 
 def sub_train(model, loss_func_cls, optimizer_cls):
@@ -310,7 +311,7 @@ def sub_train(model, loss_func_cls, optimizer_cls):
         ))
         logs.append(global_loss)
 
-    summary = bmt.inspect.inspect_model(model, "*")
+    summary = inspect.inspect_model(model, "*")
     return logs, summary
     
 def train(model, loss_func, optimizer):

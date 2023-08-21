@@ -6,6 +6,7 @@ from bmtrain.block_layer import CheckpointBlockContext,  CheckpointBlock, Transf
 from bmtrain.pipe_layer import PipelineTransformerBlockList
 from typing import List
 import torch.nn.functional as F
+from bmtrain import inspect
 
 class Linear(bmt.DistributedModule):
     def __init__(self, in_features : int, out_features: int, init_weight = None, init_bias = None) -> None:
@@ -34,8 +35,8 @@ def run(m, a, b):
     loss = logits.sum()
     loss.backward()
 
-    sm = bmt.inspect.format_summary(
-            bmt.inspect.inspect_model(m, '*')
+    sm = inspect.format_summary(
+            inspect.inspect_model(m, '*')
         )
     return sm
 
