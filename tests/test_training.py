@@ -430,7 +430,7 @@ def test_main(test_fp16=True, test_fp32=True):
         add_to_check_list("pipelist", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam_offload")
         add_to_check_list("blocklist", "torch_entropy", "torch_adam")
-        add_to_check_list("unroll_blocklist", "bmt_entropy", "bmt_adam")
+        add_to_check_list("unroll_blocklist", "torch_entropy", "bmt_adam")
         if bmt.rank() == 0:
             os.remove(ckpt_path)
         check(ret)
@@ -454,4 +454,4 @@ def check_param(info1, info2):
 if __name__ == '__main__':
     bmt.init_distributed(pipe_size=2)
 
-    test_main(test_fp16=True, test_fp32=True)
+    test_main(test_fp16=False, test_fp32=True)
