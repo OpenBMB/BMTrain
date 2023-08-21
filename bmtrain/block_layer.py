@@ -200,8 +200,6 @@ class CheckpointBlock(torch.nn.Module):
         self._pre_module = [] #save the pre module of self
         self._ref_count = 0 #incremental in forward and  decreasing in backward
         self._mode = "BLOCK" #BLOCK or ZERO or PIPE
-        self.return_hidden_states = False
-        self.hidden_states = []
         self.all_input_no_grad = False
         self.all_param_no_grad = False
 
@@ -260,7 +258,7 @@ class CheckpointBlock(torch.nn.Module):
     def forward(self, *args): 
         arg_list = self.pre_hook(*args)
 
-        if self.all_input_no_grad:
+        if self.all_input_no_grad and not self.all_param_no_grad:
             placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
             return hook_func.OneStepNoGradFunc.apply(self, placeholder, *arg_list)
 
@@ -579,7 +577,8 @@ class TransformerBlockList(torch.nn.Module):
         hidden_states = []
         for i in range(len(self)):
             if return_hidden_states:
-                hidden_states.append(args[0])
+                for hidden_state in args[:self.num_hidden]:
+                    hidden_states.append(hidden_state)
             outputs = self._modules[str(i)]._call_impl(*args)
             if not isinstance(outputs, tuple):
                 outputs = (outputs, )
