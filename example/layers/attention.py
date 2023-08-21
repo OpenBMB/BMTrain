@@ -1,7 +1,7 @@
 from typing import Optional
 import torch
 import bmtrain as bmt
-from layers import Linear
+from bmtrain.nn import Linear
 import math
 
 class Attention(bmt.DistributedModule):

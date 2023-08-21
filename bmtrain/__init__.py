@@ -18,3 +18,7 @@ from .store import save, load
 
 from . import loss
 from . import distributed
+from . import nn
+from . import optim
+from . import inspect
+from . import lr_scheduler

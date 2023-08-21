@@ -185,6 +185,15 @@ class FusedCrossEntropy(torch.nn.Module):
         self.inplace = inplace
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if input.dtype == torch.float32:
+            return torch.nn.functional.cross_entropy(
+                    input, 
+                    target.long(),
+                    weight=self.weight, 
+                    ignore_index=self.ignore_index, 
+                    reduction=self.reduction,
+                    label_smoothing=self.label_smoothing)
+
         if self.inplace:
             ret = OpFusedCrossEntropyInplace.apply(input, target.int(), self.ignore_index) # return float tensor
         else:

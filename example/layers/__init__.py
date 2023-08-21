@@ -1,4 +1,3 @@
-from .linear import Linear
 from .embedding import Embedding
 from .feedforward import Feedforward
 from .layernorm import Layernorm

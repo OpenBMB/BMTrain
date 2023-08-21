@@ -2,6 +2,8 @@ import torch
 import bmtrain as bmt
 from models import GPT
 import time
+from bmtrain import optim
+from bmtrain import inspect
 
 def main():
     bmt.init_distributed(
@@ -51,10 +53,10 @@ def main():
             break
     
     loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = bmt.optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
+    optimizer = optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 
-    optim_manager = bmt.optim.OptimManager(loss_scale=2**20)
+    optim_manager = optim.OptimManager(loss_scale=2**20)
     optim_manager.add_optimizer(optimizer, lr_scheduler)
 
     bmt.synchronize()
@@ -66,7 +68,7 @@ def main():
         # load data
         st = time.time()
 
-        with bmt.inspect.inspect_tensor() as inspector:
+        with inspect.inspect_tensor() as inspector:
             pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
             logits = model(
                 enc_input,
@@ -87,13 +89,13 @@ def main():
         # print parameters of the model
         if iteration % 100 == 0:
             bmt.print_rank(
-                bmt.inspect.format_summary(
+                inspect.format_summary(
                     inspector.get_summary()
                 )
             )
             bmt.print_rank(
-                bmt.inspect.format_summary(
-                    bmt.inspect.inspect_model(model, "*")
+                inspect.format_summary(
+                    inspect.inspect_model(model, "*")
                 )
             )
 

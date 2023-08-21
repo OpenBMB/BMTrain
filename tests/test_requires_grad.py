@@ -7,6 +7,7 @@ from bmtrain.block_layer import CheckpointBlockContext,  CheckpointBlock, Transf
 from bmtrain.pipe_layer import PipelineTransformerBlockList
 from typing import List
 import torch.nn.functional as F
+from bmtrain import inspect
 
 class Linear(bmt.DistributedModule):
     def __init__(self, in_features : int, out_features: int, init_weight = None, init_bias = None) -> None:
@@ -25,19 +26,22 @@ class Linear(bmt.DistributedModule):
         else:
             self.bias = bmt.DistributedParameter(torch.empty(out_features, dtype=torch.float, device="cuda"), init_method=torch.nn.init.zeros_)
     
-    def forward(self, input):
+    def forward(self, input, other_bias):
         ret = F.linear(input, self.weight, self.bias)
+        ret += other_bias
         return ret
 
 def run(m, a, b):
     inp = torch.rand((1, 10, 256)).cuda()*100
-    logits = m(inp)
+    bias = torch.rand(256).cuda()*100
+    logits = m(inp, bias)
     loss = logits.sum()
     loss.backward()
     bmt.synchronize()
-    sm = bmt.inspect.format_summary(
-            bmt.inspect.inspect_model(m, '*')
+    sm = inspect.format_summary(
+            inspect.inspect_model(m, '*')
         )
+    assert_eq(bias.requires_grad, False)
     return a.weight.grad is None, a.bias.grad is None, sm
 
 def test_main():

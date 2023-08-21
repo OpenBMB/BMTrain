@@ -2,6 +2,7 @@ import torch
 import bmtrain as bmt
 import os
 from copy import deepcopy
+from bmtrain import optim
 
 class TestSubModule(bmt.DistributedModule):
     def __init__(self):
@@ -67,10 +68,10 @@ def main():
     bmt.load(model2, f"test_optim_state_model1.pt")
     bmt.load(model3, f"test_optim_state_model1.pt")
 
-    opt1 = bmt.optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
-    opt2 = bmt.optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-3)
+    opt1 = optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
+    opt2 = optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-3)
     opt3 = torch.optim.Adam(model3.parameters(), weight_decay=1e-3)
-    optim_manager = bmt.optim.OptimManager(loss_scale=256)
+    optim_manager = optim.OptimManager(loss_scale=256)
     optim_manager.add_optimizer(opt1)
     optim_manager.add_optimizer(opt2)
     optim_manager.add_optimizer(opt3)
