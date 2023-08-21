@@ -77,6 +77,7 @@ class CheckpointBlock(torch.nn.Module):
         self._param_info = []
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
         self._storage_info = {}
+        self._ready = False
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
