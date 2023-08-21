@@ -206,7 +206,7 @@ class CheckpointBlock(torch.nn.Module):
             pre_module._next_module.append(self)
             
     def pre_module(self):
-        assert len(self._next_module) == self._ref_count, "{} != {}".format(len(self._next_module), self._ref_count)
+        assert len(self._pre_module) == self._ref_count, "{} != {}".format(len(self._pre_module), self._ref_count)
         return self._pre_module[self._ref_count-1]
 
     def next_module(self):
