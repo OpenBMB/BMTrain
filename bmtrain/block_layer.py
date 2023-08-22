@@ -68,7 +68,7 @@ class CheckpointBlock(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, use_offload=False):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, use_offload=False, offload_level=0):
         super().__init__()
         self._module = inner_module
         self._inputs = None
@@ -203,6 +203,7 @@ class CheckpointBlock(torch.nn.Module):
         if use_offload:
             self._mode = "OFFLOAD"
             self._on_device = False
+            self.offload_level = offload_level
     
         self.all_input_no_grad = False
         self.all_param_no_grad = False
@@ -531,7 +532,7 @@ class TransformerBlockList(torch.nn.Module):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
 
-            module._mode = "ZERO"
+            module._mode = "ZERO" if module._mode == "BLOCK" else module._mode
             module.set_pre_module(pre_module)
             pre_module = module
             self._is_first_layer = False

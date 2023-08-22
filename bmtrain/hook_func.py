@@ -141,13 +141,11 @@ def zero_pre_forward(module, inputs):
             match_module = ["Linear"]
             for n, m in module.named_modules():
                 if m.__class__.__name__ in match_module and not hasattr(m, "_offload_hook"):
-                    print("register hook")
                     m._offload_hook = (pack_hook, unpack_hook)
                     m.register_forward_pre_hook(offload_pre_hook)
                     m.register_forward_hook(offload_post_hook)
         elif module.offload_level == 2:
             if not hasattr(module, "_offload_hook"):
-                print("register HOOK for CheckpointBlock")
                 module._offload_hook = (pack_hook, unpack_hook)
                 module.register_forward_pre_hook(offload_pre_hook)
                 module.register_forward_hook(offload_post_hook)
