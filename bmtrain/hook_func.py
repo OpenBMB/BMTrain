@@ -119,6 +119,17 @@ def offload_context(module):
     if hasattr(module, "_offload_hook"):
         torch._C._autograd._pop_saved_tensors_default_hooks()
 
+def offload_pre_hook(module, input):
+   if hasattr(module, "_offload_hook"):
+        pack_hook, unpack_hook = module._offload_hook
+        torch._C._autograd._push_saved_tensors_default_hooks(
+            pack_hook, unpack_hook
+        ) 
+
+def offload_post_hook(module, input, output):
+    if hasattr(module, "_offload_hook"):
+        torch._C._autograd._pop_saved_tensors_default_hooks()
+
 def zero_pre_forward(module, inputs):
     enter = True
     pipe = False
@@ -126,9 +137,21 @@ def zero_pre_forward(module, inputs):
         if not hasattr(module, "_offload_dict"):
             module._offload_dict = Offload_Dict()
         pack_hook, unpack_hook = offload_wrapper(module._offload_dict)
-        for n, m in module.named_modules():
-            if m.__class__.__name__ == "Linear":
-                m._offload_hook = (pack_hook, unpack_hook)
+        if module.offload_level == 1:
+            match_module = ["Linear"]
+            for n, m in module.named_modules():
+                if m.__class__.__name__ in match_module and not hasattr(m, "_offload_hook"):
+                    print("register hook")
+                    m._offload_hook = (pack_hook, unpack_hook)
+                    m.register_forward_pre_hook(offload_pre_hook)
+                    m.register_forward_hook(offload_post_hook)
+        elif module.offload_level == 2:
+            if not hasattr(module, "_offload_hook"):
+                print("register HOOK for CheckpointBlock")
+                module._offload_hook = (pack_hook, unpack_hook)
+                module.register_forward_pre_hook(offload_pre_hook)
+                module.register_forward_hook(offload_post_hook)
+        
         # torch._C._autograd._push_saved_tensors_default_hooks(
         #     pack_hook, unpack_hook
         # )
