@@ -112,11 +112,11 @@ class CheckpointBlock(torch.nn.Module):
             comm = val['zero_comm']
             world_size = nccl.commCount(comm)
             rank = nccl.commRank(comm)
-            val["world_size"] = world_size #config["dp_size"]
+            val["world_size"] = world_size 
             partition_size = round_up(val["total"], val["world_size"]) // val["world_size"]
             val["partition_size"] = partition_size
-            val["begin"] = rank * partition_size #config['zero_rank'] * partition_size
-            val["end"] = (rank+1) * partition_size #(config['zero_rank'] + 1) * partition_size
+            val["begin"] = rank * partition_size
+            val["end"] = (rank+1) * partition_size
             offsets[kw] = 0
 
 

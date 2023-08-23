@@ -24,7 +24,7 @@ class GPT(bmt.DistributedModule):
             bmt.CheckpointBlock(
                 TransformerEncoder(
                     dim_model, dim_head, num_heads, dim_ff, bias, dtype
-                ), use_checkpoint=False
+                )
             )
             for _ in range(num_layers)
         ])
@@ -41,18 +41,15 @@ class GPT(bmt.DistributedModule):
         mask_2d = mask_2d & (pos[:, None, :] >= pos[:, :, None])
 
         out = self.pos_emb(pos) + self.word_emb(input)
-        bmt.synchronize()
 
         # for layer in self.transformers:
         out = self.transformers(out, mask_2d, None)
         out = self.layernorm(out)
 
-        bmt.synchronize()
         if config['tp_size'] > 1:
-            logits = self.word_emb.projection(out)#self.word_emb(out, projection=True)
+            logits = self.word_emb.projection(out)
         else:
             logits = self.word_emb(out, projection=True)
-        bmt.synchronize()
         bmt.inspect.record_tensor(logits, "logits")
 
         return logits

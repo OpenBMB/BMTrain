@@ -14,7 +14,6 @@ class Embedding(bmt.DistributedModule):
         vocab_size: int,
         embedding_size: int,
         dtype: torch.dtype = torch.half,
-        scale: bool = True,
         init_mean: float = 0.0,
         init_std: float = 1,
     ):
@@ -31,7 +30,6 @@ class Embedding(bmt.DistributedModule):
             tp_mode=True,
             tp_split_dim=0,
         )
-        self.scale = scale
 
     def forward(self, ids: torch.Tensor):
         """
@@ -47,9 +45,6 @@ class Embedding(bmt.DistributedModule):
             ids = ids.clone() - self.start_index
             ids[input_mask] = 0 
 
-        #if self.scale:
-        #embeds = F.embedding(ids, self.weight) / math.sqrt(self.dim_model)
-        #else:
         embeds = F.embedding(ids, self.weight)
 
         if config['tp_size'] > 1:
@@ -57,7 +52,6 @@ class Embedding(bmt.DistributedModule):
             embeds = all_reduce(embeds, op="sum", comm=config['tp_comm'])
             embed_list = embeds.chunk(config['tp_size'], dim=0)
             embeds = embed_list[config['topology'].tp_id].flatten(0,1)
-        #print(embeds.sum())
             
         return embeds.clone()
 
@@ -73,15 +67,5 @@ class Embedding(bmt.DistributedModule):
         split_input = False
         reduce_output_type = None 
         gather_output = False 
-        if self.scale:
-            #out = LinearHookFunc.apply(x / math.sqrt(self.dim_model), self.weight, None, gather_input, gather_output, split_input, reduce_output_type)
-            #print(x.sum())
-            #print(x.shape, self.weight.shape)
-            out = LinearHookFunc.apply(x , self.weight, None, gather_input, gather_output, split_input, reduce_output_type) / math.sqrt(self.dim_model)
-            #out_list = out.chunk(config['tp_size'], dim=0)
-            #out = out_list[config['topology'].tp_id]
-            #print(out.sum())
-            return out
-        else:
-            return LinearHookFunc.apply(x, self.weight, None, gather_input, gather_output, split_input, reduce_output_type)
-        return logits
+        out = LinearHookFunc.apply(x , self.weight, None, gather_input, gather_output, split_input, reduce_output_type)
+        return out

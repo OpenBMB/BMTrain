@@ -82,8 +82,7 @@ class Embedding(bmt.DistributedModule):
                 self.norm_type, self.scale_grad_by_freq, self.sparse)
             return out
         else:
-            out = F.linear(input, self.weight) / math.sqrt(self.embedding_dim)
-            #print(out.sum())
+            out = F.linear(input, self.weight)
             return out
 
     def extra_repr(self) -> str:

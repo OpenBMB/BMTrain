@@ -18,17 +18,17 @@ class Attention(bmt.DistributedModule):
         ) -> None:
         super().__init__()
 
-        if config['tp_size'] <= 1:
+        if config['tp_size'] > 1:
+            self.project_q = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
+            self.project_k = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
+            self.project_v = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
+            self.project_out = RowParallelLinear(dim_head * num_heads, dim_model, bias=bias, dtype=dtype)
+        else:
             self.project_q = Linear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
             self.project_k = Linear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
             self.project_v = Linear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
             self.project_out = Linear(dim_head * num_heads, dim_model, bias=bias, dtype=dtype)
-        else:
-            self.project_q = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
-            self.project_k = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
-            self.project_v = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
 
-            self.project_out = RowParallelLinear(dim_head * num_heads, dim_model, bias=bias, dtype=dtype)
 
         self.softmax = torch.nn.Softmax(dim=-1)
         self.num_heads = num_heads

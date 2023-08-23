@@ -10,7 +10,7 @@ def main():
     bmt.init_distributed(
         seed=0,
         zero_level=2,
-        tp_size=4,
+        tp_size=2,
     )
 
     model = GPT(
@@ -26,13 +26,10 @@ def main():
     )
 
     bmt.init_parameters(model)
-    #bmt.load(model, "example_model.pt")
-    # print_inspect(model, "*")
 
     bmt.print_rank("Model memory")
     bmt.print_rank(torch.cuda.memory_summary())
     bmt.synchronize()
-    #bmt.save(model, "example_model.pt")
 
     # data
     # generate dummy data for each rank

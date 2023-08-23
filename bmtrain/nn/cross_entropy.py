@@ -45,11 +45,7 @@ class FusedCrossEntropyFunc(torch.autograd.Function):
         exp_logits = vocab_parallel_logits
         torch.exp(vocab_parallel_logits, out=exp_logits)
         sum_exp_logits = exp_logits.sum(dim=-1)
-        #if config['rank'] == 0:
-            #print("before", sum_exp_logits.shape, predicted_logits.shape)
         sum_exp_logits = all_reduce(sum_exp_logits, op="sum", comm=comm)
-        #if config['rank'] == 0:
-        #    print(sum_exp_logits.shape)
 
         # Loss = log(sum(exp(logits))) - predicted-logit.
         loss = torch.log(sum_exp_logits.view(predicted_logits.shape)) - predicted_logits
@@ -111,7 +107,6 @@ class FusedCrossEntropyFunc(torch.autograd.Function):
             grad_2d[arange_1d, masked_target_1d] -= softmax_update
 
         # Finally elementwise multiplication with the output gradients.
-        #grad_input.mul_(grad_output.unsqueeze(dim=-1))
         grad_input.mul_(grad_output.flatten(0,1).unsqueeze(dim=-1))
 
         return grad_input, None, None
