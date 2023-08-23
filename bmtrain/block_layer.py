@@ -547,8 +547,8 @@ class TransformerBlockList(torch.nn.Module):
             module._mode = "ZERO"
             module.set_pre_module(pre_module)
             pre_module = module
-            self._is_first_layer = False
-            self._is_last_layer = False
+            module._is_first_layer = False
+            module._is_last_layer = False
 
             self._modules[str(i)] = module
             self.add_module(str(i), module)
