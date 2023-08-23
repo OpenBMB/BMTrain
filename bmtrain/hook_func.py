@@ -19,6 +19,11 @@ class Offload_Dict:
         self._offload_dict[tensor_id]["shape"] = tensor.shape
         self._device = "cuda"
         return tensor_id
+    
+    def get_total(self):
+        fp16_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
+        fp32_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])        
+        return fp16_total,fp32_total
 
     def make_cpu_storage(self):
         fp16_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
@@ -94,6 +99,8 @@ def offload_wrapper(offload_dict):
     def pack_hook(tensor):
         if isinstance(tensor, torch.nn.Parameter):
             return (tensor,) 
+        elif tensor.dtype not in [torch.float16]:
+            return (tensor,)
         else:
             key = offload_dict.add(tensor)
             return (tensor.device, key)
@@ -131,6 +138,13 @@ def offload_post_hook(module, input, output):
         torch._C._autograd._pop_saved_tensors_default_hooks()
 
 def zero_pre_forward(module, inputs):
+    def find_pre_module_helper(m):
+        if m._mode == "OFFLOAD":
+            return m
+        elif m._is_first_layer:
+            return None
+        else:
+            return find_pre_module_helper(m._pre_module[0])
     enter = True
     pipe = False
     if module._mode == "OFFLOAD":
@@ -138,18 +152,33 @@ def zero_pre_forward(module, inputs):
             module._offload_dict = Offload_Dict()
         pack_hook, unpack_hook = offload_wrapper(module._offload_dict)
         if module.offload_level == 1:
-            match_module = ["Linear"]
             for n, m in module.named_modules():
-                if m.__class__.__name__ in match_module and not hasattr(m, "_offload_hook"):
+                if m.__class__.__name__ == "Linear" and not hasattr(m, "_offload_hook"):
                     m._offload_hook = (pack_hook, unpack_hook)
                     m.register_forward_pre_hook(offload_pre_hook)
                     m.register_forward_hook(offload_post_hook)
         elif module.offload_level == 2:
             if not hasattr(module, "_offload_hook"):
                 module._offload_hook = (pack_hook, unpack_hook)
-                module.register_forward_pre_hook(offload_pre_hook)
-                module.register_forward_hook(offload_post_hook)
-        
+            torch._C._autograd._push_saved_tensors_default_hooks(
+                pack_hook, unpack_hook
+            )
+    elif module._mode != "OFFLOAD" and ((len(module._pre_module) > 0) and module._pre_module[0]._mode == "OFFLOAD"):
+        for pre_module in module._pre_module:
+            if len(pre_module._pre_module) == 0:
+                pre_offload_module = None
+            else:
+                pre_offload_module = find_pre_module_helper(pre_module._pre_module[0])
+            if pre_offload_module is not None:
+                torch.cuda.current_stream().wait_event(pre_offload_module.offload_event)
+            if pre_module._mode == "OFFLOAD":
+                with torch.cuda.stream(config["offload_stream"]):
+                    config["offload_stream"].wait_event(pre_module.calc_event)
+                    if not hasattr(pre_module._offload_dict, "fp16_storage"):
+                        pre_module._offload_dict.make_cpu_storage()
+                    pre_module._offload_dict.d2h_memcpy()
+                    pre_module.offload_event = torch.cuda.Event()
+                    config["offload_stream"].record_event(pre_module.offload_event)
         # torch._C._autograd._push_saved_tensors_default_hooks(
         #     pack_hook, unpack_hook
         # )
@@ -174,14 +203,10 @@ def zero_post_forward(module, inputs, outputs):
     exit = True
     if module._mode == "PIPE":
         exit = module._micro_idx == config['micros'] - 1
-    elif module._mode != "OFFLOAD" and ((not module._is_first_layer) and module._pre_module[0]._mode == "OFFLOAD"):
-        for pre_module in module._pre_module:
-            if pre_module._mode == "OFFLOAD":
-        # torch._C._autograd._pop_saved_tensors_default_hooks()
-                with torch.cuda.stream(config["offload_stream"]):
-                    if not hasattr(pre_module._offload_dict, "fp16_storage"):
-                        pre_module._offload_dict.make_cpu_storage()
-                    pre_module._offload_dict.d2h_memcpy()
+    elif module._mode == "OFFLOAD" and module.offload_level == 2:
+        module.calc_event = torch.cuda.Event()
+        torch.cuda.current_stream().record_event(module.calc_event)
+        torch._C._autograd._pop_saved_tensors_default_hooks()
     if exit:
         module._forward_block_ctx.exit(forward_flag)
         module._ref_count += 1
@@ -191,7 +216,7 @@ def zero_pre_backward(module, grad_outputs):
     if module._mode != "PIPE":
         if module._mode != "OFFLOAD":
             count = len([m for m in module._pre_module if m._mode=="OFFLOAD"])
-            if module._is_last_layer or module._next_module[0]._mode == "OFFLOAD":
+            if (len(module._next_module) == 0) or module._next_module[0]._mode == "OFFLOAD":
                 for pre_module in nearest_offload_module(module):
                     if pre_module._mode == "OFFLOAD":
                         pre_module._on_device = True

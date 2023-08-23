@@ -82,7 +82,7 @@ class CheckpointBlock(torch.nn.Module):
         self._ready = False
         # sort parameters by nam_next_modulee
         ordered_parameters = list(self._module.named_parameters())
-        assert not (use_checkpoint and use_offload)
+        assert not (use_checkpoint and use_offload), "It does not make sense to use offload and checkpointing at the same time" 
         # calc total number of parameters
         for name, param in ordered_parameters:
             if not isinstance(param, DistributedParameter):
@@ -531,14 +531,14 @@ class TransformerBlockList(torch.nn.Module):
         for i, module in enumerate(modules):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
-
             module._mode = "ZERO" if module._mode == "BLOCK" else module._mode
             module.set_pre_module(pre_module)
             pre_module = module
-            self._is_first_layer = False
-            self._is_last_layer = False
+            module._is_first_layer = False
+            module._is_last_layer = False
 
             self._modules[str(i)] = module
+            module._idx = i
             self.add_module(str(i), module)
 
         self._modules[str(0)]._is_first_layer = True
@@ -567,7 +567,7 @@ class TransformerBlockList(torch.nn.Module):
             self.save_list = save_list
         else:
             self.save_list = [(i, i) for i in range(len(self))]
-            
+             
     def __len__(self) -> int:
         return len(self._modules)
 
