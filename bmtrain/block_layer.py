@@ -94,7 +94,8 @@ class CheckpointBlock(torch.nn.Module):
                     "total": 0,
                     "storage_type": storage_type,
                     "requires_grad": param.requires_grad,
-                    "group": param.group
+                    "group": param.group,
+                    "zero_comm" : param._zero_comm
                 }
 
             param_shape = param._original_shape
@@ -108,11 +109,14 @@ class CheckpointBlock(torch.nn.Module):
         offsets = {}
         # intialize storage buffers
         for kw, val in self._storage_info.items():
-            val["world_size"] = config["world_size"]
+            comm = val['zero_comm']
+            world_size = nccl.commCount(comm)
+            rank = nccl.commRank(comm)
+            val["world_size"] = world_size #config["dp_size"]
             partition_size = round_up(val["total"], val["world_size"]) // val["world_size"]
             val["partition_size"] = partition_size
-            val["begin"] = config['rank'] * partition_size
-            val["end"] = (config['rank'] + 1) * partition_size
+            val["begin"] = rank * partition_size #config['zero_rank'] * partition_size
+            val["end"] = (rank+1) * partition_size #(config['zero_rank'] + 1) * partition_size
             offsets[kw] = 0
 
 
@@ -301,13 +305,16 @@ class CheckpointBlock(torch.nn.Module):
             if key in state_dict:
                 # load here
                 input_param = state_dict[key]
+                param = it['parameter']
+                tp_mode = param._tp_mode
                 if input_param.__class__.__name__ == "DistributedTensorWrapper":
                     input_param = input_param.broadcast()
-                if input_param.shape != it["shape"]:
+                if not tp_mode and input_param.shape != it["shape"]:
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, it["shape"]))
                     continue
+                    
                 param_st = it["offset"]
                 param_end = it["offset"] + it["size"]
                 kw_name = it["kw_name"]
@@ -321,8 +328,18 @@ class CheckpointBlock(torch.nn.Module):
                     continue
                     
                 # copy to buffer
-                assert input_param.numel() == it["size"]
+                if not tp_mode:
+                    assert input_param.numel() == it["size"]
+
                 contiguous_param = input_param.to(it["parameter"].dtype).cuda().contiguous()
+
+                if tp_mode:
+                    tp_split_dim = param._tp_split_dim
+                    if tp_split_dim >= 0:
+                        param_list = contiguous_param.chunk(config['tp_size'], dim=tp_split_dim)
+                        sub_tensor = param_list[config['topology'].tp_id]
+                        contiguous_param = torch.empty(sub_tensor.shape, device=sub_tensor.device, dtype=sub_tensor.dtype)
+                        contiguous_param.copy_(sub_tensor)
                 
                 offset_st = max(storage_st - param_st, 0)
                 offset_end = min(storage_end - param_st, contiguous_param.numel())
@@ -330,7 +347,7 @@ class CheckpointBlock(torch.nn.Module):
 
                 to_offset_st = offset_st + param_st - storage_st
                 to_offset_end = offset_end + param_st - storage_st
-                
+
                 # copy to buffer
                 # PyTorch 1.11 changed the API of storage.__getitem__
                 d_dtype = self._storage_params[kw_name].dtype
@@ -397,7 +414,7 @@ class CheckpointBlock(torch.nn.Module):
             param = it["parameter"]
             if isinstance(param, DistributedParameter) and param._init_method is not None:
                 # initialzie here
-                tmp_tensor = torch.empty(it["shape"], device=param.device, dtype=param.dtype)
+                tmp_tensor = torch.empty(param._tp_original_shape, device=param.device, dtype=param.dtype)
                 param._init_method(tmp_tensor)
                 param_st = it["offset"]
                 param_end = it["offset"] + it["size"]
@@ -411,16 +428,18 @@ class CheckpointBlock(torch.nn.Module):
                 if param_end <= storage_st:
                     continue
                     
+                if param._tp_mode and param._tp_split_dim >= 0:
+                    tensor_list = tmp_tensor.chunk(config['tp_size'], dim=param._tp_split_dim)
+                    sub_tensor = tensor_list[config['topology'].tp_id].contiguous()
+                    tmp_tensor = torch.empty(sub_tensor.shape, device=param.device, dtype=sub_tensor.dtype)
+                    tmp_tensor.copy_(sub_tensor)
                 # copy to buffer
                 assert tmp_tensor.is_contiguous() and it["size"] == tmp_tensor.numel()
                 
-                offset_st = max(storage_st - param_st, 0)
-                offset_end = min(storage_end - param_st, tmp_tensor.numel())
+                offset_st = max(storage_st - param_st, 0) 
+                offset_end = min(storage_end - param_st, tmp_tensor.numel())            
                 assert offset_st < offset_end
 
-                to_offset_st = offset_st + param_st - storage_st
-                to_offset_end = offset_end + param_st - storage_st
-                
                 # copy to buffer
                 # PyTorch 1.11 changed the API of storage.__getitem__
                 d_dtype = self._storage_params[kw_name].dtype
@@ -528,8 +547,8 @@ class TransformerBlockList(torch.nn.Module):
             module._mode = "ZERO"
             module.set_pre_module(pre_module)
             pre_module = module
-            module._is_first_layer = False
-            module._is_last_layer = False
+            self._is_first_layer = False
+            self._is_last_layer = False
 
             self._modules[str(i)] = module
             self.add_module(str(i), module)

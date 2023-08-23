@@ -39,10 +39,8 @@ class CheckpointBlockContext:
         self._param_tensor = {}
         self._grad_tensor = {}
         self._need_release = False
-        if pipe:
-            self.comm = config["zero_comm"] 
-        else:
-            self.comm = config["comm"]
+        #self.comm = config["zero_comm"] 
+
     def enter(self, flag=0, requires_grad=False):
         """
         gather parameters
@@ -74,7 +72,8 @@ class CheckpointBlockContext:
                     nccl.allGather(
                         self.block._storage_params[kw].storage(),
                         self._param_buffer[kw],
-                        self.comm
+                        #self.comm
+                        val['zero_comm']
                     )
                 nccl.groupEnd()
 
@@ -144,7 +143,8 @@ class CheckpointBlockContext:
                             self._grad_buffer[kw],
                             local_param.grad.storage(),
                             "sum",
-                            self.comm
+                            #self.comm
+                            val['zero_comm']
                         )
                 nccl.groupEnd()
 

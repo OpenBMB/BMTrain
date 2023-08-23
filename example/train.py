@@ -3,12 +3,14 @@ import bmtrain as bmt
 from models import GPT
 import time
 from bmtrain import optim
+from bmtrain.global_var import config
 from bmtrain import inspect
 
 def main():
     bmt.init_distributed(
         seed=0,
         zero_level=2,
+        tp_size=4,
     )
 
     model = GPT(
@@ -24,11 +26,13 @@ def main():
     )
 
     bmt.init_parameters(model)
+    #bmt.load(model, "example_model.pt")
     # print_inspect(model, "*")
 
     bmt.print_rank("Model memory")
     bmt.print_rank(torch.cuda.memory_summary())
     bmt.synchronize()
+    #bmt.save(model, "example_model.pt")
 
     # data
     # generate dummy data for each rank
@@ -52,7 +56,11 @@ def main():
         if i == bmt.rank():
             break
     
-    loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
+    if config['tp_size'] > 1:
+        loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100)
+    else:
+        loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
+
     optimizer = optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 
@@ -77,7 +85,10 @@ def main():
             )
             batch, seq_len, vocab_out_size = logits.size()
 
-            loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
+            if config['tp_size'] > 1:
+                loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets)
+            else:
+                loss = loss_func(logits.float().view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
         
             global_loss = bmt.sum_loss(loss).item()
 

@@ -1,6 +1,10 @@
 from typing import Optional
 import torch
 from . import _function as F
+from bmtrain.nn import fused_cross_entropy
+from bmtrain.global_var import config
+from bmtrain.distributed import all_gather
+
 class OpFusedCrossEntropy(torch.autograd.Function):
     """
     CrossEntropy dim = 1
@@ -185,19 +189,23 @@ class FusedCrossEntropy(torch.nn.Module):
         self.inplace = inplace
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        if input.dtype == torch.float32:
-            return torch.nn.functional.cross_entropy(
-                    input, 
-                    target.long(),
-                    weight=self.weight, 
-                    ignore_index=self.ignore_index, 
-                    reduction=self.reduction,
-                    label_smoothing=self.label_smoothing)
-
-        if self.inplace:
-            ret = OpFusedCrossEntropyInplace.apply(input, target.int(), self.ignore_index) # return float tensor
+        if config['tp_size'] > 1:
+            target = all_gather(target, comm=config['tp_comm']).flatten(0,1)
+            ret = fused_cross_entropy(input, target.long(), self.ignore_index)
         else:
-            ret = OpFusedCrossEntropy.apply(input, target.int(), self.ignore_index) # return float tensor
+            if input.dtype == torch.float32:
+                return torch.nn.functional.cross_entropy(
+                        input, 
+                        target.long(),
+                        weight=self.weight, 
+                        ignore_index=self.ignore_index, 
+                        reduction=self.reduction,
+                        label_smoothing=self.label_smoothing)
+
+            if self.inplace:
+                ret = OpFusedCrossEntropyInplace.apply(input, target.int(), self.ignore_index) # return float tensor
+            else:
+                ret = OpFusedCrossEntropy.apply(input, target.int(), self.ignore_index) # return float tensor
 
         if self.weight is not None:
             if self.weight.dim() != 1 or self.weight.size(0) != input.size(1):
@@ -208,6 +216,12 @@ class FusedCrossEntropy(torch.nn.Module):
             w = (target != self.ignore_index).int()
 
         ret = w * ret
+
+        if config['tp_size'] > 1:
+            ret_list = ret.chunk(config['tp_size'], dim=0)
+            ret = ret_list[config['topology'].tp_id]
+            w_list = w.chunk(config['tp_size'], dim=0)
+            w = w_list[config['topology'].tp_id]
         
         if self.reduction == "none":
             return ret
