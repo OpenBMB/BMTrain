@@ -310,7 +310,7 @@ class CheckpointBlock(torch.nn.Module):
                 if input_param.__class__.__name__ == "DistributedTensorWrapper":
                     input_param = input_param.broadcast()
 
-                verify_shape = it["shape"] if not tp_mode else param._tp_original_shape
+                verify_shape = torch.Size(it["shape"] if not tp_mode else param._tp_original_shape)
                 if input_param.shape != verify_shape:
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
@@ -335,6 +335,7 @@ class CheckpointBlock(torch.nn.Module):
 
                 contiguous_param = input_param.to(it["parameter"].dtype).cuda().contiguous()
 
+                tp_split_dim = param._tp_split_dim
                 if tp_mode and tp_split_dim >= 0:
                     contiguous_param = tp_split_tensor(contiguous_param, tp_split_dim)
                 

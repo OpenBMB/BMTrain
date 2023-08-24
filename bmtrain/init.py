@@ -81,6 +81,7 @@ def init_distributed(
     config["tp_size"] = tp_size if tp_size > 0 else 1
     config["topology"] = topology(config)
     config["zero_rank"] = config['topology'].get_group_rank("zero")
+    config["tp_rank"] = config['topology'].get_group_rank("tp")
     config["tp_zero_rank"] = config['topology'].get_group_rank("tp_zero")
     cpus_this_worker = None
     
@@ -126,12 +127,11 @@ def init_distributed(
     unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
     config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
 
-    if config['tp_size'] > 1:
-        if topo.tp_zero_id == 0:
-            unique_id = nccl.getUniqueId()
-            store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
-        unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
-        config ['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.tp_zero_id)
+    if topo.tp_zero_id == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
+    unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
+    config['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.tp_zero_id)
 
     if topo.zero_id == 0:
         unique_id = nccl.getUniqueId()

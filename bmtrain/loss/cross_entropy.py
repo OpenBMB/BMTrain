@@ -180,6 +180,7 @@ class FusedCrossEntropy(torch.nn.Module):
                  reduction: str = 'mean',
                  label_smoothing: float = 0.0, # TODO not supported yet
                  inplace: bool = False,
+                 parallel: bool = False,
                 ) -> None:
         super().__init__()
         self.weight = weight
@@ -187,9 +188,10 @@ class FusedCrossEntropy(torch.nn.Module):
         self.reduction = reduction
         self.label_smoothing = label_smoothing
         self.inplace = inplace
+        self.parallel = parallel
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        if config['tp_size'] > 1:
+        if self.parallel:
             target = all_gather(target, comm=config['tp_comm']).flatten(0,1)
             ret = parallel_cross_entropy_func(input, target.long(), self.ignore_index)
         else:
