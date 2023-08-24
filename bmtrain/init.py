@@ -15,8 +15,8 @@ def init_distributed(
         seed : int = 0,
         zero_level: int = 3,
         pipe_size: int = -1,
-        tp_size : int = 1,
         num_micro_batches: int = None,
+        tp_size : int = 1,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -25,6 +25,9 @@ def init_distributed(
     Args:
         seed (int): The random seed.
         zero_level (int): The ZeRO optimization level. 2 for stage-2, 3 for stage-3.
+        pipe_size (int) : pipe_size means that all processes will be divided into pipe_size groups
+        num_micro_batches (int) : means that the input batchs will be divided into num_micro_batches small batches. used in pipeline mode. 
+        tp_size (int) : tp_size means the size of each of tensor parallel group
 
     **init_distributed** reads the following environment variables: 
     
@@ -107,24 +110,23 @@ def init_distributed(
     
     unique_id = bytes.fromhex(store.get("BMTRAIN_UNIQUE_ID").decode())
     config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
+    topo = config['topology']
 
     if config['pipe_enabled']:
         config["micros"] = num_micro_batches if num_micro_batches else config["pipe_size"]
-        topo = config['topology']
         if topo.stage_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"PIPE_UNIQUE_ID{topo.pipe_idx}", unique_id.hex())
         unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
         config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id)
 
-    if config['tp_size'] > 1:
-        topo = config['topology']
-        if topo.tp_id == 0:
-            unique_id = nccl.getUniqueId()
-            store.set(f"TP_UNIQUE_ID{topo.tp_idx}", unique_id.hex())
-        unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
-        config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
+    if topo.tp_id == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"TP_UNIQUE_ID{topo.tp_idx}", unique_id.hex())
+    unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
+    config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
 
+    if config['tp_size'] > 1:
         if topo.tp_zero_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
@@ -166,13 +168,14 @@ class topology:
         topo=topo.view(pp_size,dp_size*tp_size)
         self.stages = config['pipe_size']
         
+        stage_size = world_size // pp_size
         for i in range(world_size):
-            self.pipe_idx = self.rank % pp_size
-            self.stage_id = self.rank // pp_size
+            self.pipe_idx = self.rank % stage_size 
+            self.stage_id = self.rank // stage_size 
             self.tp_id = self.rank % tp_size
             self.tp_idx = self.rank // tp_size 
-            self.zero_idx = self.stage_id if pp_size > 1 else 0
-            self.zero_id = self.pipe_idx if pp_size > 1 else self.rank
+            self.zero_idx = self.stage_id 
+            self.zero_id = self.pipe_idx 
             self.tp_zero_idx = self.tp_id 
             self.tp_zero_id = self.tp_idx if dp_size > 1 else 0
 
