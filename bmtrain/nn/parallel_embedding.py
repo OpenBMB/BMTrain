@@ -69,5 +69,5 @@ class ParallelEmbedding(bmt.DistributedModule):
         split_input = False
         reduce_output_type = None 
         gather_output = False 
-        out = ParallelLineakFunc.apply(x , self.weight, None, gather_input, gather_output, split_input, reduce_output_type)
+        out = ParallelLinearFunc.apply(x , self.weight, None, gather_input, gather_output, split_input, reduce_output_type)
         return out
