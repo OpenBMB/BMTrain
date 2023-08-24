@@ -107,7 +107,6 @@ def init_distributed(
     
     unique_id = bytes.fromhex(store.get("BMTRAIN_UNIQUE_ID").decode())
     config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
-    config['zero_comm'] = config['comm']
 
     if config['pipe_enabled']:
         config["micros"] = num_micro_batches if num_micro_batches else config["pipe_size"]
@@ -126,14 +125,17 @@ def init_distributed(
         unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
         config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
 
-    if not config['pipe_enabled'] and config['tp_size'] <= 1:
-        config['tp_zero_comm'] = config['comm']
-    else:
         if topo.tp_zero_id == 0:
             unique_id = nccl.getUniqueId()
-            store.set(f"ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
-        unique_id = bytes.fromhex(store.get(f"ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
+            store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
+        unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
         config ['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.tp_zero_id)
+
+    if topo.zero_id == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"ZERO_UNIQUE_ID{topo.zero_idx}", unique_id.hex() )
+    unique_id = bytes.fromhex(store.get(f"ZERO_UNIQUE_ID{topo.zero_idx}").decode())
+    config ['zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size']), topo.zero_id)
 
     for i in range(world_size):
         if i == rank:
@@ -162,29 +164,21 @@ class topology:
         config['zero_size'] = world_size // pp_size 
         topo=torch.tensor(range(dp_size*tp_size*pp_size),dtype=torch.int,device='cuda')
         topo=topo.view(pp_size,dp_size*tp_size)
-        self.pp_group=topo.transpose(0,1).reshape(-1,pp_size)
-        self.stage_id = (self.pp_group == self.rank).nonzero()[0,-1].item()
         self.stages = config['pipe_size']
-        self.pipe_idx = (self.pp_group == self.rank).nonzero()[0, 0].item() # x axes
-        self.zero_id = self.pipe_idx
-        self.zero_idx = self.stage_id
         
-        self.tp_group = topo.reshape(pp_size, dp_size, tp_size)
-        self.tp_id = (self.tp_group == self.rank).nonzero()[0,2].item()   
-        self.tp_idx = (self.tp_group == self.rank).nonzero()[0,1 if dp_size > 1 else 0].item()   
-
-        if pp_size == 1 and tp_size == 1:
-            self.tp_zero_id = self.rank
-            self.tp_zero_idx = 0
-        else:
-            self.dp_group = self.tp_group.permute(0,2,1)
-            self.tp_zero_id = (self.dp_group == self.rank).nonzero()[0,2 if tp_size > 1 else 0].item()   
-            self.tp_zero_idx = (self.dp_group == self.rank).nonzero()[0,1 if tp_size > 1 else 2].item()   
+        for i in range(world_size):
+            self.pipe_idx = self.rank % pp_size
+            self.stage_id = self.rank // pp_size
+            self.tp_id = self.rank % tp_size
+            self.tp_idx = self.rank // tp_size 
+            self.zero_idx = self.stage_id if pp_size > 1 else 0
+            self.zero_id = self.pipe_idx if pp_size > 1 else self.rank
+            self.tp_zero_idx = self.tp_id 
+            self.tp_zero_id = self.tp_idx if dp_size > 1 else 0
 
         self.next_rank = self.stage_id+1 if self.stage_id < config['pipe_size'] - 1 else -1
         self.prev_rank = self.stage_id-1 if self.stage_id > 0 else -1
-        self.tails = self.pp_group[self.pipe_idx, self.stage_id:].tolist()
-        self.heads = self.pp_group[self.pipe_idx, :self.stage_id + 1].tolist()
+
 
     def get_group_id(self,group_name):
         if group_name == "pipe":
