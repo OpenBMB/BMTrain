@@ -75,6 +75,7 @@ def init_distributed(
     config["world_size"] = world_size
     config["calc_stream"] = torch.cuda.current_stream()
     config["load_stream"] = torch.cuda.Stream(priority=-1)
+    config["tp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config['barrier_stream'] = torch.cuda.Stream()
     config["load_event"] = torch.cuda.Event()
     config["zero_level"] = zero_level
@@ -126,12 +127,12 @@ def init_distributed(
     unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
     config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
 
-    if config['tp_size'] > 1:
-        if topo.tp_zero_id == 0:
-            unique_id = nccl.getUniqueId()
-            store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
-        unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
-        config ['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.tp_zero_id)
+    #if config['tp_size'] > 1:
+    if topo.tp_zero_id == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
+    unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
+    config ['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.tp_zero_id)
 
     if topo.zero_id == 0:
         unique_id = nccl.getUniqueId()
