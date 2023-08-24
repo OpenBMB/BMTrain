@@ -15,7 +15,7 @@ class GPT(bmt.DistributedModule):
         self.max_distance = max_distance
 
         if config['tp_size'] > 1:
-            self.word_emb = bmt.nn.Embedding(vocab_size, dim_model, dtype=dtype)
+            self.word_emb = bmt.nn.ParallelEmbedding(vocab_size, dim_model, dtype=dtype)
         else:
             self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         self.pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
