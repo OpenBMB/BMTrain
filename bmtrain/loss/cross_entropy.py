@@ -1,7 +1,7 @@
 from typing import Optional
 import torch
 from . import _function as F
-from bmtrain.nn import fused_cross_entropy
+from bmtrain.nn import parallel_cross_entropy_func
 from bmtrain.global_var import config
 from bmtrain.distributed import all_gather
 
@@ -191,7 +191,7 @@ class FusedCrossEntropy(torch.nn.Module):
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         if config['tp_size'] > 1:
             target = all_gather(target, comm=config['tp_comm']).flatten(0,1)
-            ret = fused_cross_entropy(input, target.long(), self.ignore_index)
+            ret = parallel_cross_entropy_func(input, target.long(), self.ignore_index)
         else:
             if input.dtype == torch.float32:
                 return torch.nn.functional.cross_entropy(

@@ -15,7 +15,7 @@ def init_distributed(
         seed : int = 0,
         zero_level: int = 3,
         pipe_size: int = -1,
-        tp_size = 1,
+        tp_size : int = 1,
         num_micro_batches: int = None,
     ):
     """Initialize distributed training.

@@ -53,9 +53,8 @@ class DistributedParameter(torch.nn.Parameter):
         original_shape = data.size()
         tp_original_shape = original_shape 
         if tp_mode and tp_split_dim >= 0:
-            list_shape = list(original_shape)
-            list_shape[tp_split_dim] *= config['tp_size']
-            tp_original_shape = list_shape
+            tp_original_shape = list(original_shape)
+            tp_original_shape[tp_split_dim] *= config['tp_size']
 
         cuda_storage = cuda_tensor.storage_type()(cuda_storage_size)
 
@@ -176,7 +175,7 @@ class OpAllGather(torch.autograd.Function):
         )
         grad_tensor = torch.tensor([], dtype=grad_output.dtype, device="cuda")
         grad_tensor.set_(grad_storage, 0, (ctx.tensor_size,))
-        return grad_tensor, None
+        return grad_tensor
 
 class ParameterInitializer:
     """

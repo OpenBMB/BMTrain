@@ -6,9 +6,9 @@ import math
 import bmtrain as bmt
 from bmtrain.global_var import config
 from bmtrain.distributed import all_reduce, all_gather
-from .parallel_linear_hook_func import LinearHookFunc 
+from .parallel_linear_func import ParallelLinearFunc 
 
-class Embedding(bmt.DistributedModule):
+class ParallelEmbedding(bmt.DistributedModule):
     def __init__(
         self,
         vocab_size: int,
@@ -31,16 +31,18 @@ class Embedding(bmt.DistributedModule):
             tp_split_dim=0,
         )
 
-    def forward(self, ids: torch.Tensor):
+    def forward(self, ids: torch.Tensor, gather_input=True):
         """
         Args:
             ids (:obj:`torch.Tensor` of shape ``(batch_size, seq_len)``): Indices of input sequence tokens.
+            gather_input (bool) : whether gather input is required between  tensor parallel group)
         Return:
             :obj:`torch.Tensor` of shape ``(batch_size, seq_len, embedding_size)``: The embedding output.
         """  # noqa: E501
 
         if config['tp_size'] > 1:
-            ids = all_gather(ids, comm=config['tp_comm'])
+            if gather_input:
+                ids = all_gather(ids, comm=config['tp_comm'])
             input_mask = (ids < self.start_index) | (ids >= self.end_index) 
             ids = ids.clone() - self.start_index
             ids[input_mask] = 0 
@@ -67,5 +69,5 @@ class Embedding(bmt.DistributedModule):
         split_input = False
         reduce_output_type = None 
         gather_output = False 
-        out = LinearHookFunc.apply(x , self.weight, None, gather_input, gather_output, split_input, reduce_output_type)
+        out = ParallelLineakFunc.apply(x , self.weight, None, gather_input, gather_output, split_input, reduce_output_type)
         return out

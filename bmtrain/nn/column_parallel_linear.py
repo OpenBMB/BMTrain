@@ -3,16 +3,17 @@ from torch.nn.parameter import Parameter
 
 import bmtrain as bmt
 from bmtrain.global_var import config
-from .parallel_linear_hook_func import (
-    LinearHookFunc,
+from .parallel_linear_func import (
+    ParallelLinearFunc,
     ReduceType)
 
 class ColumnParallelLinear(bmt.DistributedModule):
-    def __init__(self, in_features : int, out_features: int, bias: bool = True, dtype = None, gather_output=False) -> None:
+    def __init__(self, in_features : int, out_features: int, bias: bool = True, dtype = None, gather_output=False, gather_input=True) -> None:
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.gather_output = gather_output
+        self.gather_input = gather_input
         tp_size = config['tp_size']
         assert out_features % tp_size == 0
         self.out_features_per_partition = out_features // tp_size
@@ -23,10 +24,10 @@ class ColumnParallelLinear(bmt.DistributedModule):
             self.register_parameter('bias', None)
 
     def forward(self, input):
-        gather_input = True
+        gather_input = self.gather_input 
         split_input = False
         reduce_output_type = None 
-        return LinearHookFunc.apply(input, self.weight, self.bias, gather_input, self.gather_output, split_input, reduce_output_type)
+        return ParallelLinearFunc.apply(input, self.weight, self.bias, gather_input, self.gather_output, split_input, reduce_output_type)
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={}'.format(

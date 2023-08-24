@@ -20,7 +20,7 @@ def preprocess_input(input, gather_input, split_input):
         input = all_input_list[config['topology'].tp_id]
     return input
 
-class LinearHookFunc(torch.autograd.Function):
+class ParallelLinearFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, weight, bias=None, gather_input=False, gather_output=False, split_input=False, reduce_output_type=None):
         ctx.save_for_backward(input, weight, bias)

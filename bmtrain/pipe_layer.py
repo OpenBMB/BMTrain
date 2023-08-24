@@ -290,7 +290,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
             return rest + (layer_id - rest * (part_len+1)) // part_len
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        print('call _save_to_state_dict')
         for name, module in self._modules.items():
             idx = int(name)
             name = prefix + name + '.'

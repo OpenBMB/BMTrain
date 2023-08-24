@@ -3,7 +3,6 @@ import torch
 from .block_layer import CheckpointBlock
 from .parameter import DistributedParameter
 from .global_var import config
-from . import nccl
 
 
 def init_distributed_parameter(params : Iterable[torch.nn.Parameter]):

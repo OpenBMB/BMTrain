@@ -3,8 +3,8 @@ from torch.nn.parameter import Parameter
 
 import bmtrain as bmt
 from bmtrain.global_var import config
-from .parallel_linear_hook_func import (
-    LinearHookFunc,
+from .parallel_linear_func import (
+    ParallelLinearFunc,
     ReduceType)
 
 class RowParallelLinear(bmt.DistributedModule):
@@ -27,7 +27,7 @@ class RowParallelLinear(bmt.DistributedModule):
         gather_input = self.split_input
         gather_output = False
         reduce_output_type = ReduceType.ALL_REDUCE if self.all_reduce_output else ReduceType.REDUCE_SCATTER
-        out = LinearHookFunc.apply(input, self.weight, None, gather_input, gather_output, self.split_input, reduce_output_type)
+        out = ParallelLinearFunc.apply(input, self.weight, None, gather_input, gather_output, self.split_input, reduce_output_type)
         out = out + self.bias
         return out
 

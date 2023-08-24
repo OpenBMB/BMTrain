@@ -1,6 +1,6 @@
 from typing import Dict, Iterable, Iterator, Union, List
 
-from .utils import round_up
+from .utils import (round_up, tp_split_tensor)
 from .global_var import config
 import torch
 from . import nccl
@@ -309,10 +309,12 @@ class CheckpointBlock(torch.nn.Module):
                 tp_mode = param._tp_mode
                 if input_param.__class__.__name__ == "DistributedTensorWrapper":
                     input_param = input_param.broadcast()
-                if not tp_mode and input_param.shape != it["shape"]:
+
+                verify_shape = it["shape"] if not tp_mode else param._tp_original_shape
+                if input_param.shape != verify_shape:
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
-                                      .format(key, input_param.shape, it["shape"]))
+                                      .format(key, input_param.shape, verify_shape))
                     continue
                     
                 param_st = it["offset"]
@@ -328,18 +330,13 @@ class CheckpointBlock(torch.nn.Module):
                     continue
                     
                 # copy to buffer
-                if not tp_mode:
-                    assert input_param.numel() == it["size"]
+                verify_size = verify_shape.numel()
+                assert input_param.numel() == verify_size
 
                 contiguous_param = input_param.to(it["parameter"].dtype).cuda().contiguous()
 
-                if tp_mode:
-                    tp_split_dim = param._tp_split_dim
-                    if tp_split_dim >= 0:
-                        param_list = contiguous_param.chunk(config['tp_size'], dim=tp_split_dim)
-                        sub_tensor = param_list[config['topology'].tp_id]
-                        contiguous_param = torch.empty(sub_tensor.shape, device=sub_tensor.device, dtype=sub_tensor.dtype)
-                        contiguous_param.copy_(sub_tensor)
+                if tp_mode and tp_split_dim >= 0:
+                    contiguous_param = tp_split_tensor(contiguous_param, tp_split_dim)
                 
                 offset_st = max(storage_st - param_st, 0)
                 offset_end = min(storage_end - param_st, contiguous_param.numel())
@@ -429,10 +426,7 @@ class CheckpointBlock(torch.nn.Module):
                     continue
                     
                 if param._tp_mode and param._tp_split_dim >= 0:
-                    tensor_list = tmp_tensor.chunk(config['tp_size'], dim=param._tp_split_dim)
-                    sub_tensor = tensor_list[config['topology'].tp_id].contiguous()
-                    tmp_tensor = torch.empty(sub_tensor.shape, device=param.device, dtype=sub_tensor.dtype)
-                    tmp_tensor.copy_(sub_tensor)
+                    tmp_tensor = tp_split_tensor(tmp_tensor, param._tp_split_dim)
                 # copy to buffer
                 assert tmp_tensor.is_contiguous() and it["size"] == tmp_tensor.numel()
                 

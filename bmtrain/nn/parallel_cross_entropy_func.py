@@ -3,7 +3,7 @@ import bmtrain as bmt
 from bmtrain.global_var import config
 from bmtrain.distributed import all_reduce, all_gather
 
-class FusedCrossEntropyFunc(torch.autograd.Function):
+class ParallelCrossEntropyFunc(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, vocab_parallel_logits, target, label_smoothing=0.0):
@@ -112,7 +112,7 @@ class FusedCrossEntropyFunc(torch.autograd.Function):
         return grad_input, None, None
 
 
-def fused_cross_entropy(vocab_parallel_logits, target, label_smoothing=0.0):
+def parallel_cross_entropy_func(vocab_parallel_logits, target, label_smoothing=0.0):
     """
     Performs cross entropy loss when logits are split across tensor parallel ranks
 
@@ -125,6 +125,6 @@ def fused_cross_entropy(vocab_parallel_logits, target, label_smoothing=0.0):
         lobal_smoothing: smoothing factor, must be in range [0.0, 1.0)
                          default is no smoothing (=0.0)
     """
-    out = FusedCrossEntropyFunc.apply(vocab_parallel_logits.to(torch.float32), target, label_smoothing)
+    out = ParallelCrossEntropyFunc.apply(vocab_parallel_logits.to(torch.float32), target, label_smoothing)
     return out
 
