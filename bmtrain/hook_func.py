@@ -11,7 +11,7 @@ class Offload_Dict:
         self._offload_dict = OrderedDict()
 
     def add(self, tensor):
-        tensor_id = id(tensor)
+        tensor_id = tensor.data_ptr()
         self._offload_dict[tensor_id] = {}
         self._offload_dict[tensor_id]["numel"] = tensor.numel()
         self._offload_dict[tensor_id]['dtype'] = tensor.dtype
@@ -54,8 +54,8 @@ class Offload_Dict:
         fp32_offset = 0
         fp16_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
         fp32_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])
-        assert fp16_total <= self.fp16_total
-        assert fp32_total <= self.fp32_total
+        assert fp16_total == self.fp16_total
+        assert fp32_total == self.fp32_total
         fp16_storage = self.fp16_storage
         fp32_storage = self.fp32_storage
         for key,val in self._offload_dict.items():
@@ -64,7 +64,6 @@ class Offload_Dict:
             offset = fp16_offset if val['dtype'] == torch.float16 else fp32_offset
             cpu_tensor = torch.tensor([], dtype=val['dtype'], device="cpu") \
                 .set_(storage, offset, val['shape'])
-            self._offload_dict[key]['tensor'].record_stream(config['offload_stream'])
             self._offload_dict[key]['tensor'] = cpu_tensor.copy_(self._offload_dict[key]['tensor'], non_blocking=True)
             if val['dtype'] == torch.float16:
                 fp16_offset += self._offload_dict[key]['numel']
@@ -115,16 +114,6 @@ def offload_wrapper(offload_dict):
             return tensor
     return pack_hook, unpack_hook
 
-@contextmanager
-def offload_context(module):
-    if hasattr(module, "_offload_hook"):
-        pack_hook, unpack_hook = module._offload_hook
-        torch._C._autograd._push_saved_tensors_default_hooks(
-            pack_hook, unpack_hook
-        )
-    yield
-    if hasattr(module, "_offload_hook"):
-        torch._C._autograd._pop_saved_tensors_default_hooks()
 
 def offload_pre_hook(module, input):
    if hasattr(module, "_offload_hook"):
@@ -164,24 +153,22 @@ def zero_pre_forward(module, inputs):
                 pack_hook, unpack_hook
             )
     elif module._mode != "OFFLOAD" and ((len(module._pre_module) > 0) and module._pre_module[0]._mode == "OFFLOAD"):
-        for pre_module in module._pre_module:
-            if len(pre_module._pre_module) == 0:
-                pre_offload_module = None
-            else:
-                pre_offload_module = find_pre_module_helper(pre_module._pre_module[0])
-            if pre_offload_module is not None:
-                torch.cuda.current_stream().wait_event(pre_offload_module.offload_event)
-            if pre_module._mode == "OFFLOAD":
-                with torch.cuda.stream(config["offload_stream"]):
-                    config["offload_stream"].wait_event(pre_module.calc_event)
-                    if not hasattr(pre_module._offload_dict, "fp16_storage"):
-                        pre_module._offload_dict.make_cpu_storage()
-                    pre_module._offload_dict.d2h_memcpy()
-                    # if len(module._next_module) > 0:
+        pre_module = module._pre_module[0]
+        if len(pre_module._pre_module) == 0:
+            pre_offload_module = None
+        else:
+            pre_offload_module = find_pre_module_helper(pre_module._pre_module[0])
+        if pre_offload_module is not None:
+            torch.cuda.current_stream().wait_event(pre_offload_module.offload_event)
+        if pre_module._mode == "OFFLOAD":
+            with torch.cuda.stream(config["offload_stream"]):
+                config["offload_stream"].wait_event(pre_module.calc_event)
+                if not hasattr(pre_module._offload_dict, "fp16_storage"):
+                    pre_module._offload_dict.make_cpu_storage()
+                pre_module._offload_dict.record_stream(config["offload_stream"])
+                pre_module._offload_dict.d2h_memcpy()
+                if len(module._next_module) > 0:
                     config["offload_stream"].record_event(pre_module.offload_event)
-        # torch._C._autograd._push_saved_tensors_default_hooks(
-        #     pack_hook, unpack_hook
-        # )
             
     if module._mode == "PIPE":
         enter = module._micro_idx == 0
@@ -212,19 +199,27 @@ def zero_post_forward(module, inputs, outputs):
         module._ref_count += 1
 
 def zero_pre_backward(module, grad_outputs):
+    def find_pre_module_helper(m):
+        if m._mode == "OFFLOAD":
+            return m
+        else:
+            if len(m._pre_module) != 0:
+                return find_pre_module_helper(m._pre_module[0])
+            else:
+                return None
     backward_flag = 2 if config['zero_level'] == 2 else 0
     if module._mode != "PIPE":
         if module._mode != "OFFLOAD":
             count = len([m for m in module._pre_module if m._mode=="OFFLOAD"])
             if (len(module._next_module) == 0) or module._next_module[0]._mode == "OFFLOAD":
-                for pre_module in nearest_offload_module(module):
-                    if pre_module._mode == "OFFLOAD":
-                        pre_module._on_device = True
-                        with torch.cuda.stream(config["offload_stream"]):
-                            if (len(module._next_module) != 0):
-                                torch.cuda.current_stream().wait_event(module._next_module[0].calc_event)
-                            pre_module._offload_dict.h2d_memcpy()
-                            torch.cuda.current_stream().record_event(pre_module.offload_event)
+                pre_module = find_pre_module_helper(module)
+                if pre_module is not None:
+                    pre_module._on_device = True
+                    with torch.cuda.stream(config["offload_stream"]):
+                        if (len(module._next_module) != 0):
+                            torch.cuda.current_stream().wait_event(module._next_module[0].calc_event)
+                        pre_module._offload_dict.h2d_memcpy()
+                        torch.cuda.current_stream().record_event(pre_module.offload_event)
         else:
             current_stream = torch.cuda.current_stream()
             current_stream.wait_event(module.offload_event)

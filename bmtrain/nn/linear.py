@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import bmtrain as bmt
 
-class CustomLinear(torch.autograd.Function):
+class OpLinear(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, weight, bias=None):
         ctx.save_for_backward(x, weight, bias)
