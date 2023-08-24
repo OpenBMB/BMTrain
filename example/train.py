@@ -10,19 +10,21 @@ def main():
         seed=0,
         zero_level=3,
     )
-    offload = False
-    seq_len = True
+    offload = True
+    seq_len = 4096
+    offload_level = 0
     model = GPT(
-        num_layers=48,
+        num_layers=24,
         vocab_size=80000,
-        dim_model=4096,
-        dim_head=128,
-        num_heads=32,
-        dim_ff=10240,
+        dim_model=1024,
+        dim_head=64,
+        num_heads=16,
+        dim_ff=4096,
         max_distance=seq_len,
         bias=False,
         dtype=torch.half,
-        offload=offload
+        offload=offload,
+        offload_level=offload_level
     )
 
     bmt.init_parameters(model)

@@ -177,7 +177,7 @@ def zero_pre_forward(module, inputs):
                     if not hasattr(pre_module._offload_dict, "fp16_storage"):
                         pre_module._offload_dict.make_cpu_storage()
                     pre_module._offload_dict.d2h_memcpy()
-                    pre_module.offload_event = torch.cuda.Event()
+                    # if len(module._next_module) > 0:
                     config["offload_stream"].record_event(pre_module.offload_event)
         # torch._C._autograd._push_saved_tensors_default_hooks(
         #     pack_hook, unpack_hook
@@ -203,10 +203,10 @@ def zero_post_forward(module, inputs, outputs):
     exit = True
     if module._mode == "PIPE":
         exit = module._micro_idx == config['micros'] - 1
-    elif module._mode == "OFFLOAD" and module.offload_level == 2:
-        module.calc_event = torch.cuda.Event()
+    elif module._mode == "OFFLOAD":
+        if module.offload_level == 2:
+            torch._C._autograd._pop_saved_tensors_default_hooks()
         torch.cuda.current_stream().record_event(module.calc_event)
-        torch._C._autograd._pop_saved_tensors_default_hooks()
     if exit:
         module._forward_block_ctx.exit(forward_flag)
         module._ref_count += 1
@@ -221,11 +221,14 @@ def zero_pre_backward(module, grad_outputs):
                     if pre_module._mode == "OFFLOAD":
                         pre_module._on_device = True
                         with torch.cuda.stream(config["offload_stream"]):
+                            if (len(module._next_module) != 0):
+                                torch.cuda.current_stream().wait_event(module._next_module[0].calc_event)
                             pre_module._offload_dict.h2d_memcpy()
+                            torch.cuda.current_stream().record_event(pre_module.offload_event)
         else:
             current_stream = torch.cuda.current_stream()
-            current_stream.wait_stream(config["offload_stream"])
-            module._offload_dict.record_stream(config["calc_stream"])
+            current_stream.wait_event(module.offload_event)
+            module._offload_dict.record_stream(current_stream)
         module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict)
         module._backward_block_ctx.enter(backward_flag, True)
         if not module._is_last_layer: 
@@ -241,6 +244,7 @@ def zero_post_backward(module, grad_inputs, grad_outputs):
         if module._mode == "OFFLOAD":
             module._on_device = False
             module._offload_dict.pop_all()
+            torch.cuda.current_stream().record_event(module.calc_event)
         if module._is_first_layer: 
             module.backward_release(backward_flag)
     else:

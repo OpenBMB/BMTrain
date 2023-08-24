@@ -200,7 +200,7 @@ class CheckpointBlock(torch.nn.Module):
         self._pre_module = [] #save the pre module of self
         self._ref_count = 0 #incremental in forward and  decreasing in backward
         self._mode = "BLOCK" #BLOCK or ZERO or PIPE
-        if use_offload:
+        if use_offload and offload_level != 0:
             self._mode = "OFFLOAD"
             self._on_device = False
             self.offload_level = offload_level
@@ -528,6 +528,7 @@ class TransformerBlockList(torch.nn.Module):
         
         self._modules = {}
         pre_module = None
+        offload = 0
         for i, module in enumerate(modules):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
@@ -536,11 +537,14 @@ class TransformerBlockList(torch.nn.Module):
             pre_module = module
             module._is_first_layer = False
             module._is_last_layer = False
-
+            if module._mode == "OFFLOAD":
+                offload+=1
+                module.calc_event = torch.cuda.Event()
+                module.offload_event = torch.cuda.Event()
             self._modules[str(i)] = module
             module._idx = i
             self.add_module(str(i), module)
-
+        print(f"offload layer: {offload}")
         self._modules[str(0)]._is_first_layer = True
         self._modules[str(len(modules)-1)]._is_last_layer = True
     
