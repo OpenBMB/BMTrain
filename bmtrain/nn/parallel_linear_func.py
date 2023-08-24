@@ -76,13 +76,17 @@ class OpParallelLinear(torch.autograd.Function):
             #TODO: gather on load_stream
             grad_all_input = grad_output.matmul(weight)
             grad_input = torch.empty_like(input)
+            current_stream = torch.cuda.current_stream()
+            config['tp_comm_stream'].wait_stream(current_stream)
             if ctx.gather_input:
-                nccl.reduceScatter(grad_all_input.storage(), grad_input.storage(), "sum", config['tp_comm'])
+                with torch.cuda.stream(config['tp_comm_stream']):
+                    nccl.reduceScatter(grad_all_input.storage(), grad_input.storage(), "sum", config['tp_comm'])
             else:
                 grad_input = grad_all_input
 
             if ctx.split_input:
-                grad_input = all_gather(grad_input, config['tp_comm'])
+                with torch.cuda.stream(config['tp_comm_stream']):
+                    grad_input = all_gather(grad_input, config['tp_comm'])
 
         if weight.requires_grad:
             dim = grad_output.dim()
@@ -91,4 +95,7 @@ class OpParallelLinear(torch.autograd.Function):
          
         if bias is not None and bias.requires_grad:
             grad_bias = grad_output.reshape(-1, grad_output.shape[-1]).sum(0)
+
+        current_stream = torch.cuda.current_stream()
+        current_stream.wait_stream(config['tp_comm_stream'])
         return grad_input, grad_weight, grad_bias, None, None, None, None

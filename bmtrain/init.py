@@ -75,6 +75,7 @@ def init_distributed(
     config["world_size"] = world_size
     config["calc_stream"] = torch.cuda.current_stream()
     config["load_stream"] = torch.cuda.Stream(priority=-1)
+    config["tp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config['barrier_stream'] = torch.cuda.Stream()
     config["load_event"] = torch.cuda.Event()
     config["zero_level"] = zero_level
