@@ -176,8 +176,8 @@ class topology:
             self.tp_idx = self.rank // tp_size 
             self.zero_idx = self.stage_id 
             self.zero_id = self.pipe_idx 
-            self.tp_zero_idx = self.tp_id 
-            self.tp_zero_id = self.tp_idx if dp_size > 1 else 0
+            self.tp_zero_idx = self.stage_id * tp_size + self.tp_id 
+            self.tp_zero_id = self.pipe_idx // tp_size
 
         self.next_rank = self.stage_id+1 if self.stage_id < config['pipe_size'] - 1 else -1
         self.prev_rank = self.stage_id-1 if self.stage_id > 0 else -1
