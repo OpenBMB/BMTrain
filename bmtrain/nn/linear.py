@@ -35,15 +35,8 @@ class Linear(bmt.DistributedModule):
             self.register_parameter('bias', None)
     
     def forward(self, input):
-        if hasattr(self, "_offload_hook"):
-            pack, unpack = self._offload_hook
-            torch._C._autograd._push_saved_tensors_default_hooks(
-                pack, unpack
-            )
-        res =  CustomLinear.apply(input, self.weight, self.bias)
-        if hasattr(self, "_offload_hook"):
-            torch._C._autograd._pop_saved_tensors_default_hooks()
-        return res
+        return CustomLinear.apply(input, self.weight, self.bias)
+
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={}'.format(
             self.in_features, self.out_features, self.bias is not None
