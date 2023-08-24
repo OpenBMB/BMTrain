@@ -20,9 +20,12 @@ def preprocess_input(input, gather_input, split_input):
         input = all_input_list[config['topology'].tp_id]
     return input
 
-class ParallelLinearFunc(torch.autograd.Function):
+class OpParallelLinear(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, weight, bias=None, gather_input=False, gather_output=False, split_input=False, reduce_output_type=None):
+        if reduce_output_type is not None:
+            reduce_output_type = ReduceType(reduce_output_type)
+
         ctx.save_for_backward(input, weight, bias)
         ctx.gather_output = gather_output
         ctx.split_input = split_input

@@ -4,7 +4,7 @@ from torch.nn.parameter import Parameter
 import bmtrain as bmt
 from bmtrain.global_var import config
 from .parallel_linear_func import (
-    ParallelLinearFunc,
+    OpParallelLinear,
     ReduceType)
 
 class ColumnParallelLinear(bmt.DistributedModule):
@@ -27,7 +27,7 @@ class ColumnParallelLinear(bmt.DistributedModule):
         gather_input = self.gather_input 
         split_input = False
         reduce_output_type = None 
-        return ParallelLinearFunc.apply(input, self.weight, self.bias, gather_input, self.gather_output, split_input, reduce_output_type)
+        return OpParallelLinear.apply(input, self.weight, self.bias, gather_input, self.gather_output, split_input, reduce_output_type)
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={}'.format(

@@ -6,7 +6,7 @@ import math
 import bmtrain as bmt
 from bmtrain.global_var import config
 from bmtrain.distributed import all_reduce, all_gather
-from .parallel_linear_func import ParallelLinearFunc 
+from .parallel_linear_func import OpParallelLinear 
 
 class ParallelEmbedding(bmt.DistributedModule):
     def __init__(
@@ -35,7 +35,6 @@ class ParallelEmbedding(bmt.DistributedModule):
         """
         Args:
             ids (:obj:`torch.Tensor` of shape ``(batch_size, seq_len)``): Indices of input sequence tokens.
-            gather_input (bool) : whether gather input is required between  tensor parallel group)
         Return:
             :obj:`torch.Tensor` of shape ``(batch_size, seq_len, embedding_size)``: The embedding output.
         """  # noqa: E501
@@ -69,5 +68,5 @@ class ParallelEmbedding(bmt.DistributedModule):
         split_input = False
         reduce_output_type = None 
         gather_output = False 
-        out = ParallelLinearFunc.apply(x , self.weight, None, gather_input, gather_output, split_input, reduce_output_type)
+        out = OpParallelLinear.apply(x , self.weight, None, gather_input, gather_output, split_input, reduce_output_type)
         return out

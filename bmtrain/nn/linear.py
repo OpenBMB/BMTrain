@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import bmtrain as bmt
 
-class CustomLinear(torch.autograd.Function):
+class OpLinear(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, weight, bias=None):
         ctx.save_for_backward(x, weight, bias)
@@ -35,7 +35,7 @@ class Linear(bmt.DistributedModule):
             self.register_parameter('bias', None)
     
     def forward(self, input):
-        return CustomLinear.apply(input, self.weight, self.bias)
+        return OpLinear.apply(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={}'.format(
