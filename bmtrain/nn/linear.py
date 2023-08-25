@@ -35,7 +35,7 @@ class Linear(bmt.DistributedModule):
             self.register_parameter('bias', None)
     
     def forward(self, input):
-        return CustomLinear.apply(input, self.weight, self.bias)
+        return OpLinear.apply(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={}'.format(

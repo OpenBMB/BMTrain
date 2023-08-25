@@ -11,23 +11,31 @@ class Offload_Dict:
         self._offload_dict = OrderedDict()
 
     def add(self, tensor):
-        tensor_id = tensor.data_ptr()
-        self._offload_dict[tensor_id] = {}
-        self._offload_dict[tensor_id]["numel"] = tensor.numel()
-        self._offload_dict[tensor_id]['dtype'] = tensor.dtype
-        self._offload_dict[tensor_id]["tensor"] = tensor
-        self._offload_dict[tensor_id]["shape"] = tensor.shape
+        tensor_id = id(tensor)
+        data_ptr = tensor.data_ptr()
+        if data_ptr not in self._offload_dict:
+            self._offload_dict[data_ptr] = {}
+            self._offload_dict[data_ptr]["stor"] = tensor.storage()
+            self._offload_dict[data_ptr]["size"] = tensor.storage().size()
+            self._offload_dict[data_ptr]["dtype"] = tensor.storage().dtype
+            self._offload_dict[data_ptr]["tensors"] = {}
+        self._offload_dict[data_ptr]["tensors"][id(tensor)] = {}
+        self._offload_dict[data_ptr]["tensors"][id(tensor)]["numel"] = tensor.numel()
+        self._offload_dict[data_ptr]["tensors"][id(tensor)]['dtype'] = tensor.dtype
+        self._offload_dict[data_ptr]["tensors"][id(tensor)]['offset'] = tensor.storage_offset()
+        self._offload_dict[data_ptr]["tensors"][id(tensor)]['tensor'] = tensor
+        self._offload_dict[data_ptr]["tensors"][id(tensor)]["shape"] = tensor.shape
         self._device = "cuda"
-        return tensor_id
+        return (data_ptr,tensor_id)
     
     def get_total(self):
-        fp16_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
-        fp32_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])        
+        fp16_total = sum([v['size'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
+        fp32_total = sum([v['size'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])        
         return fp16_total,fp32_total
 
     def make_cpu_storage(self):
-        fp16_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
-        fp32_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])
+        fp16_total = sum([v['size'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
+        fp32_total = sum([v['size'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])
         fp16_storage = torch.HalfStorage(fp16_total).pin_memory()
         fp32_storage = torch.FloatStorage(fp32_total).pin_memory()
         self.fp16_storage = fp16_storage
@@ -36,24 +44,29 @@ class Offload_Dict:
         self.fp32_total = fp32_total
 
     def get(self, key):
-        return self._offload_dict[key]["tensor"]
+        data_ptr, tensor_id = key
+        return self._offload_dict[data_ptr]['tensors'][tensor_id]["tensor"]
 
     def pop_all(self):
         self._offload_dict.clear()
 
     def h2d_memcpy(self):
         for key,val in self._offload_dict.items():
-            self._offload_dict[key]['tensor'] = self._offload_dict[key]['tensor'].cuda(non_blocking=True)
+            val['stor'] = val['stor'].cuda(non_blocking=True)
+            for id_val in val['tensors'].values():
+                id_val['tensor'] = torch.tensor([], dtype=id_val['dtype'],device=val['stor'].device)
+                id_val['tensor'].set_(val['stor'], id_val['offset'], id_val['shape'])
 
     def record_stream(self, stream):
         for key, val in self._offload_dict.items():
-            self._offload_dict[key]['tensor'].record_stream(stream)
+            for id_val in val['tensors'].values():
+                id_val['tensor'].record_stream(stream)
 
     def d2h_memcpy(self):   
         fp16_offset = 0
         fp32_offset = 0
-        fp16_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
-        fp32_total = sum([v['numel'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])
+        fp16_total = sum([v['size'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
+        fp32_total = sum([v['size'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])
         assert fp16_total == self.fp16_total
         assert fp32_total == self.fp32_total
         fp16_storage = self.fp16_storage
@@ -62,16 +75,17 @@ class Offload_Dict:
             assert val['dtype'] in [torch.float16, torch.float32]
             storage = fp16_storage if val['dtype'] == torch.float16 else fp32_storage
             offset = fp16_offset if val['dtype'] == torch.float16 else fp32_offset
-            cpu_tensor = torch.tensor([], dtype=val['dtype'], device="cpu") \
-                .set_(storage, offset, val['shape'])
-            self._offload_dict[key]['tensor'] = cpu_tensor.copy_(self._offload_dict[key]['tensor'], non_blocking=True)
+            for id_val in val['tensors'].values():
+                cpu_tensor = torch.tensor([], dtype=id_val['dtype'], device="cpu") \
+                    .set_(storage, offset+id_val['offset'], id_val['shape'])
+                id_val['tensor'] = cpu_tensor.copy_(id_val['tensor'], non_blocking=True)
             if val['dtype'] == torch.float16:
-                fp16_offset += self._offload_dict[key]['numel']
+                fp16_offset += val['size']
             else:
-                fp32_offset += self._offload_dict[key]['numel']
+                fp32_offset += val['size']
 
 def nearest_offload_module(module):
-    queue = deque([(module, 0)])  # 使用队列来进行广度优先搜索
+    queue = deque([(module, 0)]) 
     nearest_modules = []
     nearest_depth = float('inf')
     
