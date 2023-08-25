@@ -79,7 +79,7 @@ class OpParallelLinear(torch.autograd.Function):
         if input.requires_grad:
             current_stream = torch.cuda.current_stream()
             grad_all_input = grad_output.matmul(weight)
-            grad_input = torch.empty_like(input)
+            grad_input = torch.zeros_like(input)
             if ctx.gather_input:
                 with torch.cuda.stream(config['tp_comm_stream']):
                     config['tp_comm_stream'].wait_stream(current_stream)
