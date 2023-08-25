@@ -25,6 +25,8 @@ tq = tqdm([
     ("send_recv", 4),
     ("nccl_backward", 4),
     ("no_grad", 1),
+    ("column_parallel_linear", 2),
+    ("row_parallel_linear", 2),
 
     ("training", 4),
 ])
