@@ -13,7 +13,6 @@ from .synchronize import synchronize
 def init_distributed(
         init_method : str = "env://",
         seed : int = 0,
-        zero_level: int = 3,
         pipe_size: int = -1,
         num_micro_batches: int = None,
         tp_size : int = 1,
@@ -24,7 +23,6 @@ def init_distributed(
 
     Args:
         seed (int): The random seed.
-        zero_level (int): The ZeRO optimization level. 2 for stage-2, 3 for stage-3.
         pipe_size (int) : pipe_size means that all processes will be divided into pipe_size groups
         num_micro_batches (int) : means that the input batchs will be divided into num_micro_batches small batches. used in pipeline mode. 
         tp_size (int) : tp_size means the size of each of tensor parallel group
@@ -78,7 +76,6 @@ def init_distributed(
     config["tp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config['barrier_stream'] = torch.cuda.Stream()
     config["load_event"] = torch.cuda.Event()
-    config["zero_level"] = zero_level
     config["tp_size"] = tp_size if tp_size > 0 else 1
     config["topology"] = topology(config)
     config["zero_rank"] = config['topology'].get_group_rank("zero")
