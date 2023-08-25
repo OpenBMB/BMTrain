@@ -52,11 +52,16 @@ class Offload_Dict:
         self._offload_dict.clear()
 
     def h2d_memcpy(self):
+        fp16_storage_cuda = self.fp16_storage.cuda(non_blocking=True)
+        fp32_storage_cuda = self.fp32_storage.cuda(non_blocking=True)
         for key,val in self._offload_dict.items():
-            val['stor'] = val['stor'].cuda(non_blocking=True)
             for id_val in val['tensors'].values():
-                id_val['tensor'] = torch.tensor([], dtype=id_val['dtype'],device=val['stor'].device)
-                id_val['tensor'].set_(val['stor'], id_val['offset'], id_val['shape'])
+                id_val['tensor'] = torch.tensor([], dtype=id_val['dtype'],device=fp16_storage_cuda.device)
+                if id_val['dtype'] == torch.float16:
+                    id_val['tensor'].set_(fp16_storage_cuda, id_val['abs_offset'], id_val['shape'])
+                elif id_val['dtype'] == torch.float32:
+                    id_val['tensor'].set_(fp32_storage_cuda, id_val['abs_offset'], id_val['shape'])
+
 
     def record_stream(self, stream):
         for key, val in self._offload_dict.items():
@@ -68,8 +73,8 @@ class Offload_Dict:
         fp32_offset = 0
         fp16_total = sum([v['size'] for v in self._offload_dict.values() if v['dtype'] == torch.float16])
         fp32_total = sum([v['size'] for v in self._offload_dict.values() if v['dtype'] == torch.float32])
-        assert fp16_total == self.fp16_total
-        assert fp32_total == self.fp32_total
+        assert fp16_total <= self.fp16_total
+        assert fp32_total <= self.fp32_total
         fp16_storage = self.fp16_storage
         fp32_storage = self.fp32_storage
         for key,val in self._offload_dict.items():
@@ -79,11 +84,13 @@ class Offload_Dict:
             for id_val in val['tensors'].values():
                 cpu_tensor = torch.tensor([], dtype=id_val['dtype'], device="cpu") \
                     .set_(storage, offset+id_val['offset'], id_val['shape'])
+                id_val["abs_offset"] = offset+id_val['offset']
                 id_val['tensor'] = cpu_tensor.copy_(id_val['tensor'], non_blocking=True)
             if val['dtype'] == torch.float16:
                 fp16_offset += val['size']
             else:
                 fp32_offset += val['size']
+            val['stor'] = None
 
 def nearest_offload_module(module):
     queue = deque([(module, 0)]) 
