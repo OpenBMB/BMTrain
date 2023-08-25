@@ -4,6 +4,7 @@ from .checkpointing import CheckpointBlockContext
 from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
 from collections import deque,OrderedDict
 from contextlib import contextmanager
+from .utils import round_up
 
 class Offload_Dict:
 
@@ -13,7 +14,7 @@ class Offload_Dict:
     def add(self, tensor):
         tensor = tensor.contiguous()
         tensor_id = id(tensor)
-        data_ptr = id(tensor.storage())
+        data_ptr = tensor.storage().data_ptr()
         if data_ptr not in self._offload_dict:
             self._offload_dict[data_ptr] = {}
             self._offload_dict[data_ptr]["stor"] = tensor.storage()
