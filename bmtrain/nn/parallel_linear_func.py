@@ -31,8 +31,10 @@ class OpParallelLinear(torch.autograd.Function):
         ctx.split_input = split_input
         ctx.gather_input = gather_input
         ctx.reduce_output_type = reduce_output_type
+
         all_input = preprocess_input(input, ctx.gather_input, ctx.split_input)
         out = F.linear(all_input, weight, bias)
+
         if gather_output:
             all_output_list = all_gather(out, config['tp_comm'])
             all_output_list = all_output_list.chunk(config['tp_size'], dim=0)        
@@ -44,12 +46,15 @@ class OpParallelLinear(torch.autograd.Function):
         if reduce_output_type == ReduceType.ALL_REDUCE:
             nccl.allReduce(out.storage(), out.storage(), "sum", config['tp_comm'])
             return out 
+
         elif reduce_output_type == ReduceType.REDUCE_SCATTER:
             shape = list(out.shape)
             shape[0] = shape[0] // config['tp_size']
             reduce_out = torch.empty(shape, dtype=out.dtype, device=out.device)
             nccl.reduceScatter(out.storage(), reduce_out.storage(), "sum", config['tp_comm'])
             return reduce_out
+        else:
+            assert False, "no support reduce type{}".format(reduce_output_type)
             
     @staticmethod
     def backward(ctx, grad_output):
@@ -72,20 +77,23 @@ class OpParallelLinear(torch.autograd.Function):
             all_input = preprocess_input(input, ctx.gather_input, ctx.split_input)
 
         if input.requires_grad:
-            #gather can async with grad_out.matmul(weight)
-            #TODO: gather on load_stream
             grad_all_input = grad_output.matmul(weight)
             grad_input = torch.empty_like(input)
-            current_stream = torch.cuda.current_stream()
-            config['tp_comm_stream'].wait_stream(current_stream)
             if ctx.gather_input:
                 with torch.cuda.stream(config['tp_comm_stream']):
+                    current_stream = torch.cuda.current_stream()
+                    config['tp_comm_stream'].wait_stream(current_stream)
+                    grad_input.record_stream(config['tp_comm_stream'])
+                    grad_all_input.record_stream(config['tp_comm_stream'])
                     nccl.reduceScatter(grad_all_input.storage(), grad_input.storage(), "sum", config['tp_comm'])
             else:
                 grad_input = grad_all_input
 
             if ctx.split_input:
                 with torch.cuda.stream(config['tp_comm_stream']):
+                    current_stream = torch.cuda.current_stream()
+                    config['tp_comm_stream'].wait_stream(current_stream)
+                    grad_input.record_stream(config['tp_comm_stream'])
                     grad_input = all_gather(grad_input, config['tp_comm'])
 
         if weight.requires_grad:
