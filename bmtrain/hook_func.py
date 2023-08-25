@@ -11,8 +11,9 @@ class Offload_Dict:
         self._offload_dict = OrderedDict()
 
     def add(self, tensor):
+        tensor = tensor.contiguous()
         tensor_id = id(tensor)
-        data_ptr = tensor.data_ptr()
+        data_ptr = id(tensor.storage())
         if data_ptr not in self._offload_dict:
             self._offload_dict[data_ptr] = {}
             self._offload_dict[data_ptr]["stor"] = tensor.storage()
