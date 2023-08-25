@@ -77,11 +77,11 @@ class OpParallelLinear(torch.autograd.Function):
             all_input = preprocess_input(input, ctx.gather_input, ctx.split_input)
 
         if input.requires_grad:
+            current_stream = torch.cuda.current_stream()
             grad_all_input = grad_output.matmul(weight)
             grad_input = torch.empty_like(input)
             if ctx.gather_input:
                 with torch.cuda.stream(config['tp_comm_stream']):
-                    current_stream = torch.cuda.current_stream()
                     config['tp_comm_stream'].wait_stream(current_stream)
                     grad_input.record_stream(config['tp_comm_stream'])
                     grad_all_input.record_stream(config['tp_comm_stream'])
@@ -91,7 +91,6 @@ class OpParallelLinear(torch.autograd.Function):
 
             if ctx.split_input:
                 with torch.cuda.stream(config['tp_comm_stream']):
-                    current_stream = torch.cuda.current_stream()
                     config['tp_comm_stream'].wait_stream(current_stream)
                     grad_input.record_stream(config['tp_comm_stream'])
                     grad_input = all_gather(grad_input, config['tp_comm'])

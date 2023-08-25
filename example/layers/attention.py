@@ -19,9 +19,9 @@ class Attention(bmt.DistributedModule):
         super().__init__()
 
         if config['tp_size'] > 1:
-            self.project_q = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
-            self.project_k = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
-            self.project_v = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
+            self.project_q = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype, gather_input=False)
+            self.project_k = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype, gather_input=False)
+            self.project_v = ColumnParallelLinear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype, gather_input=False)
             self.project_out = RowParallelLinear(dim_head * num_heads, dim_model, bias=bias, dtype=dtype)
         else:
             self.project_q = Linear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
@@ -44,9 +44,12 @@ class Attention(bmt.DistributedModule):
         batch_size, seq_q, dim_model = hidden_q.size()
         seq_kv = hidden_kv.size(1)
 
+        if config['tp_size'] > 1:
+            hidden_q = all_gather(hidden_q, comm=config['tp_comm']).flatten(0,1)
+
         h_q : torch.Tensor = self.project_q(hidden_q)
-        h_k : torch.Tensor = self.project_k(hidden_kv)
-        h_v : torch.Tensor = self.project_v(hidden_kv)
+        h_k : torch.Tensor = self.project_k(hidden_q)
+        h_v : torch.Tensor = self.project_v(hidden_q)
         if config['tp_size'] > 1:
             #batch_size  will changed in TensorParallel
             batch_size = h_v.shape[0]
@@ -74,7 +77,8 @@ class Attention(bmt.DistributedModule):
             score = score + position_bias.view(batch_size, -1, seq_q, seq_kv)
          
         if config['tp_size'] > 1:
-            mask = all_gather(mask, config['tp_comm'])
+            with torch.no_grad():
+                mask = all_gather(mask, config['tp_comm']).flatten(0,1)
 
         score = torch.where(
             mask.view(batch_size, 1, seq_q, seq_kv),
