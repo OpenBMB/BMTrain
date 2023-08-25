@@ -66,7 +66,7 @@ class CheckpointBlock(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3):
         super().__init__()
         self._module = inner_module
         self._inputs = None
@@ -200,6 +200,7 @@ class CheckpointBlock(torch.nn.Module):
         self._mode = "BLOCK" #BLOCK or ZERO or PIPE
         self.all_input_no_grad = False
         self.all_param_no_grad = False
+        self._zero_level = zero_level
 
     def set_pre_module(self, pre_module):
         if pre_module is not None:
