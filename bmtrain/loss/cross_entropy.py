@@ -219,7 +219,7 @@ class FusedCrossEntropy(torch.nn.Module):
 
         ret = w * ret
 
-        if config['tp_size'] > 1:
+        if self.parallel and config['tp_size'] > 1:
             ret_list = ret.chunk(config['tp_size'], dim=0)
             ret = ret_list[config['topology'].tp_id]
             w_list = w.chunk(config['tp_size'], dim=0)
