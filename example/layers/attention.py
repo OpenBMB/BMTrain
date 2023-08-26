@@ -44,12 +44,18 @@ class Attention(bmt.DistributedModule):
         batch_size, seq_q, dim_model = hidden_q.size()
         seq_kv = hidden_kv.size(1)
 
-        if config['tp_size'] > 1:
-            hidden_q = all_gather(hidden_q, comm=config['tp_comm']).flatten(0,1)
+        assert hidden_q.data_ptr() == hidden_kv.data_ptr()
 
-        h_q : torch.Tensor = self.project_q(hidden_q)
-        h_k : torch.Tensor = self.project_k(hidden_q)
-        h_v : torch.Tensor = self.project_v(hidden_q)
+        hidden_q = bmt.nn.OpParallelLinear.apply(
+			hidden_q,
+			torch.cat([self.project_q.weight, self.project_k.weight, self.project_v.weight], dim=0),
+			torch.cat([self.project_q.bias, self.project_k.bias, self.project_v.bias], dim=0),
+			True, False,
+			False, None
+		)
+
+        h_q, h_k, h_v = hidden_q.chunk(3, dim=-1)
+
         if config['tp_size'] > 1:
             #batch_size  will changed in TensorParallel
             batch_size = h_v.shape[0]
