@@ -9,7 +9,6 @@ from bmtrain import inspect
 def main():
     bmt.init_distributed(
         seed=0,
-        zero_level=2,
         tp_size=2,
     )
 
@@ -54,7 +53,7 @@ def main():
             break
     
     if config['tp_size'] > 1:
-        loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100)
+        loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=True)
     else:
         loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
 
