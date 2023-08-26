@@ -8,7 +8,7 @@ class GPT(bmt.DistributedModule):
             num_layers : int, vocab_size : int,
             dim_model : int, dim_head : int, num_heads : int, dim_ff : int,
             max_distance : int,
-            bias : bool = True, dtype = None
+            bias : bool = True, dtype = None, offload = False, offload_level = 0
         ) -> None:
         super().__init__()
 
@@ -19,14 +19,20 @@ class GPT(bmt.DistributedModule):
         else:
             self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         self.pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
-        
+        if offload:
+            offload_mask = [True if i%4 == 0 else False for i in range(num_layers)] 
+            ckpt_mask = [not offload_mask[i] for i in range(num_layers)]
+            offload_level = offload_level
+        else:
+            ckpt_mask = [ True for i in range(num_layers) ]
+            offload_mask = [ False for i in range(num_layers) ]
         self.transformers = bmt.TransformerBlockList([
             bmt.CheckpointBlock(
                 TransformerEncoder(
                     dim_model, dim_head, num_heads, dim_ff, bias, dtype
-                )
+                ),use_checkpoint=ckpt_mask[i],use_offload=offload_mask[i],offload_level=offload_level
             )
-            for _ in range(num_layers)
+            for i in range(num_layers)
         ])
 
         self.layernorm = Layernorm(dim_model, dtype=dtype)

@@ -66,7 +66,7 @@ class CheckpointBlock(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, use_offload=False, offload_level=0, zero_level=3):
         super().__init__()
         self._module = inner_module
         self._inputs = None
@@ -78,9 +78,9 @@ class CheckpointBlock(torch.nn.Module):
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
         self._storage_info = {}
         self._ready = False
-        # sort parameters by name
+        # sort parameters by nam_next_modulee
         ordered_parameters = list(self._module.named_parameters())
-
+        assert not (use_checkpoint and use_offload), "It does not make sense to use offload and checkpointing at the same time" 
         # calc total number of parameters
         for name, param in ordered_parameters:
             if not isinstance(param, DistributedParameter):
@@ -202,6 +202,11 @@ class CheckpointBlock(torch.nn.Module):
         self._pre_module = [] #save the pre module of self
         self._ref_count = 0 #incremental in forward and  decreasing in backward
         self._mode = "BLOCK" #BLOCK or ZERO or PIPE
+        if use_offload and offload_level != 0:
+            self._mode = "OFFLOAD"
+            self._on_device = False
+            self.offload_level = offload_level
+    
         self.all_input_no_grad = False
         self.all_param_no_grad = False
         self._zero_level = zero_level
@@ -536,19 +541,23 @@ class TransformerBlockList(torch.nn.Module):
         
         self._modules = {}
         pre_module = None
+        offload = 0
         for i, module in enumerate(modules):
             if not isinstance(module, CheckpointBlock):
                 module = CheckpointBlock(module)
-
-            module._mode = "ZERO"
+            module._mode = "ZERO" if module._mode == "BLOCK" else module._mode
             module.set_pre_module(pre_module)
             pre_module = module
             module._is_first_layer = False
             module._is_last_layer = False
-
+            if module._mode == "OFFLOAD":
+                offload+=1
+                module.calc_event = torch.cuda.Event()
+                module.offload_event = torch.cuda.Event()
             self._modules[str(i)] = module
+            module._idx = i
             self.add_module(str(i), module)
-
+        print(f"offload layer: {offload}")
         self._modules[str(0)]._is_first_layer = True
         self._modules[str(len(modules)-1)]._is_last_layer = True
     
@@ -575,7 +584,7 @@ class TransformerBlockList(torch.nn.Module):
             self.save_list = save_list
         else:
             self.save_list = [(i, i) for i in range(len(self))]
-            
+             
     def __len__(self) -> int:
         return len(self._modules)
 

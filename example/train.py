@@ -11,17 +11,21 @@ def main():
         seed=0,
         tp_size=2,
     )
-
+    offload = True
+    seq_len = 4096
+    offload_level = 0
     model = GPT(
-        num_layers=8,
-        vocab_size=10240, 
-        dim_model=2560,
-        dim_head=80,
-        num_heads=32,
-        dim_ff=8192,
-        max_distance=1024,
-        bias=True,
-        dtype=torch.half
+        num_layers=24,
+        vocab_size=80000,
+        dim_model=1024,
+        dim_head=64,
+        num_heads=16,
+        dim_ff=4096,
+        max_distance=seq_len,
+        bias=False,
+        dtype=torch.half,
+        offload=offload,
+        offload_level=offload_level
     )
 
     bmt.init_parameters(model)
@@ -33,10 +37,7 @@ def main():
     # data
     # generate dummy data for each rank
     torch.manual_seed(1234)
-
-    batch_size = 2
-    seq_len = 512
-
+    batch_size = 4
     for i in range(bmt.world_size()):
         sent = torch.randint(0, 10240, (batch_size, seq_len + 1))
         enc_length = torch.randint(128, seq_len, (batch_size,)).long().cuda()
@@ -68,18 +69,18 @@ def main():
     avg_time_recorder = bmt.utils.AverageRecorder()
     avg_loss_recorder = bmt.utils.AverageRecorder()
 
-    for iteration in range(1000):
+    for iteration in range(30):
         # load data
         st = time.time()
 
-        with inspect.inspect_tensor() as inspector:
-            pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
-            logits = model(
-                enc_input,
-                pos,
-                pos < enc_length[:, None]
-            )
-            batch, seq_len, vocab_out_size = logits.size()
+        # with bmt.inspect.inspect_tensor() as inspector:
+        pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
+        logits = model(
+            enc_input,
+            pos,
+            pos < enc_length[:, None]
+        )
+        batch, seq_len, vocab_out_size = logits.size()
 
             if config['tp_size'] > 1:
                 loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets)
@@ -88,23 +89,23 @@ def main():
         
             global_loss = bmt.sum_loss(loss).item()
 
-            optim_manager.zero_grad()
+        optim_manager.zero_grad()
 
-            optim_manager.backward(loss)
+        optim_manager.backward(loss)
         
         # print inspected tensors in the forward & backward pass
         # print parameters of the model
-        if iteration % 100 == 0:
-            bmt.print_rank(
-                inspect.format_summary(
-                    inspector.get_summary()
-                )
-            )
-            bmt.print_rank(
-                inspect.format_summary(
-                    inspect.inspect_model(model, "*")
-                )
-            )
+        # if iteration % 100 == 0:
+        #     bmt.print_rank(
+        #         bmt.inspect.format_summary(
+        #             inspector.get_summary()
+        #         )
+        #     )
+        #     bmt.print_rank(
+        #         bmt.inspect.format_summary(
+        #             bmt.inspect.inspect_model(model, "*")
+        #         )
+        #     )
 
         optim_manager.step()
 

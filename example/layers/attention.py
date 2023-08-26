@@ -32,6 +32,7 @@ class Attention(bmt.DistributedModule):
 
         self.softmax = torch.nn.Softmax(dim=-1)
         self.num_heads = num_heads
+        self.num_kv_heads = num_heads
         self.dim_head = dim_head
         self.dim_model = dim_model
     
