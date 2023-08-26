@@ -16,7 +16,7 @@ def preprocess_input(input, gather_input, split_input):
         input = input.flatten(0, 1)
 
     if split_input:
-        all_input_list = input.chunk(config['tp_size'], dim=1)
+        all_input_list = input.chunk(config['tp_size'], dim=-1)
         input = all_input_list[config['topology'].tp_id]
     return input
 
@@ -68,7 +68,7 @@ class OpParallelLinear(torch.autograd.Function):
         if gather_output:
             tp_size = config['tp_size']
             tp_id = config['topology'].tp_id
-            grad_output_list = grad_output.chunk(tp_size, dim=1)
+            grad_output_list = grad_output.chunk(tp_size, dim=-1)
             grad_output = grad_output_list[tp_id]
 
         grad_input = grad_weight = grad_bias = None
