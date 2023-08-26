@@ -92,6 +92,7 @@ class Offload_Dict:
             else:
                 fp32_offset += val['size']
             val['stor'] = None
+
 def find_pre_module_helper(m):
     if len(m) == 0:
         return None
@@ -99,30 +100,6 @@ def find_pre_module_helper(m):
         return m[0]
     else:
         return find_pre_module_helper(m[0]._pre_module)
-
-def nearest_offload_module(module):
-    queue = deque([(module, 0)]) 
-    nearest_modules = []
-    nearest_depth = float('inf')
-    
-    while queue:
-        curr_module, curr_depth = queue.popleft()
-        
-        if curr_depth > nearest_depth:
-            break
-        
-        for m in curr_module._pre_module:
-            if m._mode == "OFFLOAD" and not m._on_device:
-                if curr_depth < nearest_depth:
-                    nearest_modules = [m]
-                    nearest_depth = curr_depth
-                elif curr_depth == nearest_depth:
-                    nearest_modules.append(m)
-            else:
-                queue.append((m, curr_depth + 1))
-    
-    return nearest_modules
-
 
 def offload_wrapper(offload_dict):
     def pack_hook(tensor):
