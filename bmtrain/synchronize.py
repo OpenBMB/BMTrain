@@ -35,7 +35,10 @@ def sum_loss(loss : torch.Tensor):
 
 def gather_result(result: torch.Tensor):
     warnings.warn("bmtrain.gather_result is deprecated and will be removed in later version. Use bmtrain.distributed.all_gather instead.", DeprecationWarning)
-
+    if result.storage_offset() != 0 or result.storage().size() != result.numel():
+        # Create a clone of the original tensor if it's a slice
+        result = result.clone()
+        
     output_cuda = True
     if not result.is_cuda:
         result = result.cuda()
