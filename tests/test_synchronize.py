@@ -6,26 +6,19 @@ from bmtrain import nccl, distributed
 from bmtrain.synchronize import gather_result
 
 def test_main():
-    tensor = torch.rand(5, 5) * bmt.rank()
-    result = bmt.gather_result(tensor)
-    
-    tensor_slice_0 = tensor[:1, :1]
-    result_slice_0 = bmt.gather_result(tensor_slice_0)
-    assert torch.allclose(result[:1, :1], result_slice_0, atol=1e-6), "Assertion failed for tensor_slice_0"
 
-    tensor_slice_1 = tensor[:2, :2]
-    result_slice_1 = bmt.gather_result(tensor_slice_1)
-    assert torch.allclose(result[:2, :2], result_slice_1, atol=1e-6), "Assertion failed for tensor_slice_1"
+    ref_result = torch.rand(5 * bmt.world_size(), 5)  
+    tensor = ref_result.chunk(bmt.world_size(), dim=0)[bmt.rank()]
+    real_result = bmt.gather_result(tensor)
+    assert torch.allclose(ref_result, real_result, atol=1e-6), "Assertion failed for real gather result error"
 
-    tensor_slice_2 = tensor[:3, :3]
-    result_slice_2 = bmt.gather_result(tensor_slice_2)
-    assert torch.allclose(result[:3, :3], result_slice_2, atol=1e-6), "Assertion failed for tensor_slice_2"
+    for i in range(4):
+        size = i + 1
+        tensor_slice = tensor[:size, :size]
+        result_slice = bmt.gather_result(tensor_slice)
+        assert torch.allclose(real_result[:size, :size], result_slice, atol=1e-6), f"Assertion failed for tensor_slice_{i}"
 
-    tensor_slice_3 = tensor[:4, :4]
-    result_slice_3 = bmt.gather_result(tensor_slice_3)
-    assert torch.allclose(result[:4, :4], result_slice_3, atol=1e-6), "Assertion failed for tensor_slice_3"
-
-    print("All slice tests passed!")
+    print("All tensor slice tests passed!")
 
 if __name__ == '__main__':
     bmt.init_distributed(pipe_size=1)
