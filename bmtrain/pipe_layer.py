@@ -139,7 +139,11 @@ class StagePreFunction(torch.autograd.Function):
     def backward(ctx, grad_outputs):
         if not ctx.is_first_stage:
             send_data = grad_outputs[0] if isinstance(grad_outputs, tuple) else grad_outputs 
-            send_activations(send_data, ctx.stage_id - 1, config['pipe_comm'])
+            current_stream = torch.cuda.current_stream()
+            with torch.cuda.stream(config['pp_comm_stream']):
+                config['pp_comm_stream'].wait_stream(current_stream) 
+                send_data.record_stream(current_stream)
+                send_activations(send_data, ctx.stage_id - 1, config['pipe_comm'])
         return grad_outputs, None
 
 class StagePostFunction(torch.autograd.Function):
@@ -150,7 +154,11 @@ class StagePostFunction(torch.autograd.Function):
         ctx.is_last_stage = stage_id == config['pipe_size'] - 1
         if not ctx.is_last_stage:
             send_data = outputs[0] if isinstance(outputs, tuple) else outputs
-            send_activations(send_data.detach(), stage_id + 1, config['pipe_comm'])
+            current_stream = torch.cuda.current_stream()
+            with torch.cuda.stream(config['pp_comm_stream']):
+                config['pp_comm_stream'].wait_stream(current_stream) 
+                send_data.record_stream(current_stream)
+                send_activations(send_data.detach(), stage_id + 1, config['pipe_comm'])
         return outputs
         
     @staticmethod
