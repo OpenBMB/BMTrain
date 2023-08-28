@@ -9,7 +9,7 @@ def zero_pre_forward(module, inputs):
         enter = module._micro_idx == 0
         pipe = True
     if enter:
-        zero_level = module._zero_level #config['zero_level']
+        zero_level = module._zero_level 
         forward_flag = 1 if zero_level == 2 else 0
         if zero_level == 2 and module._ref_count > 1:
             forward_flag = 2 # repeating forward in same layer
@@ -19,7 +19,6 @@ def zero_pre_forward(module, inputs):
         module._forward_block_ctx.enter(forward_flag)
 
 def zero_post_forward(module, inputs, outputs):
-    #forward_flag = 1 if config['zero_level'] == 2 else 0
     forward_flag = 1 if module._zero_level == 2 else 0
     if module.all_param_no_grad:
         forward_flag = 0
@@ -32,7 +31,6 @@ def zero_post_forward(module, inputs, outputs):
         module._ref_count += 1
 
 def zero_pre_backward(module, grad_outputs):
-    #backward_flag = 2 if config['zero_level'] == 2 else 0
     backward_flag = 2 if module._zero_level == 2 else 0
     if module._mode != "PIPE":
         module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict)
@@ -45,7 +43,6 @@ def zero_pre_backward(module, grad_outputs):
             module._backward_block_ctx.enter(backward_flag, True)
 
 def zero_post_backward(module, grad_inputs, grad_outputs):
-    #backward_flag = 2 if config['zero_level'] == 2 else 0
     backward_flag = 2 if module._zero_level == 2 else 0
     if module._mode != "PIPE":
         if module._is_first_layer: 
