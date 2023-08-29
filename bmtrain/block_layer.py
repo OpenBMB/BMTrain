@@ -66,7 +66,7 @@ class CheckpointBlock(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, use_offload=False, offload_level=0, zero_level=3):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, offload_level=0, zero_level=3):
         super().__init__()
         self._module = inner_module
         self._inputs = None
@@ -80,6 +80,7 @@ class CheckpointBlock(torch.nn.Module):
         self._ready = False
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
+        use_offload = offload_level in [1,2]
         assert not (use_checkpoint and use_offload), "It does not make sense to use offload and checkpointing at the same time" 
         # calc total number of parameters
         for name, param in ordered_parameters:
@@ -202,7 +203,7 @@ class CheckpointBlock(torch.nn.Module):
         self._pre_module = [] #save the pre module of self
         self._ref_count = 0 #incremental in forward and  decreasing in backward
         self._mode = "BLOCK" #BLOCK or ZERO or PIPE
-        if use_offload and offload_level != 0:
+        if use_offload:
             self._mode = "OFFLOAD"
             self._on_device = False
             self.offload_level = offload_level
