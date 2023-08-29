@@ -557,7 +557,6 @@ class TransformerBlockList(torch.nn.Module):
             self._modules[str(i)] = module
             module._idx = i
             self.add_module(str(i), module)
-        print(f"offload layer: {offload}")
         self._modules[str(0)]._is_first_layer = True
         self._modules[str(len(modules)-1)]._is_last_layer = True
     

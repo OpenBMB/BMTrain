@@ -32,7 +32,14 @@ def load_nccl_pypi():
         if file_split[-1] == "so" or (len(file_split)>1 and file_split[-2] == "so"):
             ctypes.CDLL(os.path.join(path, file_so))
     
-    
+def find_pre_module_helper(m):
+    if len(m) == 0:
+        return None
+    if m._mode == "OFFLOAD":
+        return m
+    else:
+        return find_pre_module_helper(m.pre_module())
+
 def round_up(x, d):
     return (x + d - 1) // d * d
 
