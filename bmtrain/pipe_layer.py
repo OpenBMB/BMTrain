@@ -17,6 +17,7 @@ from .block_layer import Block, round_up, _get_param_kw
 class PipePreFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, hidden_state, *args):
+        print(config['rank'], "pipe pre forward")
         hidden_state_list = all_gather(hidden_state.clone(), config["pipe_comm"])
         hidden_state_list.requires_grad_()
 
@@ -56,6 +57,7 @@ class PipePreFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grads, arg_grads):
+        print(config['rank'], "pipe pre backward")
         grads = broadcast(grads, 0, config['pipe_comm'])
         topo = config['topology']
         arg_grads = []
@@ -78,6 +80,7 @@ class PipePreFunction(torch.autograd.Function):
 class PipePostFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, last_hidden, hidden_states=None, forward_stage_ranges=None, backward_stage_ranges=None, last_hidden_shape=None, return_hidden_states=False):
+        print(config['rank'], "pipe post forward")
         topo = config['topology']
         ctx.return_hidden_states = return_hidden_states
         last_hidden = broadcast(last_hidden, config["pipe_size"] - 1, config["pipe_comm"])
@@ -108,6 +111,7 @@ class PipePostFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grads, grad_middle=None):
+        print(config['rank'], "pipe post backward")
         grad_list = all_gather(grads, config["pipe_comm"])
         grad_list = grad_list.flatten(start_dim=0, end_dim=1)
 
@@ -126,9 +130,11 @@ class PipePostFunction(torch.autograd.Function):
 class StagePreFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, stage_id):
+        print(config['rank'], "stage pre forward")
         ctx.stage_id = stage_id
         ctx.is_first_stage = stage_id == 0 
         ctx.is_last_stage = stage_id == config['pipe_size'] - 1
+        print(stage_id, ctx.is_first_stage, ctx.is_last_stage)
         if not ctx.is_first_stage:
             input = recv_activations(stage_id - 1, config['pipe_comm'])
             input.requires_grad_()
@@ -137,6 +143,7 @@ class StagePreFunction(torch.autograd.Function):
         
     @staticmethod
     def backward(ctx, grad_outputs):
+        print(config['rank'], "stage pre backward")
         if not ctx.is_first_stage:
             send_data = grad_outputs[0] if isinstance(grad_outputs, tuple) else grad_outputs 
             current_stream = torch.cuda.current_stream()
@@ -149,9 +156,11 @@ class StagePreFunction(torch.autograd.Function):
 class StagePostFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, outputs, stage_id):
+        print(config['rank'], "stage post forward")
         ctx.stage_id = stage_id
         ctx.is_first_stage = stage_id == 0 
         ctx.is_last_stage = stage_id == config['pipe_size'] - 1
+        print(stage_id, ctx.is_first_stage, ctx.is_last_stage)
         if not ctx.is_last_stage:
             send_data = outputs[0] if isinstance(outputs, tuple) else outputs
             current_stream = torch.cuda.current_stream()
@@ -159,10 +168,12 @@ class StagePostFunction(torch.autograd.Function):
                 config['pp_comm_stream'].wait_stream(current_stream) 
                 send_data.record_stream(current_stream)
                 send_activations(send_data.detach(), stage_id + 1, config['pipe_comm'])
+        print(config['rank'], "stage post forward end")
         return outputs
         
     @staticmethod
     def backward(ctx, grad_outputs):
+        print(config['rank'], "stage post backward")
         if not ctx.is_last_stage:
             pre_grad_inputs = recv_activations(ctx.stage_id + 1, config['pipe_comm'])
             return pre_grad_inputs, None
@@ -194,9 +205,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
         super().__init__()
         self.num_hidden = num_hidden 
         self._modules = {}
-        rank = config['rank']
-        topo = config['topology']
         self.layer_ids = []
+        topo = config["topology"]
         self.stages = topo.stages
         self.stage_id = topo.stage_id
         self.pipe_idx = topo.pipe_idx 
@@ -205,9 +215,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
                 module = Block(module)
 
             module._mode = "PIPE"
-            module.stage_id = self.stage_id
-            module.stages = self.stages
-
             self._modules[str(idx)] = module
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)
@@ -217,11 +224,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
             module = self._modules[str(layer_id)]
             module.set_pre_module(pre_module)
             pre_module = module
-
-            module._is_first_stage = True if self.stage_id == 0 else False
-            module._is_last_stage = True if self.stage_id == self.stages-1 else False
             module._is_first_layer = False
             module._is_last_layer = False
+            
         self._modules[str(self.layer_ids[0])]._is_first_layer = True
         self._modules[str(self.layer_ids[-1])]._is_last_layer = True
 

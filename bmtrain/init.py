@@ -130,13 +130,21 @@ def init_distributed(
         unique_id = nccl.getUniqueId()
         store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
     unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
-    config['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.tp_zero_id)
+    config['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['tp_size'], topo.tp_zero_id)
 
-    if topo.zero_id == 0:
+    if topo.pp_zero_id == 0:
         unique_id = nccl.getUniqueId()
-        store.set(f"ZERO_UNIQUE_ID{topo.zero_idx}", unique_id.hex() )
-    unique_id = bytes.fromhex(store.get(f"ZERO_UNIQUE_ID{topo.zero_idx}").decode())
-    config ['zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size']), topo.zero_id)
+        store.set(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}", unique_id.hex() )
+    unique_id = bytes.fromhex(store.get(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}").decode())
+    config['pp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['pipe_size'], topo.pp_zero_id)
+
+    if topo.pp_tp_zero_id == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}", unique_id.hex() )
+    unique_id = bytes.fromhex(store.get(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}").decode())
+    config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id)
+
+    config ['zero_comm'] = config['comm']
 
     for i in range(world_size):
         if i == rank:
@@ -163,8 +171,6 @@ class topology:
         dp_size = world_size // (pp_size * tp_size)
         config['tp_zero_size'] = dp_size
         config['zero_size'] = world_size // pp_size 
-        topo=torch.tensor(range(dp_size*tp_size*pp_size),dtype=torch.int,device='cuda')
-        topo=topo.view(pp_size,dp_size*tp_size)
         self.stages = config['pipe_size']
         
         stage_size = world_size // pp_size
@@ -173,13 +179,19 @@ class topology:
             self.stage_id = self.rank // stage_size 
             self.tp_id = self.rank % tp_size
             self.tp_idx = self.rank // tp_size 
-            self.zero_idx = self.stage_id 
-            self.zero_id = self.pipe_idx 
-            self.tp_zero_idx = self.stage_id * tp_size + self.tp_id 
-            self.tp_zero_id = self.pipe_idx // tp_size
-
-        self.next_rank = self.stage_id+1 if self.stage_id < config['pipe_size'] - 1 else -1
-        self.prev_rank = self.stage_id-1 if self.stage_id > 0 else -1
+            #pp->zero
+            self.pp_zero_idx = self.stage_id 
+            self.pp_zero_id = self.pipe_idx 
+            #pp->tp->zero
+            self.pp_tp_zero_idx = self.stage_id * tp_size + self.tp_id 
+            self.pp_tp_zero_id = self.pipe_idx // tp_size
+            #tp->zero
+            self.tp_zero_idx = self.tp_id 
+            self.tp_zero_id = self.tp_idx
+        #only zero
+        self.zero_idx = 0
+        self.zero_id = self.rank
+        print(self.rank, self.stage_id, self.pipe_idx, self.pp_zero_idx, self.pp_zero_id)
 
 
     def get_group_id(self,group_name):

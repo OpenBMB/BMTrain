@@ -5,12 +5,8 @@ from .global_var import config
 import torch
 from . import nccl
 from .parameter import DistributedParameter, OpAllGather
-from .zero_context import (
-        ZeroContext
-)
-
+from .zero_context import ZeroContext
 from . import hook_func
-
 import inspect
 from torch.utils.checkpoint import checkpoint
 
@@ -70,11 +66,28 @@ class Block(torch.nn.Module):
         self._layer_dict = {}
         self._forward_block_ctx = None
         self._backward_block_ctx = None
-        # build large parameter&grad here
         self._param_info = []
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
         self._storage_info = {}
         self._ready = False
+        self.use_checkpoint = use_checkpoint
+        self._is_first_layer = True
+        self._is_last_layer = True
+        self._release_list = [True] 
+        self._next_module = [] #save the next module of self
+        self._pre_module = [] #save the pre module of self
+        self._ref_count = 0 #incremental in forward and  decreasing in backward
+        self._mode = "BLOCK" #BLOCK or ZERO or PIPE
+        self.all_input_no_grad = False
+        self.all_param_no_grad = False
+        self._zero_level = zero_level
+        self._has_partition = False
+
+    def partition_parameter(self):
+        if self._has_partition:
+            return
+        self._has_partition = True
+
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
@@ -87,12 +100,22 @@ class Block(torch.nn.Module):
             kw_name = _get_param_kw(param)
 
             if kw_name not in self._storage_info:
+                print(self._mode, param._tp_mode)
+                if self._mode == "PIPE" and param._tp_mode:
+                    zero_comm = config["pp_tp_zero_comm"]
+                elif self._mode != "PIPE" and param._tp_mode:
+                    zero_comm = config["tp_zero_comm"]
+                elif self._mode == "PIPE" and not param._tp_mode:
+                    zero_comm = config["pp_zero_comm"]
+                else:
+                    zero_comm = config["zero_comm"]
+
                 self._storage_info[kw_name] = {
                     "total": 0,
                     "storage_type": storage_type,
                     "requires_grad": param.requires_grad,
                     "group": param.group,
-                    "zero_comm" : param._zero_comm
+                    "zero_comm" : zero_comm
                 }
 
             param_shape = param._original_shape
@@ -106,7 +129,7 @@ class Block(torch.nn.Module):
         offsets = {}
         # intialize storage buffers
         for kw, val in self._storage_info.items():
-            comm = val['zero_comm']
+            comm = val["zero_comm"]
             world_size = nccl.commCount(comm)
             rank = nccl.commRank(comm)
             val["world_size"] = world_size 
@@ -191,18 +214,6 @@ class Block(torch.nn.Module):
         for kw in offsets.keys():
             assert offsets[kw] == self._storage_info[kw]["total"]
 
-        self.use_checkpoint = use_checkpoint
-        self._is_first_layer = True
-        self._is_last_layer = True
-        self._release_list = [True] 
-        self._next_module = [] #save the next module of self
-        self._pre_module = [] #save the pre module of self
-        self._ref_count = 0 #incremental in forward and  decreasing in backward
-        self._mode = "BLOCK" #BLOCK or ZERO or PIPE
-        self.all_input_no_grad = False
-        self.all_param_no_grad = False
-        self._zero_level = zero_level
-
     def set_pre_module(self, pre_module):
         if pre_module is not None:
             self._pre_module.append(pre_module)
@@ -223,6 +234,7 @@ class Block(torch.nn.Module):
         self._ref_count -= 1
 
     def pre_hook(self, *args):
+        self.partition_parameter()
         grad_tensors = []
         grad_index = []
         arg_list = list(args)
@@ -289,6 +301,7 @@ class Block(torch.nn.Module):
         raise RuntimeError("._save_to_state_dict() of Block should not be called")
     
     def state_dict(self, destination=None, prefix='', keep_vars=False):
+        self.partition_parameter()
         # gather here
         with torch.no_grad():
             with ZeroContext(self):
@@ -296,6 +309,7 @@ class Block(torch.nn.Module):
     
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+        self.partition_parameter()
         all_keys = []
         for it in self._param_info:
             key = prefix + it["name"]
@@ -406,6 +420,7 @@ class Block(torch.nn.Module):
         """
         Initialize distributed parameters in this block.
         """
+        self.partition_parameter()
         for it in self._param_info:
             param = it["parameter"]
             if isinstance(param, DistributedParameter) and param._init_method is not None:

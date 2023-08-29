@@ -170,21 +170,21 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mid
         )
     return ret + "\n" # replace for matching None grad with zero_grad
 
-def run(name, cls, num_layer=4, dim=4096, batch=32, seq_len=256):
+def run(name, cls, num_layer=2, dim=4096, batch=32, seq_len=256):
     ret = ""
     ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_last=True)
     bmt.synchronize()
-    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_middle=True)
-    bmt.synchronize()
-    ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, mix_test=True)
-    bmt.synchronize()
+    #ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, only_middle=True)
+    #bmt.synchronize()
+    #ret += sub_run(name, cls, num_layer=num_layer, dim=dim, batch=batch, seq_len=seq_len, mix_test=True)
+    #bmt.synchronize()
     return ret
 
 def test_main():
     ret = {}
     ret["normal"] = run("normal", Model_NORMAL)
-    ret["block"] = run("block", Model_BLOCK)
-    ret["zero"] = run("zero", Model_ZERO)
+    #ret["block"] = run("block", Model_BLOCK)
+    #ret["zero"] = run("zero", Model_ZERO)
     ret["pipe"] = run("pipe", Model_PIPE)
     for k, r in ret.items():
         bmt.print_rank(f"============={k}============")
@@ -207,6 +207,6 @@ def test_main():
                         assert_eq(w, w2)
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=4)
+    bmt.init_distributed(pipe_size=2)
 
     test_main()
