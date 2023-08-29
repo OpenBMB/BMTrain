@@ -1,38 +1,28 @@
 import torch
 import bmtrain as bmt
 from layers import TransformerEncoder, Layernorm, Embedding, TransformerEncoder
-from bmtrain.global_var import config
 
 class GPT(bmt.DistributedModule):
     def __init__(self,
             num_layers : int, vocab_size : int,
             dim_model : int, dim_head : int, num_heads : int, dim_ff : int,
             max_distance : int,
-            bias : bool = True, dtype = None, offload = False, offload_level = 0
+            bias : bool = True, dtype = None
         ) -> None:
         super().__init__()
 
         self.max_distance = max_distance
 
-        if config['tp_size'] > 1:
-            self.word_emb = bmt.nn.ParallelEmbedding(vocab_size, dim_model, dtype=dtype)
-        else:
-            self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
+        self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         self.pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
-        if offload:
-            offload_mask = [True if i%4 == 0 else False for i in range(num_layers)] 
-            ckpt_mask = [not offload_mask[i] for i in range(num_layers)]
-            offload_level = offload_level
-        else:
-            ckpt_mask = [ True for i in range(num_layers) ]
-            offload_mask = [ False for i in range(num_layers) ]
+        
         self.transformers = bmt.TransformerBlockList([
             bmt.CheckpointBlock(
                 TransformerEncoder(
                     dim_model, dim_head, num_heads, dim_ff, bias, dtype
-                ),use_checkpoint=ckpt_mask[i],use_offload=offload_mask[i],offload_level=offload_level
+                )
             )
-            for i in range(num_layers)
+            for _ in range(num_layers)
         ])
 
         self.layernorm = Layernorm(dim_model, dtype=dtype)
@@ -52,10 +42,7 @@ class GPT(bmt.DistributedModule):
         out = self.transformers(out, mask_2d, None)
         out = self.layernorm(out)
 
-        if config['tp_size'] > 1:
-            logits = self.word_emb.projection(out)
-        else:
-            logits = self.word_emb(out, projection=True)
+        logits = self.word_emb(out, projection=True)
         bmt.inspect.record_tensor(logits, "logits")
 
         return logits

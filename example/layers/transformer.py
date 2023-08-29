@@ -20,10 +20,10 @@ class TransformerEncoder(bmt.DistributedModule):
             hidden : torch.Tensor,      # (batch, seq_len, dim_model)
             mask : torch.BoolTensor,    # (batch, seq_len, dim_model)
             position_bias : Optional[torch.Tensor] = None,   # (batch, num_head, seq_len, seq_len)
-    ):
-        # bmt.inspect.record_tensor(hidden, "hidden")
+        ):
+        bmt.inspect.record_tensor(hidden, "hidden")
         x = self.ln_attn(hidden)
-        x = self.attn(x, x, mask)
+        x = self.attn(x, x, mask, position_bias)
         hidden = hidden + x
 
         x = self.ln_ff(hidden)
