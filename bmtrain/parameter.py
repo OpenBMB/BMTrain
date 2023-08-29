@@ -25,7 +25,7 @@ class DistributedParameter(torch.nn.Parameter):
     _start_partition : int
     _end_partition : int
     _init_method : Optional[Callable[['DistributedParameter'], None]]
-    _in_checkpoint_block : bool
+    _in_block: bool
     _group : Optional[str]
 
     def __new__(cls,
@@ -72,7 +72,7 @@ class DistributedParameter(torch.nn.Parameter):
         setattr(ret, "_start_partition", start_of_partition)
         setattr(ret, "_end_partition", end_of_partition)
         setattr(ret, "_init_method", init_method)
-        setattr(ret, "_in_checkpoint_block", False)
+        setattr(ret, "_in_block", False)
         setattr(ret, "_group", group if not tp_mode else "tp")
         
         setattr(ret, "_tp_mode", tp_mode)

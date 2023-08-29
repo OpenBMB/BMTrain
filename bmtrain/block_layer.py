@@ -5,15 +5,12 @@ from .global_var import config
 import torch
 from . import nccl
 from .parameter import DistributedParameter, OpAllGather
-from .checkpointing import (
-        CheckpointBlockContext
+from .zero_context import (
+        ZeroContext
 )
-
-from . import debug
 
 from . import hook_func
 
-import copy
 import inspect
 from torch.utils.checkpoint import checkpoint
 
@@ -48,21 +45,21 @@ def _get_param_kw(param : DistributedParameter):
         group_name = "_g_" + param.group
     return type_name + grad_name + group_name
 
-class CheckpointBlock(torch.nn.Module):
-    """ A bmtrain block containing two memory-saving methods of ZeRO-2/3 and checkpoint.
-
-    Checkpoint block is used to save the occupation of GPU memory in training.
-
-    For details, please refer to `Checkpointing <https://pytorch.org/docs/stable/checkpoint.html>`_ .
+class Block(torch.nn.Module):
+    """ A block containing two memory-saving methods of ZeRO and checkpoint.
+    For details please refer to `ZeRO <https://arxiv.org/abs/1910.02054v3>`_ and 
+    `Checkpointing <https://pytorch.org/docs/stable/checkpoint.html>`_ . 
 
     Args:
-        model (torch.nn.Module): The model to be checkpointed. All kinds of modules are supported.
+        inner_module (torch.nn.Module): The module to reduce memory usage. All kinds of modules are supported.
         use_checkpoint (boolean): use checkpoint or not. Default True.
+        zero_level (int): 2 (ZeRO-2) indicates that optimizer states and gradients are partitioned across the process, 
+            3 (ZeRO-3) means that the parameters are partitioned one the basis of ZeRO-2. Default 3.
     
     Examples:
         >>> transformer_block = TransformerBlock(...)
-        >>> checkpoint_block = CheckpointBlock(transformer_block)
-        >>> y1, ... = checkpoint_block(x)
+        >>> bmt_block = Block(transformer_block)
+        >>> y1, ... = bmt_block(x)
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
@@ -189,7 +186,7 @@ class CheckpointBlock(torch.nn.Module):
             else:
                 param.data = torch.tensor([], dtype=param.dtype, device=param.device)
             # clear parameter data, but keep the dtype and device
-            setattr(param, "_in_checkpoint_block", True)
+            setattr(param, "_in_block", True)
 
         for kw in offsets.keys():
             assert offsets[kw] == self._storage_info[kw]["total"]
@@ -289,12 +286,12 @@ class CheckpointBlock(torch.nn.Module):
         object.__delattr__(self, name)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        raise RuntimeError("._save_to_state_dict() of CheckpointBlock should not be called")
+        raise RuntimeError("._save_to_state_dict() of Block should not be called")
     
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         # gather here
         with torch.no_grad():
-            with CheckpointBlockContext(self):
+            with ZeroContext(self):
                 return self._module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
     
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
@@ -358,7 +355,7 @@ class CheckpointBlock(torch.nn.Module):
                 missing_keys.append(key)
 
         for name, param in self.named_parameters():
-            if isinstance(param, DistributedParameter) and not param._in_checkpoint_block:
+            if isinstance(param, DistributedParameter) and not param._in_block:
                 key = prefix + name
                 all_keys.append(key)
                 if key in state_dict:
@@ -512,7 +509,7 @@ class CheckpointBlock(torch.nn.Module):
         
 class TransformerBlockList(torch.nn.Module):
     r"""
-    TransformerBlockList is a list of CheckpointBlocks.
+    TransformerBlockList is a list of bmt.Block.
 
     This is designed to reduce the communication overhead by overlapping the computation and reduce_scatter operation during backward pass.
 
@@ -529,16 +526,16 @@ class TransformerBlockList(torch.nn.Module):
         >>> hidden_state = transformer_module_list(hidden_state, ...)
 
     """
-    _modules: Dict[str, CheckpointBlock]
+    _modules: Dict[str, Block]
 
-    def __init__(self, modules: Iterable[CheckpointBlock], num_hidden=1, sqrt=False) -> None:
+    def __init__(self, modules: Iterable[Block], num_hidden=1, sqrt=False) -> None:
         super().__init__()
         
         self._modules = {}
         pre_module = None
         for i, module in enumerate(modules):
-            if not isinstance(module, CheckpointBlock):
-                module = CheckpointBlock(module)
+            if not isinstance(module, Block):
+                module = Block(module)
 
             module._mode = "ZERO"
             module.set_pre_module(pre_module)
@@ -579,9 +576,9 @@ class TransformerBlockList(torch.nn.Module):
     def __len__(self) -> int:
         return len(self._modules)
 
-    def __iter__(self) -> Iterator[CheckpointBlock]:
+    def __iter__(self) -> Iterator[Block]:
         return iter(self._modules.values())
-    def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
+    def __getitem__(self, index: Union[int, str]) -> Block:
         return self._modules[str(index)]
 
     def forward(self, *args, return_hidden_states = False):

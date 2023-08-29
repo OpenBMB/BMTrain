@@ -1,6 +1,6 @@
 import torch
 from .global_var import config
-from .checkpointing import CheckpointBlockContext
+from .zero_context import ZeroContext
 
 def zero_pre_forward(module, inputs):
     enter = True
@@ -15,7 +15,7 @@ def zero_pre_forward(module, inputs):
             forward_flag = 2 # repeating forward in same layer
         if module.all_param_no_grad: #only forward
             forward_flag = 0
-        module._forward_block_ctx = CheckpointBlockContext(module, module._layer_dict, pipe=pipe)
+        module._forward_block_ctx = ZeroContext(module, module._layer_dict, pipe=pipe)
         module._forward_block_ctx.enter(forward_flag)
 
 def zero_post_forward(module, inputs, outputs):
@@ -33,13 +33,13 @@ def zero_post_forward(module, inputs, outputs):
 def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if module._zero_level == 2 else 0
     if module._mode != "PIPE":
-        module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict)
+        module._backward_block_ctx = ZeroContext(module, module._layer_dict)
         module._backward_block_ctx.enter(backward_flag, True)
         if not module._is_last_layer: 
             module.next_module().backward_release(backward_flag)
     else:
         if module._micro_idx == config['micros'] - 1:
-            module._backward_block_ctx = CheckpointBlockContext(module, module._layer_dict, pipe=True)
+            module._backward_block_ctx = ZeroContext(module, module._layer_dict, pipe=True)
             module._backward_block_ctx.enter(backward_flag, True)
 
 def zero_post_backward(module, grad_inputs, grad_outputs):
