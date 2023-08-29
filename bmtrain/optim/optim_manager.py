@@ -11,9 +11,9 @@ def check_overflow(param_groups):
     has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
     for group in param_groups:
         for p in group['params']:
-            if p.grad is not None and p.dtype == torch.half: # TODO support other types
-                has_inf_nan(p.grad, has_inf_or_nan)
-
+            if p.grad is not None:
+                if p.dtype != torch.float:
+                    has_inf_nan(p.grad, has_inf_or_nan)
     if "comm" in config:
         nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
 
