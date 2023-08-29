@@ -560,7 +560,6 @@ class TransformerBlockList(torch.nn.Module):
                 module.calc_event = torch.cuda.Event()
                 module.offload_event = torch.cuda.Event()
             self._modules[str(i)] = module
-            module._idx = i
             self.add_module(str(i), module)
         self._modules[str(0)]._is_first_layer = True
         self._modules[str(len(modules)-1)]._is_last_layer = True
