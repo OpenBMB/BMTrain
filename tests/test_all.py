@@ -6,6 +6,7 @@ tq = tqdm([
     ("different_output_shape", 1),
     ("load_ckpt", 1),
     ("init_parameters", 1),
+    ("synchronize", 4),
     ("init_parameters_multi_gpu", 4),
     ("optim_state", 4),
 
@@ -26,6 +27,9 @@ tq = tqdm([
 
     ("send_recv", 4),
     ("nccl_backward", 4),
+    ("no_grad", 1),
+    ("column_parallel_linear", 2),
+    ("row_parallel_linear", 2),
 
     ("training", 4),
 ])

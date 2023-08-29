@@ -1,6 +1,7 @@
 from utils import *
 import torch
 import bmtrain as bmt
+from bmtrain import optim
 
 class TestModule(torch.nn.Module):
     def __init__(self):

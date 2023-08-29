@@ -2,6 +2,8 @@ import torch
 import sys
 from typing import Any, Dict, Iterable, Optional
 from .global_var import config
+import os
+import ctypes
 
 ALIGN = 4
 ROW_WIDTH = 60
@@ -18,6 +20,19 @@ def check_torch_version(version_str):
     current_version_int = current_version_int_arr[0] * 10000 + current_version_int_arr[1] * 100 + current_version_int_arr[2]
     return current_version_int - version_int
 
+def load_nccl_pypi():
+    try:
+        import nvidia.nccl
+    except:
+        raise ImportError("Run pip install nvidia-nccl-cu11 >=2.14.3 first")
+
+    path = os.path.join(os.path.dirname(nvidia.nccl.__file__), "lib")
+    for file_so in os.listdir(path):
+        file_split = file_so.split('.')
+        if file_split[-1] == "so" or (len(file_split)>1 and file_split[-2] == "so"):
+            ctypes.CDLL(os.path.join(path, file_so))
+    
+    
 def round_up(x, d):
     return (x + d - 1) // d * d
 
@@ -91,6 +106,13 @@ def see_memory(message, detail=False):
         =======================================================================================
         """)
     torch.cuda.reset_peak_memory_stats()
+
+def tp_split_tensor(tensor, split_dim):
+    tensor_list = tensor.chunk(config['tp_size'], dim=split_dim)
+    sub_tensor = tensor_list[config['topology'].tp_id].contiguous()
+    tmp_tensor = torch.empty(sub_tensor.shape, device=sub_tensor.device, dtype=sub_tensor.dtype)
+    tmp_tensor.copy_(sub_tensor)
+    return tmp_tensor
 
 class AverageRecorder:
     """A utility class to record the average value of a quantity over time.

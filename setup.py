@@ -1,4 +1,5 @@
-import os, shutil
+import os
+import shutil
 from setuptools.command.build_ext import build_ext
 from setuptools import  setup, find_packages, Extension
 import setuptools
@@ -92,7 +93,7 @@ ext_modules = [
 ]
 setup(
     name='bmtrain',
-    version='0.2.3.post1',
+    version='0.2.3.post2',
     author="Guoyang Zeng",
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",
