@@ -75,6 +75,7 @@ def init_distributed(
     config["load_stream"] = torch.cuda.Stream(priority=-1)
     config["tp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config["offload_stream"] = torch.cuda.Stream()
+    config["pp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config['barrier_stream'] = torch.cuda.Stream()
     config["load_event"] = torch.cuda.Event()
     config["tp_size"] = tp_size if tp_size > 0 else 1
