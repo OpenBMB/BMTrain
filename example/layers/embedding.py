@@ -77,11 +77,13 @@ class Embedding(bmt.DistributedModule):
 
     def forward(self, input: torch.Tensor, projection : bool = False) -> torch.Tensor:
         if not projection:
-            return F.embedding(
+            out = F.embedding(
                 input, self.weight, self.padding_idx, self.max_norm,
                 self.norm_type, self.scale_grad_by_freq, self.sparse)
+            return out
         else:
-            return F.linear(input, self.weight) / math.sqrt(self.embedding_dim)
+            out = F.linear(input, self.weight)
+            return out
 
     def extra_repr(self) -> str:
         s = '{num_embeddings}, {embedding_dim}'
