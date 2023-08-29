@@ -78,7 +78,7 @@ class CheckpointBlock(torch.nn.Module):
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
         self._storage_info = {}
         self._ready = False
-        # sort parameters by nam_next_modulee
+        # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
         assert not (use_checkpoint and use_offload), "It does not make sense to use offload and checkpointing at the same time" 
         # calc total number of parameters
