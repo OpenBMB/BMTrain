@@ -28,7 +28,8 @@ class RowParallelLinear(bmt.DistributedModule):
         gather_output = False
         reduce_output_type = ReduceType.ALL_REDUCE if self.all_reduce_output else ReduceType.REDUCE_SCATTER
         out = OpParallelLinear.apply(input, self.weight, None, gather_input, gather_output, self.split_input, reduce_output_type)
-        out = out + self.bias
+        if self.bias:
+            out = out + self.bias
         return out
 
     def extra_repr(self) -> str:
