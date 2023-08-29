@@ -72,6 +72,7 @@ def init_distributed(
     config["rank"] = rank
     config["world_size"] = world_size
     config["calc_stream"] = torch.cuda.current_stream()
+    config["offload_stream"] = torch.cuda.Stream(priority=-1)
     config["load_stream"] = torch.cuda.Stream(priority=-1)
     config["tp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config["pp_comm_stream"] = torch.cuda.Stream(priority=-1)
