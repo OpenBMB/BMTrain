@@ -13,17 +13,27 @@ def init_distributed_parameter(params : Iterable[torch.nn.Parameter]):
             continue
         with torch.no_grad():
             partition_size = param.storage().size()
-            global_size = partition_size * config['world_size']
-            
+            global_size = partition_size * config['tp_zero_size'] * config['tp_size'] 
             tmp_storage = param.storage_type()(global_size)
             tmp_tensor = torch.tensor([], dtype=param.dtype, device="cuda")
-            tmp_tensor.set_(tmp_storage, 0, param._original_shape)
+            tmp_tensor.set_(tmp_storage, 0, param._tp_original_shape)
 
             param._init_method(tmp_tensor)
+            if param._tp_mode and param._tp_split_dim >= 0:
+                tensor_list = tmp_tensor.chunk(config['tp_size'], dim=param._tp_split_dim)
+                sub_tensor = tensor_list[config['topology'].tp_id].contiguous()
+                tmp_tensor = torch.empty(sub_tensor.shape, device=param.device, dtype=sub_tensor.dtype)
+                tmp_tensor.copy_(sub_tensor)
+
+            if param._tp_mode:
+                begin = config['tp_zero_rank']
+            else:
+                begin = config['zero_rank']
+            end = begin + 1
 
             # Pytorch 1.11 changed the API of storage.__getitem__
             torch.tensor([], dtype=param.dtype, device=param.device).set_(param.storage())[:] = \
-                torch.tensor([], dtype=param.dtype, device=param.device).set_(tmp_storage)[partition_size * config['rank'] : partition_size * (config['rank'] + 1)]
+                torch.tensor([], dtype=param.dtype, device=param.device).set_(tmp_tensor.storage())[partition_size * begin : partition_size * end]
             # param.storage().copy_(tmp_storage[partition_size * config['rank'] : partition_size * (config['rank'] + 1)])
 
 def iterate_parameters(model : torch.nn.Module):

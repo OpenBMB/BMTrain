@@ -139,7 +139,11 @@ class StagePreFunction(torch.autograd.Function):
     def backward(ctx, grad_outputs):
         if not ctx.is_first_stage:
             send_data = grad_outputs[0] if isinstance(grad_outputs, tuple) else grad_outputs 
-            send_activations(send_data, ctx.stage_id - 1, config['pipe_comm'])
+            current_stream = torch.cuda.current_stream()
+            with torch.cuda.stream(config['pp_comm_stream']):
+                config['pp_comm_stream'].wait_stream(current_stream) 
+                send_data.record_stream(current_stream)
+                send_activations(send_data, ctx.stage_id - 1, config['pipe_comm'])
         return grad_outputs, None
 
 class StagePostFunction(torch.autograd.Function):
@@ -150,7 +154,11 @@ class StagePostFunction(torch.autograd.Function):
         ctx.is_last_stage = stage_id == config['pipe_size'] - 1
         if not ctx.is_last_stage:
             send_data = outputs[0] if isinstance(outputs, tuple) else outputs
-            send_activations(send_data.detach(), stage_id + 1, config['pipe_comm'])
+            current_stream = torch.cuda.current_stream()
+            with torch.cuda.stream(config['pp_comm_stream']):
+                config['pp_comm_stream'].wait_stream(current_stream) 
+                send_data.record_stream(current_stream)
+                send_activations(send_data.detach(), stage_id + 1, config['pipe_comm'])
         return outputs
         
     @staticmethod
@@ -189,7 +197,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
         rank = config['rank']
         topo = config['topology']
         self.layer_ids = []
-        pipe_group = topo.pp_group
         self.stages = topo.stages
         self.stage_id = topo.stage_id
         self.pipe_idx = topo.pipe_idx 
@@ -217,11 +224,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
             module._is_last_layer = False
         self._modules[str(self.layer_ids[0])]._is_first_layer = True
         self._modules[str(self.layer_ids[-1])]._is_last_layer = True
-
-        self.partition_modules(self.layer_ids)
-        self.next_rank = pipe_group[self.pipe_idx, self.stage_id + 1] if self.stage_id < config['pipe_size'] - 1 else -1
-        self.prev_rank = pipe_group[self.pipe_idx, self.stage_id - 1] if self.stage_id > 0 else -1
-        # self.micro_batches = config['num_micro_batches']
 
         self.save_list = [(i, i) for i in range(len(self.layer_ids))]
             
@@ -295,76 +297,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
         else:
             return rest + (layer_id - rest * (part_len+1)) // part_len
 
-    def partition_modules(self, idxs) -> None:
-        for i in range(len(self)):
-            contiguous_params = {}
-            for kw, val in self[i]._storage_info.items():
-                storage_type = val["storage_type"]
-                contiguous_params[kw] = storage_type(round_up(val["total"], config["world_size"] // config["pipe_size"]))
-                nccl.allGather(
-                    self[i]._storage_params[kw].storage(),
-                    contiguous_params[kw],
-                    config["comm"]
-                )
-
-            if i not in idxs:
-                for name, param in self[i]._module.named_parameters():
-                    param.data = torch.tensor([], dtype = param.dtype, device = param.device)
-                for kw, val in self[i]._storage_info.items():
-                    val["begin"] = self.stage_id
-                    val["end"] = self.stage_id + 1
-                    val["partition_size"] = 1
-                    val["total"] = val["world_size"]
-                    dtype = self[i]._storage_params[kw].dtype
-                    device = self[i]._storage_params[kw].device
-                    self[i]._storage_params[kw] = \
-                        torch.nn.Parameter(torch.tensor([0], dtype = dtype, device=device))
-            else:
-                for kw, val in self[i]._storage_info.items():
-                    storage_type = val["storage_type"]
-                    val["world_size"] = config["world_size"] // config["pipe_size"]
-                    partition_size = round_up(val["total"], val["world_size"]) // val["world_size"]
-                    val["partition_size"] = partition_size
-                    val["begin"] = config['zero_rank'] * partition_size
-                    val["end"] = (config['zero_rank'] + 1) * partition_size
-                    storage_param_buffer = storage_type(partition_size)
-                    dtype = storage_param_buffer.dtype
-                    device = storage_param_buffer.device
-                    self[i]._storage_params[kw] = torch.nn.Parameter(
-                        torch.tensor([], dtype=dtype, device=device).set_(storage_param_buffer)
-                    )
-                    if val["requires_grad"]:
-                        self[i]._storage_params[kw].requires_grad_(True)
-                    else:
-                        self[i]._storage_params[kw].requires_grad_(False)
-                ordered_parameters = list(self[i]._module.named_parameters())
-                for idx, named_param in enumerate(ordered_parameters):
-                    name, param = named_param
-                    param_info = self[i]._param_info[idx]
-                    kw_name = _get_param_kw(param)
-                    storage_info = self[i]._storage_info[kw_name]
-                    storage_st = storage_info["begin"]
-                    storage_end = storage_info["end"]
-                    param_st = param_info["offset"]
-                    param_end = param_st + param_info["size"]
-                    if not (param_st >= storage_end or param_end <= storage_st):
-                        # copy offset in parameter storage
-                        offset_st = max(storage_st - param_st, 0)
-                        offset_end = min(storage_end - param_st, param_info["size"])
-                        assert offset_st < offset_end
-                        to_offset_st = offset_st + param_st - storage_st
-                        to_offset_end = offset_end + param_st - storage_st
-                        d_dtype = self[i]._storage_params[kw_name].dtype
-                        d_device = self[i]._storage_params[kw_name].device
-                        param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self[i]._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
-                        param_info["begin"] = to_offset_st
-                        param_info["end"] = (to_offset_end - to_offset_st,)
-                        param.data[:] = \
-                            torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_params[kw], storage_st+to_offset_st, (to_offset_end - to_offset_st,))[:]
-                    else:
-                        param.data = torch.tensor([], dtype=param.dtype, device=param.device)
-            del contiguous_params
-    
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         for name, module in self._modules.items():
             idx = int(name)
