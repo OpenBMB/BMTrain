@@ -33,8 +33,8 @@ def load_nccl_pypi():
             ctypes.CDLL(os.path.join(path, file_so))
     
 def find_pre_module_helper(m):
-    if len(m) == 0:
-        return None
+    if m is None:
+        return m
     if m._mode == "OFFLOAD":
         return m
     else:

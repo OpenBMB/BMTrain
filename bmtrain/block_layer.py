@@ -217,12 +217,16 @@ class CheckpointBlock(torch.nn.Module):
             pre_module._next_module.append(self)
             
     def pre_module(self):
-        assert len(self._pre_module) == self._ref_count, "{} != {}".format(len(self._pre_module), self._ref_count)
-        return self._pre_module[self._ref_count-1]
+        if len(self._pre_module) > 0:
+            return self._pre_module[self._ref_count-1]
+        else:
+            return None
 
     def next_module(self):
-        assert len(self._next_module) == self._ref_count, "{} != {}".format(len(self._next_module), self._ref_count)
-        return self._next_module[self._ref_count-1]
+        if len(self._next_module) > 0:
+            return self._next_module[self._ref_count-1]
+        else:
+            return None
 
     def backward_release(self, flag):
         if self._ref_count == 1 and self._backward_block_ctx is not None:
