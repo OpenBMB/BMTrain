@@ -6,6 +6,7 @@ tq = tqdm([
     ("different_output_shape", 1),
     ("load_ckpt", 1),
     ("init_parameters", 1),
+    ("synchronize", 4),
     ("init_parameters_multi_gpu", 4),
     ("optim_state", 4),
 

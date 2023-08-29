@@ -225,7 +225,7 @@ class CheckpointBlock(torch.nn.Module):
         return self._next_module[self._ref_count-1]
 
     def backward_release(self, flag):
-        if self._ref_count == 1:
+        if self._ref_count == 1 and self._backward_block_ctx is not None:
             self._backward_block_ctx.exit(flag, True)
             config['load_stream'].record_event(config['load_event'])
         self._ref_count -= 1
