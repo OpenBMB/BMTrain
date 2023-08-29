@@ -87,6 +87,17 @@ def print_rank(*args, rank=0, **kwargs):
     if config["rank"] == rank:
         print(*args, **kwargs)
 
+def print_strategy(model):
+    print_rank(" "*24+"|"+" Offload Level |" + " ZeRO Level |"+" Activation Recompute |")
+    for idx,ckpt in enumerate(model):
+        print_rank(f"CheckpointBlock Layer {idx} |{ckpt.offload_level:^14} | {ckpt._zero_level:^10} | {ckpt.use_checkpoint.__repr__():^20} |")
+
+def print_inspect(model):
+    model_inspect = bmt.inspect.inspect_model(model, "*")
+    print_rank(bmt.inspect.format_summary(model_inspect))
+
+
+
 def see_memory(message, detail=False):
     """
     Outputs a message followed by GPU memory status summary on rank 0.

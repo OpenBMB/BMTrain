@@ -203,11 +203,11 @@ class CheckpointBlock(torch.nn.Module):
         self._pre_module = [] #save the pre module of self
         self._ref_count = 0 #incremental in forward and  decreasing in backward
         self._mode = "BLOCK" #BLOCK or ZERO or PIPE
+        self.offload_level = offload_level
         if use_offload:
             self._mode = "OFFLOAD"
             self._on_device = False
-            self.offload_level = offload_level
-    
+
         self.all_input_no_grad = False
         self.all_param_no_grad = False
         self._zero_level = zero_level
