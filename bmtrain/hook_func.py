@@ -2,7 +2,6 @@ import torch
 from .global_var import config
 from .checkpointing import CheckpointBlockContext
 from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
-from collections import deque,OrderedDict
 from contextlib import contextmanager
 from .utils import round_up, find_pre_module_helper
 from .offload import Offload_Dict, offload_wrapper, offload_pre_hook, offload_post_hook

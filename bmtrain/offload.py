@@ -1,3 +1,6 @@
+import torch
+from collections import OrderedDict
+
 class Offload_Dict:
 
     def __init__(self):
@@ -84,6 +87,7 @@ class Offload_Dict:
             else:
                 fp32_offset += val['size']
             val['stor'] = None
+
 
 def offload_wrapper(offload_dict):
     def pack_hook(tensor):
