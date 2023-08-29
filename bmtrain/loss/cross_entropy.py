@@ -36,36 +36,6 @@ class OpFusedCrossEntropy(torch.autograd.Function):
         )
         return (softmax, None, None)
 
-class OpFusedCrossEntropyInplace(torch.autograd.Function):
-    """
-    CrossEntropy dim = 1
-    """
-    @staticmethod
-    def forward(ctx, x : torch.Tensor, target : torch.Tensor, ignore_index: int):
-        assert x.ndim == 2
-        out = torch.empty(x.size(0), device=x.device, dtype=torch.float)
-        F.cross_entropy_forward_inplace(
-            x.size(0), x.size(1),
-            x, target,
-            out,
-            ignore_index,
-        ) # x is inplace modify to softmax result
-        ctx.ignore_index = ignore_index
-        ctx.save_for_backward(x, target)
-        return out # float tensor
-        
-    @staticmethod
-    def backward(ctx, grad_output : torch.Tensor):
-        grad_output = grad_output.contiguous()
-        softmax, target = ctx.saved_tensors
-        F.cross_entropy_backward_inplace(
-            softmax.size(0), softmax.size(1),
-            grad_output, target,
-            softmax,
-            ctx.ignore_index,
-        ) # softmax is inplace modify to grad_input
-        return (softmax, None, None)
-
 class FusedCrossEntropy(torch.nn.Module):
     r"""This criterion computes the cross entropy loss between input and target.
 

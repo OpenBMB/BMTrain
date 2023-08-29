@@ -16,6 +16,8 @@ tq = tqdm([
     ("dropout", 1),
     ("loss_func", 1),
 
+    ("optim", 1),
+
     ("multi_return", 2),
     ("middle_hidden", 4),
     ("other_hidden", 4),
