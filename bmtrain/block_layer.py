@@ -533,6 +533,7 @@ def _block_wrapper(module):
             zero_level=module._zero_level
         )
         module._has_partition = has_partition
+    return module
         
 class TransformerBlockList(torch.nn.Module):
     r"""
