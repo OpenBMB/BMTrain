@@ -521,6 +521,18 @@ class Block(torch.nn.Module):
     
     def __repr__(self):
         return self._module.__repr__()
+
+def _block_wrapper(module):
+    if not isinstance(module, Block):
+        module = Block(module)
+    else:
+        has_partition = module._has_partition
+        module = Block(
+            module._module, 
+            use_checkpoint=module._use_checkpoint, 
+            zero_level=module._zero_level
+        )
+        module._has_partition = has_partition
         
 class TransformerBlockList(torch.nn.Module):
     r"""
@@ -550,17 +562,7 @@ class TransformerBlockList(torch.nn.Module):
         pre_module = None
         visit_module = set()
         for i, module in enumerate(modules):
-            if not isinstance(module, Block):
-                module = Block(module)
-            else:
-                has_partition = module._has_partition
-                module = Block(
-                    module._module, 
-                    use_checkpoint=module._use_checkpoint, 
-                    zero_level=module._zero_level
-                )
-                module._has_partition = has_partition
-
+            module = _block_wrapper(module)
             module._mode = "ZERO"
 
             module.set_pre_module(pre_module)

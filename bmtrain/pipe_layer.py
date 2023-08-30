@@ -12,7 +12,7 @@ from .zero_context import (
         ZeroContext
 )
 from . import debug
-from .block_layer import Block, round_up, _get_param_kw
+from .block_layer import Block, round_up, _get_param_kw, _block_wrapper
 
 class PipePreFunction(torch.autograd.Function):
     @staticmethod
@@ -201,18 +201,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.pipe_idx = topo.pipe_idx 
         visit_module = set()
         for idx, module in enumerate(modules):
-            if not isinstance(module, Block):
-                module = Block(module)
-            else:
-                has_partition = module._has_partition
-                module = Block(
-                    module._module, 
-                    use_checkpoint=module._use_checkpoint, 
-                    zero_level=module._zero_level
-                )
-                module._has_partition = has_partition
-
+            module = _block_wrapper(module)
             module._mode = "PIPE"
+
             module._need_release = True
             if id(module._module) not in visit_module:
                 visit_module.add(id(module._module))
@@ -234,8 +225,6 @@ class PipelineTransformerBlockList(torch.nn.Module):
             
         self._modules[str(self.layer_ids[0])]._is_first_layer = True
         self._modules[str(self.layer_ids[-1])]._is_last_layer = True
-
-        self.save_list = [(i, i) for i in range(len(self.layer_ids))]
             
     def __len__(self) -> int:
         return len(self._modules) 
