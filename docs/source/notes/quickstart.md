@@ -55,9 +55,9 @@ class MyModule(bmt.DistributedModule):
         super().__init__()
         self.param = bmt.DistributedParameter(torch.empty(1024))
         self.module_list = torch.nn.ModuleList([
-            bmt.CheckpointBlock(SomeTransformerBlock()),
-            bmt.CheckpointBlock(SomeTransformerBlock()),
-            bmt.CheckpointBlock(SomeTransformerBlock())
+            bmt.Block(SomeTransformerBlock()),
+            bmt.Block(SomeTransformerBlock()),
+            bmt.Block(SomeTransformerBlock())
         ])
     
     def forward(self):
@@ -86,9 +86,9 @@ class MyModule(bmt.DistributedModule):
         super().__init__()
         self.param = bmt.DistributedParameter(torch.empty(1024))
         self.module_list = torch.nn.ModuleList([
-            bmt.CheckpointBlock(SomeTransformerBlock()),
-            bmt.CheckpointBlock(SomeTransformerBlock()),
-            bmt.CheckpointBlock(SomeTransformerBlock())
+            bmt.Block(SomeTransformerBlock()),
+            bmt.Block(SomeTransformerBlock()),
+            bmt.Block(SomeTransformerBlock())
         ])
     
     def forward(self):
@@ -109,9 +109,9 @@ class MyModule(bmt.DistributedModule):
         super().__init__()
         self.param = bmt.DistributedParameter(torch.empty(1024))
         self.module_list = bmt.TransformerBlockList([
-            bmt.CheckpointBlock(SomeTransformerBlock()),
-            bmt.CheckpointBlock(SomeTransformerBlock()),
-            bmt.CheckpointBlock(SomeTransformerBlock())
+            bmt.Block(SomeTransformerBlock()),
+            bmt.Block(SomeTransformerBlock()),
+            bmt.Block(SomeTransformerBlock())
         ])
     
     def forward(self):
