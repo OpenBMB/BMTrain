@@ -8,11 +8,11 @@ import torch
 from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
 from .global_var import config
 from . import nccl
-from .checkpointing import (
-        CheckpointBlockContext
+from .zero_context import (
+        ZeroContext
 )
 from . import debug
-from .block_layer import CheckpointBlock, round_up, _get_param_kw
+from .block_layer import Block, round_up, _get_param_kw
 
 class PipePreFunction(torch.autograd.Function):
     @staticmethod
@@ -171,7 +171,7 @@ class StagePostFunction(torch.autograd.Function):
 
 class PipelineTransformerBlockList(torch.nn.Module):
     r"""
-    TransformerBlockList is a list of CheckpointBlocks.
+    TransformerBlockList is a list of Blocks.
 
     This is designed to reduce the communication overhead by overlapping the computation and reduce_scatter operation during backward pass.
 
@@ -188,9 +188,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
         >>> hidden_state = transformer_module_list(hidden_state, ...)
 
     """
-    _modules: Dict[str, CheckpointBlock]
+    _modules: Dict[str, Block]
 
-    def __init__(self, modules: Iterable[CheckpointBlock], num_hidden=1) -> None:
+    def __init__(self, modules: Iterable[Block], num_hidden=1) -> None:
         super().__init__()
         self.num_hidden = num_hidden 
         self._modules = {}
@@ -201,8 +201,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.stage_id = topo.stage_id
         self.pipe_idx = topo.pipe_idx 
         for idx, module in enumerate(modules):
-            if not isinstance(module, CheckpointBlock):
-                module = CheckpointBlock(module)
+            if not isinstance(module, Block):
+                module = Block(module)
 
             module._mode = "PIPE"
             module.stage_id = self.stage_id
@@ -230,10 +230,10 @@ class PipelineTransformerBlockList(torch.nn.Module):
     def __len__(self) -> int:
         return len(self._modules) 
 
-    def __iter__(self) -> Iterator[CheckpointBlock]:
+    def __iter__(self) -> Iterator[Block]:
         return iter(self._modules.values())
 
-    def __getitem__(self, index: Union[int, str]) -> CheckpointBlock:
+    def __getitem__(self, index: Union[int, str]) -> Block:
         return self._modules[str(index)]
 
     def forward(self, hidden_state, *args, batch_related=[], return_hidden_states=False):
@@ -307,7 +307,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
 
             if idx in self.layer_ids:
                 with torch.no_grad():
-                    with CheckpointBlockContext(module, pipe=True):
+                    with ZeroContext(module, pipe=True):
                         module._module.state_dict(destination=dst, prefix=name, keep_vars=False)
                 if config["zero_rank"] == 0:
                     if config["rank"] == 0:

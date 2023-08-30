@@ -4,7 +4,7 @@ import bmtrain as bmt
 import random
 import torch
 from bmtrain import config
-from bmtrain.block_layer import CheckpointBlock, TransformerBlockList
+from bmtrain.block_layer import Block, TransformerBlockList
 from bmtrain.pipe_layer import PipelineTransformerBlockList
 import torch.nn.functional as F
 from bmtrain import inspect
@@ -35,7 +35,7 @@ class Model_ZERO(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = TransformerBlockList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
         self.post = post
@@ -54,7 +54,7 @@ class Model_PIPE(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = PipelineTransformerBlockList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
         self.post = post
@@ -73,7 +73,7 @@ class Model_BLOCK(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = torch.nn.ModuleList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
         self.post = post

@@ -5,7 +5,7 @@ import numpy as np
 
 def run_bmt(x, gather_output, ckp_path, tp_size=2):
     linear = bmt.nn.ColumnParallelLinear(8,8, gather_output=gather_output)
-    linear = bmt.CheckpointBlock(linear)
+    linear = bmt.Block(linear)
     bmt.init_parameters(linear)
     y = linear(x[config['topology'].tp_id])
     y.sum().backward()

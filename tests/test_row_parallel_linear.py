@@ -6,7 +6,7 @@ import numpy as np
 def run_bmt(x, ckp_path, split_input=True, use_checkpoint_block=True):
     linear = bmt.nn.RowParallelLinear(8,8, split_input=split_input, all_reduce_output=True)
     if use_checkpoint_block:
-        linear = bmt.CheckpointBlock(linear)
+        linear = bmt.Block(linear)
     bmt.init_parameters(linear)
     y = linear(x)
     y.sum().backward()

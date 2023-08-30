@@ -10,7 +10,7 @@ from .parameter import DistributedParameter, ParameterInitializer
 from .layer import DistributedModule
 from .param_init import init_parameters, grouped_parameters
 from .synchronize import synchronize, sum_loss, wait_loader, gather_result
-from .block_layer import CheckpointBlock, TransformerBlockList
+from .block_layer import Block, TransformerBlockList
 from .wrapper import BMTrainModelWrapper
 from .pipe_layer import PipelineTransformerBlockList
 from . import debug
@@ -22,3 +22,5 @@ from . import nn
 from . import optim
 from . import inspect
 from . import lr_scheduler
+
+CheckpointBlock = Block

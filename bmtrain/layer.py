@@ -12,8 +12,8 @@ class DistributedModule(torch.nn.Module):
 
     def __getattr__(self, name: str):
         ret = super().__getattr__(name)
-        # gather distributed parameters if not in CheckpointBlock
-        if isinstance(ret, DistributedParameter) and not ret._in_checkpoint_block: 
+        # gather distributed parameters if not in bmt.Block
+        if isinstance(ret, DistributedParameter) and not ret._in_block: 
             return ret.gather()
         return ret
     
@@ -32,8 +32,8 @@ class DistributedModule(torch.nn.Module):
         """
         for name, param in self._parameters.items():
             if param is not None:
-                if isinstance(param, DistributedParameter):#and not param._in_checkpoint_block:
-                    if param._in_checkpoint_block:
+                if isinstance(param, DistributedParameter):#and not param._in_block:
+                    if param._in_block:
                         destination[prefix + name] = param.tp_gather().detach().cpu()  # sync operation
                     else:
                         destination[prefix + name] = param.gather_all().detach().cpu()  # sync operation

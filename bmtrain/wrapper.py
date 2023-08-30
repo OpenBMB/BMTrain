@@ -1,5 +1,5 @@
 import torch
-from .block_layer import CheckpointBlock, TransformerBlockList
+from .block_layer import Block, TransformerBlockList
 from .layer import DistributedModule, DistributedParameter
 
 def make_distributed(model : torch.nn.Module):
@@ -14,8 +14,8 @@ def make_distributed(model : torch.nn.Module):
     
     for kw in list(model._modules.keys()):
         if isinstance(model, torch.nn.ModuleList):
-            if not isinstance(model._modules[kw], CheckpointBlock):
-                model._modules[kw] = CheckpointBlock(model_wrapper_dispatch(model._modules[kw]))
+            if not isinstance(model._modules[kw], Block):
+                model._modules[kw] = Block(model_wrapper_dispatch(model._modules[kw]))
         else:
             model._modules[kw] = model_wrapper_dispatch(model._modules[kw])
 
@@ -27,7 +27,7 @@ def model_wrapper_dispatch(model : torch.nn.Module):
         return model
     elif isinstance(model, DistributedModule):
         return model
-    elif isinstance(model, CheckpointBlock):
+    elif isinstance(model, Block):
         return model
     else:
         return make_distributed(model)
@@ -35,6 +35,6 @@ def model_wrapper_dispatch(model : torch.nn.Module):
 def BMTrainModelWrapper(model : torch.nn.Module) -> torch.nn.Module:
     """
     Automatically wrap a model in a BMTrain model.
-    Replaces all parameters with DistributedParameter, all modules with DistributedModule, and modules in ModuleList with CheckpointBlock.
+    Replaces all parameters with DistributedParameter, all modules with DistributedModule, and modules in ModuleList with Block.
     """
     return model_wrapper_dispatch(model)

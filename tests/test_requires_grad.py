@@ -3,7 +3,7 @@ from utils import *
 import bmtrain as bmt
 import torch
 from bmtrain import config
-from bmtrain.block_layer import CheckpointBlockContext,  CheckpointBlock, TransformerBlockList
+from bmtrain.block_layer import Block, TransformerBlockList
 from bmtrain.pipe_layer import PipelineTransformerBlockList
 from typing import List
 import torch.nn.functional as F
@@ -47,7 +47,7 @@ def run(m, a, b):
 def test_main():
     a = Linear(256, 256)
     b = Linear(256, 256)
-    m = TransformerBlockList([CheckpointBlock(a), CheckpointBlock(b)])
+    m = TransformerBlockList([Block(a), Block(b)])
     bmt.init_parameters(m)
 
     a.bias.requires_grad_(False)
@@ -75,7 +75,7 @@ def test_main():
 def test_main_pipe():
     a = Linear(256, 256)
     b = Linear(256, 256)
-    m = PipelineTransformerBlockList([CheckpointBlock(a), CheckpointBlock(b)])
+    m = PipelineTransformerBlockList([Block(a), Block(b)])
     bmt.init_parameters(m)
 
     a.bias.requires_grad_(False)

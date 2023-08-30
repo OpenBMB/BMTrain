@@ -13,8 +13,8 @@ class Layer(torch.nn.Module):
 def test_no_grad():
     x = torch.randn(32, 32, device='cuda')
 
-    layer1 = bmt.CheckpointBlock(Layer())
-    layer2 = bmt.CheckpointBlock(Layer())
+    layer1 = bmt.Block(Layer())
+    layer2 = bmt.Block(Layer())
     layer1.linear.weight.requires_grad_(False)
     layer1.linear.bias.requires_grad_(False)
     y = layer1(x)
@@ -30,8 +30,8 @@ def test_all_input_no_grad():
 
     x = torch.randn(32,32, device='cuda')
 
-    linear1 = bmt.CheckpointBlock(linear1)
-    linear2 = bmt.CheckpointBlock(linear2)
+    linear1 = bmt.Block(linear1)
+    linear2 = bmt.Block(linear2)
     y = linear1(x)
     y = linear2(y)
     y.sum().backward()

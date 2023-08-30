@@ -372,7 +372,7 @@ def test_main(test_fp16=True, test_fp32=True):
         model = GPT(**kwargs)
         pipe_model = bmt.BMTrainModelWrapper(model)
         for m in pipe_model.transformers:
-            assert isinstance(m, bmt.CheckpointBlock)
+            assert isinstance(m, bmt.Block)
         pipe_model.transformers = bmt.PipelineTransformerBlockList([m for m in pipe_model.transformers])
         bmt.load(pipe_model, ckpt_path)
         return model
