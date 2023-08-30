@@ -199,27 +199,20 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.stages = topo.stages
         self.stage_id = topo.stage_id
         self.pipe_idx = topo.pipe_idx 
+        visit_module = set()
         for idx, module in enumerate(modules):
             if not isinstance(module, Block):
                 module = Block(module)
             else:
+                has_partition = module._has_partition
                 module = Block(
                     module._module, 
                     use_checkpoint=module._use_checkpoint, 
                     zero_level=module._zero_level
                 )
+                module._has_partition = has_partition
 
             module._mode = "PIPE"
-            self._modules[str(idx)] = module
-
-        self.layer_ids = self.get_range_by_stage_id(self.stage_id)
-
-        pre_module = None
-        visit_module = set()
-        for i,layer_id in enumerate(self.layer_ids):
-            module = self._modules[str(layer_id)]
-            module.set_pre_module(pre_module)
-            pre_module = module
             module._need_release = True
             if id(module._module) not in visit_module:
                 visit_module.add(id(module._module))
@@ -227,6 +220,15 @@ class PipelineTransformerBlockList(torch.nn.Module):
             else:
                 module._need_release = False
                 module._has_partition = True
+            self._modules[str(idx)] = module
+
+        self.layer_ids = self.get_range_by_stage_id(self.stage_id)
+
+        pre_module = None
+        for i,layer_id in enumerate(self.layer_ids):
+            module = self._modules[str(layer_id)]
+            module.set_pre_module(pre_module)
+            pre_module = module
             module._is_first_layer = False
             module._is_last_layer = False
             

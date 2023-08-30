@@ -108,7 +108,6 @@ class Block(torch.nn.Module):
                     zero_comm = config["pp_zero_comm"]
                 else:
                     zero_comm = config["zero_comm"]
-                param._zero_comm = zero_comm
 
                 self._storage_info[kw_name] = {
                     "total": 0,
@@ -117,8 +116,6 @@ class Block(torch.nn.Module):
                     "group": param.group,
                     "zero_comm" : zero_comm
                 }
-            else:
-                param._zero_comm = self._storage_info[kw_name]['zero_comm']
 
             param_shape = param._original_shape
 
@@ -556,11 +553,13 @@ class TransformerBlockList(torch.nn.Module):
             if not isinstance(module, Block):
                 module = Block(module)
             else:
+                has_partition = module._has_partition
                 module = Block(
                     module._module, 
                     use_checkpoint=module._use_checkpoint, 
                     zero_level=module._zero_level
                 )
+                module._has_partition = has_partition
 
             module._mode = "ZERO"
 
