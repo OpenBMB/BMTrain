@@ -202,18 +202,31 @@ class PipelineTransformerBlockList(torch.nn.Module):
         for idx, module in enumerate(modules):
             if not isinstance(module, Block):
                 module = Block(module)
+            else:
+                module = Block(
+                    module._module, 
+                    use_checkpoint=module._use_checkpoint, 
+                    zero_level=module._zero_level
+                )
 
             module._mode = "PIPE"
-            module.partition_parameter()
             self._modules[str(idx)] = module
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)
 
         pre_module = None
+        visit_module = set()
         for i,layer_id in enumerate(self.layer_ids):
             module = self._modules[str(layer_id)]
             module.set_pre_module(pre_module)
             pre_module = module
+            module._need_release = True
+            if id(module._module) not in visit_module:
+                visit_module.add(id(module._module))
+                module.partition_parameter()
+            else:
+                module._need_release = False
+                module._has_partition = True
             module._is_first_layer = False
             module._is_last_layer = False
             
@@ -304,7 +317,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
                 with torch.no_grad():
                     with ZeroContext(module, pipe=True):
                         module._module.state_dict(destination=dst, prefix=name, keep_vars=False)
-                if config["zero_rank"] == 0:
+
+                if config["topology"].pp_zero_id == 0:
                     if config["rank"] == 0:
                         destination.update(dst)
                     else:
@@ -313,5 +327,5 @@ class PipelineTransformerBlockList(torch.nn.Module):
                             send_activations(tensor.cuda(), 0, config['pipe_comm'])
             if config['rank'] == 0 and idx not in self.layer_ids:
                 for n, parameter in module._module.named_parameters():
-                    destination[name+n] = recv_activations(self.get_stage_by_layer_id(idx), config['pipe_comm'])
+                    destination[name+n] = recv_activations(self.get_stage_by_layer_id(idx), config['pipe_comm']).cpu()
 
