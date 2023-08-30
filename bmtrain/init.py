@@ -182,16 +182,15 @@ class topology:
             #pp->zero
             self.pp_zero_idx = self.stage_id 
             self.pp_zero_id = self.pipe_idx 
-            #pp->tp->zero
-            self.pp_tp_zero_idx = self.stage_id * tp_size + self.tp_id 
-            self.pp_tp_zero_id = self.pipe_idx // tp_size
             #tp->zero
             self.tp_zero_idx = self.tp_id 
             self.tp_zero_id = self.tp_idx
+            #pp->tp->zero
+            self.pp_tp_zero_idx = self.stage_id * tp_size + self.tp_id 
+            self.pp_tp_zero_id = self.pipe_idx // tp_size
         #only zero
         self.zero_idx = 0
         self.zero_id = self.rank
-        print(self.rank, self.stage_id, self.pipe_idx, self.pp_zero_idx, self.pp_zero_id)
 
 
     def get_group_id(self,group_name):

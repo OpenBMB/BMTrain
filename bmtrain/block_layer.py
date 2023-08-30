@@ -100,7 +100,6 @@ class Block(torch.nn.Module):
             kw_name = _get_param_kw(param)
 
             if kw_name not in self._storage_info:
-                print(self._mode, param._tp_mode)
                 if self._mode == "PIPE" and param._tp_mode:
                     zero_comm = config["pp_tp_zero_comm"]
                 elif self._mode != "PIPE" and param._tp_mode:
