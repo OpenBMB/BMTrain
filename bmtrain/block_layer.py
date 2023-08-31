@@ -66,6 +66,7 @@ class Block(torch.nn.Module):
         self._layer_dict = {}
         self._forward_block_ctx = None
         self._backward_block_ctx = None
+
         self._param_info = []
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
         self._storage_info = {}
@@ -82,6 +83,14 @@ class Block(torch.nn.Module):
         self.all_param_no_grad = False
         self._zero_level = zero_level
         self._has_partition = False
+
+    def reference(self, block):
+        self._param_info = block._param_info
+        self._storage_params = block._storage_params
+        self._storage_info = block._storage_info
+        self._layer_dict = block._layer_dict
+        self._has_partition = True
+        self._need_release = False
 
     def partition_parameter(self):
         if self._has_partition:
@@ -522,18 +531,23 @@ class Block(torch.nn.Module):
     def __repr__(self):
         return self._module.__repr__()
 
-def _block_wrapper(module):
+def _block_wrapper(module, module_dict:dict):
     if not isinstance(module, Block):
-        module = Block(module)
+        new_module = Block(module)
+        if id(module) in module_dict:
+            new_module.reference(module_dict[id(module)])
     else:
-        has_partition = module._has_partition
-        module = Block(
-            module._module, 
-            use_checkpoint=module._use_checkpoint, 
-            zero_level=module._zero_level
-        )
-        module._has_partition = has_partition
-    return module
+        if id(module._module) in module_dict:
+            new_module = Block(
+                module._module, 
+                use_checkpoint=module._use_checkpoint, 
+                zero_level=module._zero_level
+            )
+            new_module.reference(module)
+        else:
+            new_module = module
+    new_module.partition_parameter()
+    return new_module
         
 class TransformerBlockList(torch.nn.Module):
     r"""
@@ -561,20 +575,12 @@ class TransformerBlockList(torch.nn.Module):
         
         self._modules = {}
         pre_module = None
-        visit_module = set()
+        module_dict = {}
         for i, module in enumerate(modules):
-            module = _block_wrapper(module)
+            module = _block_wrapper(module, module_dict)
             module._mode = "ZERO"
-
             module.set_pre_module(pre_module)
             pre_module = module
-            module._need_release = True
-            if id(module._module) not in visit_module:
-                visit_module.add(id(module._module))
-                module.partition_parameter()
-            else:
-                module._need_release = False
-                module._has_partition = True
             module._is_first_layer = False
             module._is_last_layer = False
             self._modules[str(i)] = module
@@ -590,6 +596,7 @@ class TransformerBlockList(torch.nn.Module):
 
     def __iter__(self) -> Iterator[Block]:
         return iter(self._modules.values())
+
     def __getitem__(self, index: Union[int, str]) -> Block:
         return self._modules[str(index)]
 

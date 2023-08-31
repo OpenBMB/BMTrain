@@ -199,18 +199,10 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.stages = topo.stages
         self.stage_id = topo.stage_id
         self.pipe_idx = topo.pipe_idx 
-        visit_module = set()
+        module_dict = {}
         for idx, module in enumerate(modules):
-            module = _block_wrapper(module)
+            module = _block_wrapper(module, module_dict)
             module._mode = "PIPE"
-
-            module._need_release = True
-            if id(module._module) not in visit_module:
-                visit_module.add(id(module._module))
-                module.partition_parameter()
-            else:
-                module._need_release = False
-                module._has_partition = True
             self._modules[str(idx)] = module
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)
