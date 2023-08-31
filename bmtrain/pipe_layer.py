@@ -180,7 +180,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
     Example:
         >>> module_list = [ ... ]
         >>> normal_module_list = torch.nn.ModuleList(module_list)
-        >>> transformer_module_list = TransformerBlockList(module_list)
+        >>> transformer_module_list = PipelineTransformerBlockList(module_list)
         >>> # Calling normal module list
         >>> for layer in normal_module_list:
         >>>     hidden_state = layer.forward(hidden_state, ...)
@@ -190,7 +190,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
     """
     _modules: Dict[str, Block]
 
-    def __init__(self, modules: Iterable[Block], num_hidden=1) -> None:
+    def __init__(self, modules: Iterable[torch.nn.Module], num_hidden=1) -> None:
         super().__init__()
         self.num_hidden = num_hidden 
         self._modules = {}
@@ -199,8 +199,9 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.stages = topo.stages
         self.stage_id = topo.stage_id
         self.pipe_idx = topo.pipe_idx 
+        module_dict = {}
         for idx, module in enumerate(modules):
-            module = _block_wrapper(module, self._modules, "PIPE")
+            module = _block_wrapper(module, module_dict, "PIPE")
             self._modules[str(idx)] = module
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)

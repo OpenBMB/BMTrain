@@ -51,7 +51,7 @@ class Block(torch.nn.Module):
         use_checkpoint (boolean): use checkpoint or not. Default True.
         zero_level (int): 2 (ZeRO-2) indicates that optimizer states and gradients are partitioned across the process, 
             3 (ZeRO-3) means that the parameters are partitioned one the basis of ZeRO-2. Default 3.
-        initialized (bool): initialized parameter storage. Default True.
+        initialized (bool): initialized parameter storage. Default False.
         mode (str): the mode shouled be "PIPE" when runing in pipeline mode, otherwise mode="BLOCK". Default "BLOCK"
     
     Examples:
@@ -61,7 +61,7 @@ class Block(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3, initialized=True, mode="BLOCK"):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3, initialized=False, mode="BLOCK"):
         super().__init__()
         self._module = inner_module
         self._inputs = None
@@ -84,8 +84,9 @@ class Block(torch.nn.Module):
         self.all_input_no_grad = False
         self.all_param_no_grad = False
         self._zero_level = zero_level
-        if initialized:
+        if not initialized:
             self.init_param_storage()
+        self._initialized = initialized
 
     def reference(self, block):
         self._param_info = block._param_info
@@ -96,6 +97,9 @@ class Block(torch.nn.Module):
         self._need_release = False
 
     def init_param_storage(self):
+        if self._initialized:
+            return
+        self._initialized = False
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
@@ -526,15 +530,19 @@ class Block(torch.nn.Module):
     def __repr__(self):
         return self._module.__repr__()
 
-def _block_wrapper(module, modules:dict, mode):
+def _block_wrapper(module, module_dict:dict, mode="BLOCK"):
     if not isinstance(module, Block):
-        in_block = id(module) in modules
-        new_module = Block(module, initialized=not in_block, mode=mode)
+        in_block = id(module) in module_dict
+        new_module = Block(module, initialized=in_block, mode=mode)
         if in_block:
             new_module.reference(modules[id(module)])
+        else:
+            module_dict[id(module)] = new_module
     else:
+        if mode == "PIPE":
+            assert False, "bmt.Block are not support in PipelineTransformerBlockList!"
         if id(module._module) in modules:
-            assert "no support duplicated block in same block list!"
+            assert False, "duplicate bmt.Block not supported in same block list!"
         else:
             new_module = module
     return new_module
@@ -566,8 +574,9 @@ class TransformerBlockList(torch.nn.Module):
         self._modules = {}
         pre_module = None
         module_dict = {}
+        module_dict = {}
         for i, module in enumerate(modules):
-            module = _block_wrapper(module, self._modules, "ZERO")
+            module = _block_wrapper(module, module_dict)
             module.set_pre_module(pre_module)
             pre_module = module
             module._is_first_layer = False
