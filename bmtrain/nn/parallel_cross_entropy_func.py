@@ -103,7 +103,7 @@ class ParallelCrossEntropyFunc(torch.autograd.Function):
         else:
             grad_2d[arange_1d, masked_target_1d] -= softmax_update
 
-        grad_input.mul_(grad_output.flatten(0,1).unsqueeze(dim=-1))
+        grad_input.mul_(grad_output.view(*grad_input.shape[:-1]).unsqueeze(dim=-1))
 
         return grad_input, None, None
 
