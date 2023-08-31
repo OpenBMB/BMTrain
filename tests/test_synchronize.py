@@ -16,10 +16,10 @@ def test_main():
         size = i + 1  
         tensor_slice = tensor[:size, :size]
         result_slice = bmt.gather_result(tensor_slice)
-        test_slice = torch.chunk(result_slice, bmt.world_size(), dim=0)[0]
+        test_slice = torch.chunk(result_slice, bmt.world_size(), dim=0)[i]
         assert torch.allclose(tensor_slice, test_slice), f"Assertion failed for tensor_slice_{i}"
- 
-    print("All tensor slice tests passed!")
+
+print("All test passed")
 
 if __name__ == '__main__':
     bmt.init_distributed(pipe_size=1)
