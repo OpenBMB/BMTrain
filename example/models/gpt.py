@@ -20,14 +20,25 @@ class GPT(bmt.DistributedModule):
             self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         self.pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
         
-        self.transformers = bmt.TransformerBlockList([
-            bmt.Block(
-                TransformerEncoder(
-                    dim_model, dim_head, num_heads, dim_ff, bias, dtype
+        if config['pipe_size'] > 1:
+            self.transformers = bmt.PipelineTransformerBlockList([
+                bmt.Block(
+                    TransformerEncoder(
+                        dim_model, dim_head, num_heads, dim_ff, bias, dtype
+                    )
+                    , mode="PIPE"
                 )
-            )
-            for _ in range(num_layers)
-        ])
+                for _ in range(num_layers)
+            ])
+        else:
+            self.transformers = bmt.TransformerBlockList([
+                bmt.Block(
+                    TransformerEncoder(
+                        dim_model, dim_head, num_heads, dim_ff, bias, dtype
+                    )
+                )
+                for _ in range(num_layers)
+            ])
 
         self.layernorm = Layernorm(dim_model, dtype=dtype)
 
@@ -47,6 +58,7 @@ class GPT(bmt.DistributedModule):
         out = self.layernorm(out)
 
         if config['tp_size'] > 1:
+        if False:
             logits = self.word_emb.projection(out)
         else:
             logits = self.word_emb(out, projection=True)

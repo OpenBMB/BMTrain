@@ -536,9 +536,9 @@ def _block_wrapper(module, module_dict:dict, mode="BLOCK"):
             module_dict[id(module)] = new_module
     else:
         if mode == "PIPE" and module._mode != "PIPE":
-            assert False, "bmt.Block are not support in PipelineTransformerBlockList!"
+            assert False, "You must be set mode=\"PIPE\" in bmt.Block when use PipelineTransformerBlockList!"
         if id(module._module) in module_dict:
-            assert False, "duplicate bmt.Block not supported in same block list!"
+            assert False, "Duplicate bmt.Block not supported in same block list!"
         else:
             new_module = module
             module_dict[id(module._module)] = new_module
