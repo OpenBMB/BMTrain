@@ -23,9 +23,12 @@ BMTrain's Documentation!
    :caption: Package Reference
 
    api/bmtrain.rst
-   api/nccl.rst
-   api/inspect.rst
-   api/lr_scheduler.rst
+   api/bmtrain.benchmark.rst
+   api/bmtrain.distributed.rst
+   api/bmtrain.inspect.rst
+   api/bmtrain.lr_scheduler.rst
+   api/bmtrain.nccl.rst
+   api/bmtrain.optim.rst
 
 API
 ==================

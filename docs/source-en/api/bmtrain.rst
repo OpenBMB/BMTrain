@@ -1,58 +1,131 @@
-====================
-bmtrain
-====================
+bmtrain package
+===============
 
+Subpackages
+-----------
 
-Initialization 
-==========================================
+.. toctree::
+   :maxdepth: 4
 
-.. autofunction:: bmtrain.init_distributed
+   bmtrain.benchmark
+   bmtrain.distributed
+   bmtrain.inspect
+   bmtrain.loss
+   bmtrain.lr_scheduler
+   bmtrain.nccl
+   bmtrain.optim
 
-Distributed Parameters and Modules
-==========================================
+Submodules
+----------
 
-.. autoclass:: bmtrain.DistributedParameter
-    :members:
-    :show-inheritance:
+bmtrain.block\_layer module
+---------------------------
 
-.. autoclass:: bmtrain.ParameterInitializer
-    :members:
-    :show-inheritance:
+.. automodule:: bmtrain.block_layer
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-.. autoclass:: bmtrain.DistributedModule
-    :members:
-    :show-inheritance:
+bmtrain.checkpointing module
+----------------------------
 
-.. autoclass:: bmtrain.CheckpointBlock
-    :members:
-    :show-inheritance:
+.. automodule:: bmtrain.checkpointing
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-.. autoclass:: bmtrain.TransformerBlockList
-    :members:
-    :show-inheritance:
+bmtrain.debug module
+--------------------
 
-Methods for Parameters
-==========================================
+.. automodule:: bmtrain.debug
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-.. autofunction:: bmtrain.init_parameters
+bmtrain.global\_var module
+--------------------------
 
-.. autofunction:: bmtrain.grouped_parameters
+.. automodule:: bmtrain.global_var
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-.. autofunction:: bmtrain.save
+bmtrain.init module
+-------------------
 
-.. autofunction:: bmtrain.load
+.. automodule:: bmtrain.init
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-Utilities
-==========================================
+bmtrain.layer module
+--------------------
 
-.. autofunction:: bmtrain.rank
+.. automodule:: bmtrain.layer
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-.. autofunction:: bmtrain.world_size
+bmtrain.param\_init module
+--------------------------
 
-.. autofunction:: bmtrain.print_rank
+.. automodule:: bmtrain.param_init
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-.. autofunction:: bmtrain.synchronize
+bmtrain.parameter module
+------------------------
 
-.. autofunction:: bmtrain.sum_loss
+.. automodule:: bmtrain.parameter
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-.. autofunction:: bmtrain.optim_step
+bmtrain.pipe\_layer module
+--------------------------
+
+.. automodule:: bmtrain.pipe_layer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+bmtrain.store module
+--------------------
+
+.. automodule:: bmtrain.store
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+bmtrain.synchronize module
+--------------------------
+
+.. automodule:: bmtrain.synchronize
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+bmtrain.utils module
+--------------------
+
+.. automodule:: bmtrain.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+bmtrain.wrapper module
+----------------------
+
+.. automodule:: bmtrain.wrapper
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: bmtrain
+   :members:
+   :undoc-members:
+   :show-inheritance:
