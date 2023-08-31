@@ -36,10 +36,10 @@ def test_multi_layer_no_grad():
 
     y = x
     for layer in layers:
-        y = layer(out)
+        y = layer(y)
     y.sum().backward()
     for i in range(len(layers)):
-        assert layer[i].count == (1 if i <=4 else 2)
+        assert layers[i].count == (1 if i <=4 else 2)
 
 def test_all_input_no_grad():
     linear1 = bmt.nn.Linear(32, 32)
@@ -56,8 +56,29 @@ def test_all_input_no_grad():
     assert linear1.bias.grad is not None
     assert x.grad is None
 
+def test_no_grad_error():
+    layer = bmt.Block(Layer())
+
+    try:
+        block_list = bmt.TransformerBlockList([layer, layer])
+        raise ValueError("test failed")
+    except AssertionError as e:
+        return
+
+def test_no_grad_error2():
+    layer = bmt.Block(Layer())
+
+    try:
+        block_list = bmt.PipelineTransformerBlockList([layer])
+        raise ValueError("test failed")
+    except AssertionError as e:
+        return
+
 if __name__ == '__main__':
     bmt.init_distributed()
 
     test_no_grad()
+    test_multi_layer_no_grad()
     test_all_input_no_grad()
+    test_no_grad_error()
+    test_no_grad_error2()

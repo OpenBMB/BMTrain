@@ -86,7 +86,6 @@ class Block(torch.nn.Module):
         self._zero_level = zero_level
         if not initialized:
             self.init_param_storage()
-        self._initialized = initialized
 
     def reference(self, block):
         self._param_info = block._param_info
@@ -97,9 +96,6 @@ class Block(torch.nn.Module):
         self._need_release = False
 
     def init_param_storage(self):
-        if self._initialized:
-            return
-        self._initialized = False
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
@@ -539,12 +535,13 @@ def _block_wrapper(module, module_dict:dict, mode="BLOCK"):
         else:
             module_dict[id(module)] = new_module
     else:
-        if mode == "PIPE":
+        if mode == "PIPE" and module._mode != "PIPE":
             assert False, "bmt.Block are not support in PipelineTransformerBlockList!"
-        if id(module._module) in modules:
+        if id(module._module) in module_dict:
             assert False, "duplicate bmt.Block not supported in same block list!"
         else:
             new_module = module
+            module_dict[id(module._module)] = new_module
     return new_module
         
 class TransformerBlockList(torch.nn.Module):
