@@ -11,7 +11,7 @@ def zero_pre_forward(module, inputs):
     if enter:
         zero_level = module._zero_level 
         forward_flag = 1 if zero_level == 2 else 0
-        if zero_level == 2 and module._ref_count > 1:
+        if zero_level == 2 and not module._need_release:
             forward_flag = 2 # repeating forward in same layer
         if module.all_param_no_grad: #only forward
             forward_flag = 0
@@ -28,15 +28,13 @@ def zero_post_forward(module, inputs, outputs):
 
     if exit:
         module._forward_block_ctx.exit(forward_flag)
-        module._ref_count += 1
 
 def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if module._zero_level == 2 else 0
     if module._mode != "PIPE":
         module._backward_block_ctx = ZeroContext(module, module._layer_dict)
         module._backward_block_ctx.enter(backward_flag, True)
-        if not module._is_last_layer: 
-            module.next_module().backward_release(backward_flag)
+        module.release_next_module(backward_flag)
     else:
         if module._micro_idx == config['micros'] - 1:
             module._backward_block_ctx = ZeroContext(module, module._layer_dict, pipe=True)
@@ -46,10 +44,10 @@ def zero_post_backward(module, grad_inputs, grad_outputs):
     backward_flag = 2 if module._zero_level == 2 else 0
     if module._mode != "PIPE":
         if module._is_first_layer: 
-            module.backward_release(backward_flag)
+            module.release(backward_flag)
     else:
         if module._micro_idx == 0:
-            module.backward_release(backward_flag)
+            module.release(backward_flag)
         module._micro_idx -= 1
 
 class OneStepNoGradFunc(torch.autograd.Function):
@@ -83,7 +81,6 @@ class OneStepNoGradFunc(torch.autograd.Function):
         for _ in x:
             grads.append(None)
         return None, None, *grads 
-
 
 class PreHookFunc(torch.autograd.Function):
     @staticmethod

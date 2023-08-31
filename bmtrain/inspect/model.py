@@ -63,13 +63,13 @@ def inspect_pipeline_transformer_block_list(pipe_model: PipelineTransformerBlock
                 nccl.allGather(
                     model._storage_params[kw].storage(),
                     _param_buffer[kw],
-                    config["zero_comm"]
+                    val["zero_comm"]
                 )
                 if model._storage_params[kw].grad is not None:
                     nccl.allGather(
                         model._storage_params[kw].grad.storage(),
                         _grad_buffer[kw],
-                        config["zero_comm"]
+                        val["zero_comm"]
                     )
 
             nccl.groupEnd()

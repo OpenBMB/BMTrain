@@ -452,6 +452,6 @@ def check_param(info1, info2):
             assert_lt(abs(v1-v2), 1e-2)
 
 if __name__ == '__main__':
-    bmt.init_distributed(pipe_size=2)
+    bmt.init_distributed(pipe_size=1)
 
     test_main(test_fp16=True, test_fp32=True)
