@@ -13,6 +13,7 @@ Subpackages
    bmtrain.loss
    bmtrain.lr_scheduler
    bmtrain.nccl
+   bmtrain.nn
    bmtrain.optim
 
 Submodules
@@ -22,14 +23,6 @@ bmtrain.block\_layer module
 ---------------------------
 
 .. automodule:: bmtrain.block_layer
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-bmtrain.checkpointing module
-----------------------------
-
-.. automodule:: bmtrain.checkpointing
    :members:
    :undoc-members:
    :show-inheritance:
@@ -46,6 +39,14 @@ bmtrain.global\_var module
 --------------------------
 
 .. automodule:: bmtrain.global_var
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+bmtrain.hook\_func module
+-------------------------
+
+.. automodule:: bmtrain.hook_func
    :members:
    :undoc-members:
    :show-inheritance:
@@ -118,6 +119,14 @@ bmtrain.wrapper module
 ----------------------
 
 .. automodule:: bmtrain.wrapper
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+bmtrain.zero\_context module
+----------------------------
+
+.. automodule:: bmtrain.zero_context
    :members:
    :undoc-members:
    :show-inheritance:
