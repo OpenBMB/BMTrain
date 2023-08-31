@@ -58,7 +58,6 @@ class GPT(bmt.DistributedModule):
         out = self.layernorm(out)
 
         if config['tp_size'] > 1:
-        if False:
             logits = self.word_emb.projection(out)
         else:
             logits = self.word_emb(out, projection=True)
