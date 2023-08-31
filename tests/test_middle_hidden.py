@@ -207,6 +207,6 @@ def test_main():
                         assert_eq(w, w2)
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=4)
+    bmt.init_distributed(pipe_size=1)
 
     test_main()

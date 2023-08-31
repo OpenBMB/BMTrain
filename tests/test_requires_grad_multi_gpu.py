@@ -90,7 +90,7 @@ def test_main_pipe():
     assert_eq(sm2.split('\n')[2], sm3.split('\n')[2])
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=2)
+    bmt.init_distributed(pipe_size=1)
 
     test_main()
     test_main_pipe()

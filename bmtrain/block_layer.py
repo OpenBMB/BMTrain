@@ -51,15 +51,17 @@ class Block(torch.nn.Module):
         use_checkpoint (boolean): use checkpoint or not. Default True.
         zero_level (int): 2 (ZeRO-2) indicates that optimizer states and gradients are partitioned across the process, 
             3 (ZeRO-3) means that the parameters are partitioned one the basis of ZeRO-2. Default 3.
+        initialized (bool): initialized parameter storage. Default True.
+        mode (str): the mode shouled be "PIPE" when runing in pipeline mode, otherwise mode="BLOCK". Default "BLOCK"
     
     Examples:
         >>> transformer_block = TransformerBlock(...)
-        >>> bmt_block = Block(transformer_block)
-        >>> y1, ... = bmt_block(x)
+        >>> block = Block(transformer_block)
+        >>> y1, ... = block(x)
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3, initialized=True, mode="BLOCK"):
         super().__init__()
         self._module = inner_module
         self._inputs = None
@@ -78,11 +80,12 @@ class Block(torch.nn.Module):
         self._need_release = True 
         self._next_module = None #save the next module of self
         self._pre_module = None #save the pre module of self
-        self._mode = "BLOCK" #BLOCK or ZERO or PIPE
+        self._mode = mode #BLOCK or PIPE
         self.all_input_no_grad = False
         self.all_param_no_grad = False
         self._zero_level = zero_level
-        self._initialized = False
+        if initialized:
+            self.init_param_storage()
 
     def reference(self, block):
         self._param_info = block._param_info
@@ -92,11 +95,7 @@ class Block(torch.nn.Module):
         self._initialized = True
         self._need_release = False
 
-    def partition_parameter(self):
-        if self._initialized:
-            return
-        self._initialized = True
-
+    def init_param_storage(self):
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
@@ -243,7 +242,6 @@ class Block(torch.nn.Module):
             config['load_stream'].record_event(config['load_event'])
 
     def pre_hook(self, *args):
-        self.partition_parameter()
         grad_tensors = []
         grad_index = []
         arg_list = list(args)
@@ -310,7 +308,6 @@ class Block(torch.nn.Module):
         raise RuntimeError("._save_to_state_dict() of Block should not be called")
     
     def state_dict(self, destination=None, prefix='', keep_vars=False):
-        self.partition_parameter()
         # gather here
         with torch.no_grad():
             with ZeroContext(self):
@@ -318,7 +315,6 @@ class Block(torch.nn.Module):
     
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.partition_parameter()
         all_keys = []
         for it in self._param_info:
             key = prefix + it["name"]
@@ -429,7 +425,6 @@ class Block(torch.nn.Module):
         """
         Initialize distributed parameters in this block.
         """
-        self.partition_parameter()
         for it in self._param_info:
             param = it["parameter"]
             if isinstance(param, DistributedParameter) and param._init_method is not None:
@@ -531,24 +526,17 @@ class Block(torch.nn.Module):
     def __repr__(self):
         return self._module.__repr__()
 
-def _block_wrapper(module, module_dict:dict, mode):
+def _block_wrapper(module, modules:dict, mode):
     if not isinstance(module, Block):
-        new_module = Block(module)
-        if id(module) in module_dict:
-            new_module.reference(module_dict[id(module)])
+        in_block = id(module) in modules
+        new_module = Block(module, initialized=not in_block, mode=mode)
+        if in_block:
+            new_module.reference(modules[id(module)])
     else:
-        if id(module._module) in module_dict:
-            new_module = Block(
-                module._module, 
-                use_checkpoint=module._use_checkpoint, 
-                zero_level=module._zero_level
-            )
-            new_module.reference(module)
+        if id(module._module) in modules:
+            assert "no support duplicated block in same block list!"
         else:
             new_module = module
-    new_module._mode = mode
-    new_module.partition_parameter()
-    module_dict[id(module)] = new_module
     return new_module
         
 class TransformerBlockList(torch.nn.Module):
@@ -579,7 +567,7 @@ class TransformerBlockList(torch.nn.Module):
         pre_module = None
         module_dict = {}
         for i, module in enumerate(modules):
-            module = _block_wrapper(module, module_dict, "ZERO")
+            module = _block_wrapper(module, self._modules, "ZERO")
             module.set_pre_module(pre_module)
             pre_module = module
             module._is_first_layer = False
