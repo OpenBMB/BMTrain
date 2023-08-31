@@ -82,20 +82,20 @@ class Block(torch.nn.Module):
         self.all_input_no_grad = False
         self.all_param_no_grad = False
         self._zero_level = zero_level
-        self._has_partition = False
+        self._initialized = False
 
     def reference(self, block):
         self._param_info = block._param_info
         self._storage_params = block._storage_params
         self._storage_info = block._storage_info
         self._layer_dict = block._layer_dict
-        self._has_partition = True
+        self._initialized = True
         self._need_release = False
 
     def partition_parameter(self):
-        if self._has_partition:
+        if self._initialized:
             return
-        self._has_partition = True
+        self._initialized = True
 
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
@@ -531,7 +531,7 @@ class Block(torch.nn.Module):
     def __repr__(self):
         return self._module.__repr__()
 
-def _block_wrapper(module, module_dict:dict):
+def _block_wrapper(module, module_dict:dict, mode):
     if not isinstance(module, Block):
         new_module = Block(module)
         if id(module) in module_dict:
@@ -546,7 +546,9 @@ def _block_wrapper(module, module_dict:dict):
             new_module.reference(module)
         else:
             new_module = module
+    new_module._mode = mode
     new_module.partition_parameter()
+    module_dict[id(module)] = new_module
     return new_module
         
 class TransformerBlockList(torch.nn.Module):
@@ -570,15 +572,14 @@ class TransformerBlockList(torch.nn.Module):
     """
     _modules: Dict[str, Block]
 
-    def __init__(self, modules: Iterable[Block], num_hidden=1, sqrt=False) -> None:
+    def __init__(self, modules: Iterable[Block], num_hidden=1) -> None:
         super().__init__()
         
         self._modules = {}
         pre_module = None
         module_dict = {}
         for i, module in enumerate(modules):
-            module = _block_wrapper(module, module_dict)
-            module._mode = "ZERO"
+            module = _block_wrapper(module, module_dict, "ZERO")
             module.set_pre_module(pre_module)
             pre_module = module
             module._is_first_layer = False

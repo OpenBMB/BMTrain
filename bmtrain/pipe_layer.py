@@ -201,8 +201,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         self.pipe_idx = topo.pipe_idx 
         module_dict = {}
         for idx, module in enumerate(modules):
-            module = _block_wrapper(module, module_dict)
-            module._mode = "PIPE"
+            module = _block_wrapper(module, module_dict, "PIPE")
             self._modules[str(idx)] = module
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)
