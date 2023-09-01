@@ -12,7 +12,7 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../..'),(os.path.abspath('../../bmtrain')))
+sys.path.insert(0, os.path.abspath('../..'))
 
 import recommonmark
 from recommonmark.transform import AutoStructify
