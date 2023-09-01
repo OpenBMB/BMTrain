@@ -70,13 +70,13 @@ def getUniqueId() -> bytes:
     """
     return C.ncclGetUniqueId()
 
-def commInitRank(unique_id : bytes, world_size : int, rank : int) -> NCCLCommunicator:
+def commInitRank(unique_id : bytes, world_size : int, rank : int, timeout : int = 30*60*1000, non_blocking: bool = True) -> NCCLCommunicator:
     """
     NCCL API: `ncclCommInitRank <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclcomminitrank>`_
 
     """
     assert rank >= 0 and rank < world_size, "rank must be between 0 and world_size-1"
-    return NCCLCommunicator(C.ncclCommInitRank(unique_id, world_size, rank))
+    return NCCLCommunicator(C.ncclCommInitRank(unique_id, world_size, rank, timeout, non_blocking))
 
 def commDestroy(comm : NCCLCommunicator):
     """
