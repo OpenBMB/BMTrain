@@ -5,12 +5,8 @@ from .global_var import config
 import torch
 from . import nccl
 from .parameter import DistributedParameter, OpAllGather
-from .zero_context import (
-        ZeroContext
-)
-
+from .zero_context import ZeroContext
 from . import hook_func
-
 import inspect
 from torch.utils.checkpoint import checkpoint
 
@@ -55,26 +51,51 @@ class Block(torch.nn.Module):
         use_checkpoint (boolean): use checkpoint or not. Default True.
         zero_level (int): 2 (ZeRO-2) indicates that optimizer states and gradients are partitioned across the process, 
             3 (ZeRO-3) means that the parameters are partitioned one the basis of ZeRO-2. Default 3.
+        initialized (bool): initialized parameter storage. Default False.
+        mode (str): the mode shouled be "PIPE" when runing in pipeline mode, otherwise mode="BLOCK". Default "BLOCK"
     
     Examples:
         >>> transformer_block = TransformerBlock(...)
-        >>> bmt_block = Block(transformer_block)
-        >>> y1, ... = bmt_block(x)
+        >>> block = Block(transformer_block)
+        >>> y1, ... = block(x)
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3, initialized=False, mode="BLOCK"):
         super().__init__()
         self._module = inner_module
         self._inputs = None
         self._layer_dict = {}
         self._forward_block_ctx = None
         self._backward_block_ctx = None
-        # build large parameter&grad here
+
         self._param_info = []
         self._storage_params : Dict[str, torch.nn.Parameter] = {}
         self._storage_info = {}
         self._ready = False
+
+        self._use_checkpoint = use_checkpoint
+        self._is_first_layer = True
+        self._is_last_layer = True
+        self._need_release = True 
+        self._next_module = None #save the next module of self
+        self._pre_module = None #save the pre module of self
+        self._mode = mode #BLOCK or PIPE
+        self.all_input_no_grad = False
+        self.all_param_no_grad = False
+        self._zero_level = zero_level
+        if not initialized:
+            self.init_param_storage()
+
+    def reference(self, block):
+        self._param_info = block._param_info
+        self._storage_params = block._storage_params
+        self._storage_info = block._storage_info
+        self._layer_dict = block._layer_dict
+        self._initialized = True
+        self._need_release = False
+
+    def init_param_storage(self):
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
@@ -87,12 +108,21 @@ class Block(torch.nn.Module):
             kw_name = _get_param_kw(param)
 
             if kw_name not in self._storage_info:
+                if self._mode == "PIPE" and param._tp_mode:
+                    zero_comm = config["pp_tp_zero_comm"]
+                elif self._mode != "PIPE" and param._tp_mode:
+                    zero_comm = config["tp_zero_comm"]
+                elif self._mode == "PIPE" and not param._tp_mode:
+                    zero_comm = config["pp_zero_comm"]
+                else:
+                    zero_comm = config["zero_comm"]
+
                 self._storage_info[kw_name] = {
                     "total": 0,
                     "storage_type": storage_type,
                     "requires_grad": param.requires_grad,
                     "group": param.group,
-                    "zero_comm" : param._zero_comm
+                    "zero_comm" : zero_comm
                 }
 
             param_shape = param._original_shape
@@ -106,7 +136,7 @@ class Block(torch.nn.Module):
         offsets = {}
         # intialize storage buffers
         for kw, val in self._storage_info.items():
-            comm = val['zero_comm']
+            comm = val["zero_comm"]
             world_size = nccl.commCount(comm)
             rank = nccl.commRank(comm)
             val["world_size"] = world_size 
@@ -191,36 +221,25 @@ class Block(torch.nn.Module):
         for kw in offsets.keys():
             assert offsets[kw] == self._storage_info[kw]["total"]
 
-        self.use_checkpoint = use_checkpoint
-        self._is_first_layer = True
-        self._is_last_layer = True
-        self._release_list = [True] 
-        self._next_module = [] #save the next module of self
-        self._pre_module = [] #save the pre module of self
-        self._ref_count = 0 #incremental in forward and  decreasing in backward
-        self._mode = "BLOCK" #BLOCK or ZERO or PIPE
-        self.all_input_no_grad = False
-        self.all_param_no_grad = False
-        self._zero_level = zero_level
-
     def set_pre_module(self, pre_module):
         if pre_module is not None:
-            self._pre_module.append(pre_module)
-            pre_module._next_module.append(self)
+            self._pre_module = pre_module
+            pre_module._next_module = self
             
     def pre_module(self):
-        assert len(self._pre_module) == self._ref_count, "{} != {}".format(len(self._pre_module), self._ref_count)
-        return self._pre_module[self._ref_count-1]
+        return self._pre_module if not self._is_first_layer else None
 
     def next_module(self):
-        assert len(self._next_module) == self._ref_count, "{} != {}".format(len(self._next_module), self._ref_count)
-        return self._next_module[self._ref_count-1]
+        return self._next_module if not self._is_last_layer else None
 
-    def backward_release(self, flag):
-        if self._ref_count == 1 and self._backward_block_ctx is not None:
+    def release_next_module(self, flag):
+        if self.next_module() is not None:
+            self.next_module().release(flag)
+
+    def release(self, flag):
+        if self._need_release and self._backward_block_ctx is not None:
             self._backward_block_ctx.exit(flag, True)
             config['load_stream'].record_event(config['load_event'])
-        self._ref_count -= 1
 
     def pre_hook(self, *args):
         grad_tensors = []
@@ -262,7 +281,7 @@ class Block(torch.nn.Module):
             placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
             return hook_func.OneStepNoGradFunc.apply(self, placeholder, *arg_list)
 
-        if self.use_checkpoint:
+        if self._use_checkpoint:
             out = checkpoint(self._module, *arg_list, use_reentrant=not self.all_input_no_grad)
         else:
             out = self._module(*arg_list)
@@ -506,6 +525,24 @@ class Block(torch.nn.Module):
     
     def __repr__(self):
         return self._module.__repr__()
+
+def _block_wrapper(module, module_dict:dict, mode="BLOCK"):
+    if not isinstance(module, Block):
+        in_block = id(module) in module_dict
+        new_module = Block(module, initialized=in_block, mode=mode)
+        if in_block:
+            new_module.reference(modules[id(module)])
+        else:
+            module_dict[id(module)] = new_module
+    else:
+        if mode == "PIPE" and module._mode != "PIPE":
+            assert False, "You must be set mode=\"PIPE\" in bmt.Block when use PipelineTransformerBlockList!"
+        if id(module._module) in module_dict:
+            assert False, "Duplicate bmt.Block not supported in same block list!"
+        else:
+            new_module = module
+            module_dict[id(module._module)] = new_module
+    return new_module
         
 class TransformerBlockList(torch.nn.Module):
     r"""
@@ -528,21 +565,19 @@ class TransformerBlockList(torch.nn.Module):
     """
     _modules: Dict[str, Block]
 
-    def __init__(self, modules: Iterable[Block], num_hidden=1, sqrt=False) -> None:
+    def __init__(self, modules: Iterable[Block], num_hidden=1) -> None:
         super().__init__()
         
         self._modules = {}
         pre_module = None
+        module_dict = {}
+        module_dict = {}
         for i, module in enumerate(modules):
-            if not isinstance(module, Block):
-                module = Block(module)
-
-            module._mode = "ZERO"
+            module = _block_wrapper(module, module_dict)
             module.set_pre_module(pre_module)
             pre_module = module
             module._is_first_layer = False
             module._is_last_layer = False
-
             self._modules[str(i)] = module
             self.add_module(str(i), module)
 
@@ -550,34 +585,13 @@ class TransformerBlockList(torch.nn.Module):
         self._modules[str(len(modules)-1)]._is_last_layer = True
     
         self.num_hidden = num_hidden
-
-        if sqrt:
-            length = len(self)
-            num_save_needed = 0
-            num_freed = 0
-            save_list = [None]*length
-            for i in range(length-1, -1, -1):
-                if num_freed == 0 or i == 0:
-                    num_save_needed += 1
-                    save_list[i] = [1, -num_save_needed]
-                    num_freed = num_save_needed
-                else:
-                    num_freed -= 1
-                    save_list[i] = [0, -(num_save_needed - num_freed)]
-            for i in range(length-1, -1, -1):
-                save_list[i][1] += num_save_needed
-            for i in range(0, length):
-                save_list[i][0] = i if save_list[i][0]==1 else save_list[i-1][0]
-
-            self.save_list = save_list
-        else:
-            self.save_list = [(i, i) for i in range(len(self))]
             
     def __len__(self) -> int:
         return len(self._modules)
 
     def __iter__(self) -> Iterator[Block]:
         return iter(self._modules.values())
+
     def __getitem__(self, index: Union[int, str]) -> Block:
         return self._modules[str(index)]
 

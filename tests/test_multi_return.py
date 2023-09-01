@@ -121,6 +121,6 @@ def test_main():
                 assert_lt((r[i]-r2[i]).abs().max(), 1e-5)
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=2)
+    bmt.init_distributed(pipe_size=1)
 
     test_main()
