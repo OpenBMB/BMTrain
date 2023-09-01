@@ -20,9 +20,50 @@ def preprocess_input(input, gather_input, split_input):
         input = all_input_list[config['topology'].tp_id]
     return input
 
+def async_all_gather_linear_func(input, weight, bias, async_chunks=2):
+    dim = input.dim()
+    shape = list(input.shape)
+    if dim > 2:
+        input = input.flatten(0, 1)
+    tp_size = config['tp_size']
+    current_stream = torch.cuda.current_stream()
+
+    rounds = async_chunks
+    inputs = input.chunk(rounds, dim=0)
+    config['tp_comm_stream'].wait_stream(current_stream)
+    outputs = [None] * tp_size * rounds
+
+    input = all_gather(inputs[0], config['tp_comm'])
+    input = input.flatten(0, 1)
+    out = F.linear(input, weight, bias)
+    outs = out.chunk(tp_size, dim=0)
+    for i in range(tp_size):
+        outputs[i * rounds] = outs[i]
+
+    #async all_gather and overalap with linear
+    for i in range(rounds-1):
+        with torch.cuda.stream(config['tp_comm_stream']):
+            inputs[i+1].record_stream(config['tp_comm_stream'])
+            input = all_gather(inputs[i+1], config['tp_comm'])
+            input = input.flatten(0, 1)
+
+        current_stream.wait_stream(config['tp_comm_stream'])
+        out = F.linear(input, weight, bias)
+        outs = out.chunk(tp_size, dim=0)
+        for j in range(tp_size):
+            outputs[(i + 1) + j * rounds] = outs[j]
+
+    out = torch.cat(outputs, dim=0)
+    if dim > 2:
+        out_shape = list(out.shape)
+        shape[0] = out_shape[0] // shape[1]
+        shape[2:] = out_shape[1:]
+        out = out.view(shape)
+    return out
+
 class OpParallelLinear(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input, weight, bias=None, gather_input=False, gather_output=False, split_input=False, reduce_output_type=None):
+    def forward(ctx, input, weight, bias=None, gather_input=False, gather_output=False, split_input=False, reduce_output_type=None, async_gather_chunks=2):
         if reduce_output_type is not None:
             reduce_output_type = ReduceType(reduce_output_type)
 
@@ -32,8 +73,11 @@ class OpParallelLinear(torch.autograd.Function):
         ctx.gather_input = gather_input
         ctx.reduce_output_type = reduce_output_type
 
-        all_input = preprocess_input(input, ctx.gather_input, ctx.split_input)
-        out = F.linear(all_input, weight, bias)
+        if gather_input and config['tp_size'] > 1:
+            out = async_all_gather_linear_func(input, weight, bias, async_gather_chunks)
+        else:
+            all_input = preprocess_input(input, ctx.gather_input, ctx.split_input)
+            out = F.linear(all_input, weight, bias)
 
         if gather_output:
             all_output_list = all_gather(out, config['tp_comm'])
@@ -105,4 +149,4 @@ class OpParallelLinear(torch.autograd.Function):
 
         current_stream = torch.cuda.current_stream()
         current_stream.wait_stream(config['tp_comm_stream'])
-        return grad_input, grad_weight, grad_bias, None, None, None, None
+        return grad_input, grad_weight, grad_bias, None, None, None, None, None
