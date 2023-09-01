@@ -13,6 +13,7 @@ def init_distributed(
         zero_level: int = 3,
         pipe_size: int = -1,
         num_micro_batches: int = None,
+        timeout: int = 18 * 60 * 1000 # miliseconds
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -50,12 +51,12 @@ def init_distributed(
     addr = os.environ["MASTER_ADDR"]
     port = os.environ["MASTER_PORT"]
     master = addr+":"+port
-    timeout = datetime.timedelta(seconds=1800)
+    timeout_rdz = datetime.timedelta(seconds=timeout // 1000)
     rendezvous_iterator = dist.rendezvous(
-        init_method, rank, world_size, timeout=timeout
+        init_method, rank, world_size, timeout=timeout_rdz
     )
     store, rank, world_size = next(rendezvous_iterator)
-    store.set_timeout(timeout)
+    store.set_timeout(timeout_rdz)
     store = dist.PrefixStore("bmtrain", store)
     torch.cuda.set_device(local_rank)
     config["initialized"] = True
@@ -99,7 +100,7 @@ def init_distributed(
         store.set("BMTRAIN_UNIQUE_ID", unique_id.hex() )
     
     unique_id = bytes.fromhex(store.get("BMTRAIN_UNIQUE_ID").decode())
-    config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
+    config['comm'] = nccl.commInitRank(unique_id, world_size, rank, timeout)
     if config['pipe_enabled']:
         config["micros"] = num_micro_batches if num_micro_batches else config["pipe_size"]
         topo = config['topology']
@@ -107,12 +108,12 @@ def init_distributed(
             unique_id = nccl.getUniqueId()
             store.set(f"PIPE_UNIQUE_ID{topo.pipe_idx}", unique_id.hex())
         unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
-        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id)
+        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id, timeout, False)
         if topo.zero_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"ZERO_UNIQUE_ID{topo.zero_idx}", unique_id.hex() )
         unique_id = bytes.fromhex(store.get(f"ZERO_UNIQUE_ID{topo.zero_idx}").decode())
-        config ['zero_comm'] = nccl.commInitRank(unique_id, world_size//pipe_size, topo.zero_id)
+        config ['zero_comm'] = nccl.commInitRank(unique_id, world_size//pipe_size, topo.zero_id, timeout)
     else:
         config['zero_comm'] = config['comm']
     for i in range(world_size):
