@@ -51,7 +51,7 @@ Our [documentation](https://bmtrain.readthedocs.io/en/latest/index.html) provide
 
 - From pip （recommend） : ``pip install bmtrain``
 
-- From source code: download the package and run ``python setup.py install``
+- From source code: download the package and run ``python install .``
 
 Installing BMTrain may take a few to ten minutes, as it requires compiling the c/cuda source code at the time of installation.
 We recommend compiling BMTrain directly in the training environment to avoid potential problems caused by the different environments.
