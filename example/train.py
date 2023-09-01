@@ -9,7 +9,8 @@ from bmtrain import inspect
 def main():
     bmt.init_distributed(
         seed=0,
-        tp_size=2,
+        tp_size=1,
+        pipe_size=4,
     )
 
     model = GPT(

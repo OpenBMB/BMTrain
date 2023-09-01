@@ -2,7 +2,16 @@ import torch
 import bmtrain as bmt
 from layers import TransformerEncoder, Layernorm, Embedding, TransformerEncoder
 from bmtrain.global_var import config
-
+class BlockInput(bmt.DistributedModule):
+    def __init__(self,word_emb, pos_emb, dtype = None):
+        self.embed_layers = embedding_layers
+    
+    def forward(self, input, pos):
+        output = self.embed_layers[0](input)
+        for layer in self.embed_layers[1:]:
+            output = layer(output)
+        return input
+    
 class GPT(bmt.DistributedModule):
     def __init__(self,
             num_layers : int, vocab_size : int,

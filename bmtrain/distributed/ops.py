@@ -5,7 +5,7 @@ from ..nccl import allReduce as ncclAllReduce
 from ..nccl import broadcast as ncclBroadcast
 from ..nccl import send as ncclSend
 from ..nccl import recv as ncclRecv
-from ..nccl import commCount,commRank,NCCLCommunicator
+from ..nccl import commCount,commRank,NCCLCommunicator,groupStart,groupEnd
 DTYPE_LIST = [
     torch.float64,
     torch.float32,
@@ -17,7 +17,28 @@ DTYPE_LIST = [
     torch.bfloat16,
     torch.bool
 ]
+def send_activations_list(hidden_state_list, next_rank, comm):
+    length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
+    length[0] = len(hidden_state_list)
+    ncclSend(length.storage(), next_rank, comm)
+    groupStart()
+    for i in range(length):
+        send_activations(hidden_state_list[i], next_rank, comm)
+    groupEnd()
+
+def recv_activations_list(prev_rank, comm):
+    length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
+    ncclRecv(length.storage(), prev_rank, comm)
+    hidden_state_list = []
+    groupStart()
+    for i in range(length[0].item()):
+        hidden_state_list.append(recv_activations(prev_rank, comm))
+    groupEnd()
+    return hidden_state_list
+
+
 def send_activations(hidden_state, next_rank, comm):
+    hidden_state = hidden_state.contiguous()
     send_meta(hidden_state, next_rank, comm)
     ncclSend(hidden_state.storage(), next_rank, comm)
 

@@ -3,7 +3,22 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 import bmtrain as bmt
-
+import inspect
+def router(func):
+    params_kw = list(inspect.signature(func).parameters.keys())
+    def wrapper(self,*args,**kwargs):
+        assert len(args) == 0, "In pipeline module , you have to pass variable in key=value manner"
+        sub_kwargs = {}
+        for key in kwargs:
+            if key in params_kw:
+               sub_kwargs[key] = kwargs[key]
+        next_module = self.next_module()
+        next_module.set_input()
+        return func(**sub_kwargs) 
+    if bmt.config["pipe_size"] > 1:
+        return wrapper
+    else:
+        return func
 
 class Embedding(bmt.DistributedModule):
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
@@ -75,6 +90,7 @@ class Embedding(bmt.DistributedModule):
         embedding.weight.requires_grad = not freeze
         return embedding
 
+    @router
     def forward(self, input: torch.Tensor, projection : bool = False) -> torch.Tensor:
         if not projection:
             out = F.embedding(

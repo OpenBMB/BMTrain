@@ -114,11 +114,11 @@ def init_distributed(
 
     if config['pipe_enabled']:
         config["micros"] = num_micro_batches if num_micro_batches else config["pipe_size"]
-        if topo.stage_id == 0:
+        if topo.pipe_rank == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"PIPE_UNIQUE_ID{topo.pipe_idx}", unique_id.hex())
         unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
-        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id)
+        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.pipe_rank)
 
     if topo.tp_id == 0:
         unique_id = nccl.getUniqueId()
@@ -165,21 +165,21 @@ class topology:
         config['zero_size'] = world_size // pp_size 
         topo=torch.tensor(range(dp_size*tp_size*pp_size),dtype=torch.int,device='cuda')
         topo=topo.view(pp_size,dp_size*tp_size)
-        self.stages = config['pipe_size']
+        self.pipe_size = config['pipe_size']
         
         stage_size = world_size // pp_size
         for i in range(world_size):
             self.pipe_idx = self.rank % stage_size 
-            self.stage_id = self.rank // stage_size 
+            self.pipe_rank = self.rank // stage_size 
             self.tp_id = self.rank % tp_size
             self.tp_idx = self.rank // tp_size 
-            self.zero_idx = self.stage_id 
+            self.zero_idx = self.pipe_rank 
             self.zero_id = self.pipe_idx 
-            self.tp_zero_idx = self.stage_id * tp_size + self.tp_id 
+            self.tp_zero_idx = self.pipe_rank * tp_size + self.tp_id 
             self.tp_zero_id = self.pipe_idx // tp_size
 
-        self.next_rank = self.stage_id+1 if self.stage_id < config['pipe_size'] - 1 else -1
-        self.prev_rank = self.stage_id-1 if self.stage_id > 0 else -1
+        self.next_rank = self.pipe_rank+1 if self.pipe_rank < config['pipe_size'] - 1 else -1
+        self.prev_rank = self.pipe_rank-1 if self.pipe_rank > 0 else -1
 
 
     def get_group_id(self,group_name):
@@ -194,7 +194,7 @@ class topology:
         
     def get_group_rank(self,group_name):
         if group_name == "pipe":
-            return self.stage_id
+            return self.pipe_rank
         elif group_name == "zero":
             return self.zero_id
         elif group_name == "tp_zero":
