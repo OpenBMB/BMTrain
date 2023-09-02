@@ -73,7 +73,7 @@ class OpParallelLinear(torch.autograd.Function):
         ctx.gather_input = gather_input
         ctx.reduce_output_type = reduce_output_type
 
-        if gather_input and config['tp_size'] > 1:
+        if gather_input and config['tp_size'] > 1 and async_gather_chunks > 1:
             out = async_all_gather_linear_func(input, weight, bias, async_gather_chunks)
         else:
             all_input = preprocess_input(input, ctx.gather_input, ctx.split_input)
@@ -117,14 +117,24 @@ class OpParallelLinear(torch.autograd.Function):
 
         grad_input = grad_weight = grad_bias = None
 
+        current_stream = torch.cuda.current_stream()
         if input.requires_grad or weight.requires_grad:
-            all_input = preprocess_input(input, ctx.gather_input, ctx.split_input)
+            if ctx.gather_input:
+                # async the all_gather
+                with torch.cuda.stream(config['tp_comm_stream']):
+                    input.record_stream(config['tp_comm_stream'])
+                    config['tp_comm_stream'].wait_stream(current_stream)
+                    all_input = preprocess_input(input, ctx.gather_input, ctx.split_input)
+                    #use event to solve two streams waiting for each other
+                    gather_event = config['tp_comm_stream'].record_event()
+            else:
+                all_input = preprocess_input(input, ctx.gather_input, ctx.split_input)
 
         if input.requires_grad:
-            current_stream = torch.cuda.current_stream()
             grad_all_input = grad_output.matmul(weight)
             grad_input = torch.zeros_like(input)
             if ctx.gather_input:
+                # async the reduce_scatter
                 with torch.cuda.stream(config['tp_comm_stream']):
                     config['tp_comm_stream'].wait_stream(current_stream)
                     grad_input.record_stream(config['tp_comm_stream'])
@@ -139,6 +149,9 @@ class OpParallelLinear(torch.autograd.Function):
                     grad_input.record_stream(config['tp_comm_stream'])
                     grad_input = all_gather(grad_input, config['tp_comm'])
 
+        # wait all_gather 
+        if ctx.gather_input:
+            current_stream.wait_event(gather_event)
         if weight.requires_grad:
             dim = grad_output.dim()
             grad_weight = grad_output.reshape(-1,
