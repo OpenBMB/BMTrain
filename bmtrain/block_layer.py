@@ -531,7 +531,7 @@ def _block_wrapper(module, module_dict:dict, mode="BLOCK"):
         in_block = id(module) in module_dict
         new_module = Block(module, initialized=in_block, mode=mode)
         if in_block:
-            new_module.reference(modules[id(module)])
+            new_module.reference(module_dict[id(module)])
         else:
             module_dict[id(module)] = new_module
     else:
