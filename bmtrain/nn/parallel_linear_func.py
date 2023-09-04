@@ -24,13 +24,14 @@ def async_all_gather_linear_func(input, weight, bias, async_chunks=2):
     dim = input.dim()
     shape = list(input.shape)
     if dim > 2:
-        input = input.flatten(0, 1)
+        input = input.view(-1, input.shape[-1])
     tp_size = config['tp_size']
     current_stream = torch.cuda.current_stream()
+    comm_stream = config['tp_comm_stream']
 
     rounds = async_chunks
     inputs = input.chunk(rounds, dim=0)
-    config['tp_comm_stream'].wait_stream(current_stream)
+    comm_stream.wait_stream(current_stream)
     outputs = [None] * tp_size * rounds
 
     input = all_gather(inputs[0], config['tp_comm'])
@@ -42,12 +43,12 @@ def async_all_gather_linear_func(input, weight, bias, async_chunks=2):
 
     #async all_gather and overalap with linear
     for i in range(rounds-1):
-        with torch.cuda.stream(config['tp_comm_stream']):
-            inputs[i+1].record_stream(config['tp_comm_stream'])
+        with torch.cuda.stream(comm_stream):
+            inputs[i+1].record_stream(comm_stream)
             input = all_gather(inputs[i+1], config['tp_comm'])
             input = input.flatten(0, 1)
 
-        current_stream.wait_stream(config['tp_comm_stream'])
+        current_stream.wait_stream(comm_stream)
         out = F.linear(input, weight, bias)
         outs = out.chunk(tp_size, dim=0)
         for j in range(tp_size):
@@ -56,8 +57,8 @@ def async_all_gather_linear_func(input, weight, bias, async_chunks=2):
     out = torch.cat(outputs, dim=0)
     if dim > 2:
         out_shape = list(out.shape)
-        shape[0] = out_shape[0] // shape[1]
-        shape[2:] = out_shape[1:]
+        shape[-1] = out_shape[-1]
+        shape[0] = shape[0] * tp_size
         out = out.view(shape)
     return out
 
@@ -99,6 +100,7 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
     grad_weights = [None] * tp_size * rounds 
     grad_outs = [None] * tp_size * rounds
     local_grad_outs = grad_out.chunk(rounds, dim=0)
+
     input_list = [None] * tp_size * rounds
     tp_inputs = input.chunk(tp_size, dim=0)
     for i in range(tp_size):
