@@ -56,6 +56,11 @@ def test_all_input_no_grad():
     assert linear1.bias.grad is not None
     assert x.grad is None
 
+def test_same_layer():
+    layer = Layer()
+    block_list = bmt.TransformerBlockList([layer, layer])
+    assert id(block_list[0]) != id(block_list[1])
+
 def test_no_grad_error():
     layer = bmt.Block(Layer())
 
@@ -80,5 +85,6 @@ if __name__ == '__main__':
     test_no_grad()
     test_multi_layer_no_grad()
     test_all_input_no_grad()
+    test_same_layer()
     test_no_grad_error()
     test_no_grad_error2()
