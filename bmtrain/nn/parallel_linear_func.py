@@ -61,54 +61,6 @@ def async_all_gather_linear_func(input, weight, bias, async_chunks=2):
         out = out.view(shape)
     return out
 
-def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_chunks=2):
-    dim = grad_out.dim()
-    shape = list(grad_out.shape)
-    if dim > 2:
-        grad_out = grad_out.flatten(0, 1)
-    tp_size = config['tp_size']
-    current_stream = torch.cuda.current_stream()
-
-    rounds = async_chunks
-    grad_outs = grad_out.chunk(rounds, dim=0)
-    config['tp_comm_stream'].wait_stream(current_stream)
-    grad_inputs = [None] * tp_size * rounds
-    grad_weights = [None] * tp_size * rounds
-
-    grad_out = all_gather(grad_outs[0], config['tp_comm'])
-    grad_out = grad_out.flatten(0, 1)
-
-    if input.requires_grad:
-        grad_input = grad_out.matmul(weight)
-
-    if weight.requires_grad:
-        dim = grad_out.dim()
-        grad_weight = grad_out.reshape(-1,
-            grad_out.shape[-1]).t().matmul(input.reshape(-1, input.shape[-1]))
-    if bias is not None and bias.requires_grad:
-        grad_bias = grad_out.reshape(-1, grad_out.shape[-1]).sum(0)
-
-    #async all_gather and overalap with linear
-    for i in range(rounds-1):
-        with torch.cuda.stream(config['tp_comm_stream']):
-            inputs[i+1].record_stream(config['tp_comm_stream'])
-            input = all_gather(inputs[i+1], config['tp_comm'])
-            input = input.flatten(0, 1)
-
-        current_stream.wait_stream(config['tp_comm_stream'])
-        out = F.linear(input, weight, bias)
-        outs = out.chunk(tp_size, dim=0)
-        for j in range(tp_size):
-            outputs[(i + 1) + j * rounds] = outs[j]
-
-    out = torch.cat(outputs, dim=0)
-    if dim > 2:
-        out_shape = list(out.shape)
-        shape[0] = out_shape[0] // shape[1]
-        shape[2:] = out_shape[1:]
-        out = out.view(shape)
-    return out
-
 def async_reduce_scatter_linear_func(input, weight, bias, async_chunks=2):
     tp_size = config['tp_size']
     comm_stream = config['tp_comm_stream']
@@ -134,8 +86,59 @@ def async_reduce_scatter_linear_func(input, weight, bias, async_chunks=2):
     current_stream.wait_stream(comm_stream)
     out = torch.cat(outputs, dim=0)
     return out
-    
 
+def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_chunks=2):
+    tp_size = config['tp_size']
+    current_stream = torch.cuda.current_stream()
+    comm_stream = config['tp_comm_stream']
+
+    rounds = async_chunks
+    grad_outs = grad_out.chunk(rounds, dim=0)
+    comm_stream.wait_stream(current_stream)
+    grad_inputs = [None] * tp_size * rounds 
+    grad_weights = [None] * tp_size * rounds 
+    grad_outs = [None] * tp_size * rounds
+    local_grad_outs = grad_out.chunk(rounds, dim=0)
+    grad_input = grad_weight = grad_bias = None
+
+    grad_out = all_gather(local_grad_outs[0], config['tp_comm']) 
+    for j in range(tp_size):
+        grad_outs[j * rounds] = grad_out[j]
+    grad_out = grad_out.flatten(0, 1) # (tp_size * (m/rounds), n)
+    grad_input = grad_out.matmul(weight) # (tp_size * (m/rounds), n) * (n, k/tp_size)
+    tmp_grad_inputs = grad_input.chunk(tp_size, dim=0)
+    for j in range(tp_size):
+        grad_inputs[j * rounds] = tmp_grad_inputs[j]
+
+    #async all_gather and overalap with matmul
+    for i in range(rounds-1):
+        with torch.cuda.stream(comm_stream):
+            local_grad_outs[i+1].record_stream(comm_stream)
+            grad_out = all_gather(local_grad_outs[i+1], config['tp_comm']) 
+            for j in range(tp_size):
+                grad_outs[j * rounds + i+1] = grad_out[j]
+            grad_out = grad_out.flatten(0, 1) # (tp_size * (m/rounds), n)
+
+        current_stream.wait_stream(comm_stream)
+        grad_input = grad_out.matmul(weight) # (tp_size * (m/rounds), n) * (n, k/tp_size)
+        tmp_grad_inputs = grad_input.chunk(tp_size, dim=0)
+        for j in range(tp_size):
+            grad_inputs[j * rounds + i+1] = tmp_grad_inputs[j]
+
+    grad_input = torch.cat(grad_inputs, dim=0)
+    grad_out = torch.cat(grad_outs, dim=0)
+
+    if weight.requires_grad:
+        dim = grad_out.dim()
+        grad_weight = grad_out.reshape(-1,
+            grad_out.shape[-1]).t().matmul(input.reshape(-1, input.shape[-1]))
+
+    if bias is not None and bias.requires_grad:
+        grad_bias = grad_out.reshape(-1, grad_out.shape[-1]).sum(0)
+
+    return grad_input, grad_weight, grad_bias
+
+    
 class OpParallelLinear(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, weight, bias=None, gather_input=False, gather_output=False, split_input=False, reduce_output_type=None, async_gather_chunks=2):
@@ -147,6 +150,7 @@ class OpParallelLinear(torch.autograd.Function):
         ctx.split_input = split_input
         ctx.gather_input = gather_input
         ctx.reduce_output_type = reduce_output_type
+        ctx.async_gather_chunks = async_gather_chunks
 
         if gather_input and config['tp_size'] > 1 and async_gather_chunks > 1:
             out = async_all_gather_linear_func(input, weight, bias, async_gather_chunks)
@@ -183,8 +187,12 @@ class OpParallelLinear(torch.autograd.Function):
         gather_output = ctx.gather_output
 
         if ctx.reduce_output_type == ReduceType.REDUCE_SCATTER:
-            grad_output = all_gather(grad_output, config['tp_comm'])
-            grad_output = grad_output.flatten(0, 1)
+            if input.requires_grad:
+                grad_input, grad_weight, grad_bias = async_all_gather_linear_backward_func(grad_output, input, weight, bias, ctx.async_gather_chunks)
+                return grad_input, grad_weight, grad_bias, None, None, None, None 
+            else:
+                grad_output = all_gather(grad_output, config['tp_comm'])
+                grad_output = grad_output.flatten(0, 1)
 
         if gather_output:
             tp_size = config['tp_size']
