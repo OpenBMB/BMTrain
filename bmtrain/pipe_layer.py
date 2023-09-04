@@ -12,7 +12,7 @@ from .zero_context import (
         ZeroContext
 )
 from . import debug
-from .block_layer import Block, round_up, _get_param_kw
+from .block_layer import Block, round_up, _get_param_kw, _block_wrapper
 
 class PipePreFunction(torch.autograd.Function):
     @staticmethod
@@ -180,7 +180,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
     Example:
         >>> module_list = [ ... ]
         >>> normal_module_list = torch.nn.ModuleList(module_list)
-        >>> transformer_module_list = TransformerBlockList(module_list)
+        >>> transformer_module_list = PipelineTransformerBlockList(module_list)
         >>> # Calling normal module list
         >>> for layer in normal_module_list:
         >>>     hidden_state = layer.forward(hidden_state, ...)
@@ -190,24 +190,18 @@ class PipelineTransformerBlockList(torch.nn.Module):
     """
     _modules: Dict[str, Block]
 
-    def __init__(self, modules: Iterable[Block], num_hidden=1) -> None:
+    def __init__(self, modules: Iterable[torch.nn.Module], num_hidden=1) -> None:
         super().__init__()
         self.num_hidden = num_hidden 
         self._modules = {}
-        rank = config['rank']
-        topo = config['topology']
         self.layer_ids = []
+        topo = config["topology"]
         self.pipe_size = topo.pipe_size
         self.pipe_rank = topo.pipe_rank
         self.pipe_idx = topo.pipe_idx 
+        module_dict = {}
         for idx, module in enumerate(modules):
-            if not isinstance(module, Block):
-                module = Block(module)
-
-            module._mode = "PIPE"
-            module.pipe_rank = self.pipe_rank
-            module.pipe_size = self.pipe_size
-
+            module = _block_wrapper(module, module_dict, "PIPE")
             self._modules[str(idx)] = module
 
         self.layer_ids = self.get_range_by_pipe_rank(self.pipe_rank)
@@ -217,15 +211,11 @@ class PipelineTransformerBlockList(torch.nn.Module):
             module = self._modules[str(layer_id)]
             module.set_pre_module(pre_module)
             pre_module = module
-
-            module._is_first_stage = True if self.pipe_rank == 0 else False
-            module._is_last_stage = True if self.pipe_rank == self.pipe_size-1 else False
             module._is_first_layer = False
             module._is_last_layer = False
+            
         self._modules[str(self.layer_ids[0])]._is_first_layer = True
         self._modules[str(self.layer_ids[-1])]._is_last_layer = True
-
-        self.save_list = [(i, i) for i in range(len(self.layer_ids))]
             
     def __len__(self) -> int:
         return len(self._modules) 
@@ -309,7 +299,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
                 with torch.no_grad():
                     with ZeroContext(module, pipe=True):
                         module._module.state_dict(destination=dst, prefix=name, keep_vars=False)
-                if config["zero_rank"] == 0:
+
+                if config["topology"].pp_zero_id == 0:
                     if config["rank"] == 0:
                         destination.update(dst)
                     else:
@@ -318,5 +309,5 @@ class PipelineTransformerBlockList(torch.nn.Module):
                             send_activations(tensor.cuda(), 0, config['pipe_comm'])
             if config['rank'] == 0 and idx not in self.layer_ids:
                 for n, parameter in module._module.named_parameters():
-                    destination[name+n] = recv_activations(self.get_stage_by_layer_id(idx), config['pipe_comm'])
+                    destination[name+n] = recv_activations(self.get_stage_by_layer_id(idx), config['pipe_comm']).cpu()
 
