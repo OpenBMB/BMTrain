@@ -603,3 +603,17 @@ class TransformerBlockList(torch.nn.Module):
             return outputs + tuple(hidden_states)
         else:
             return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
+
+class PipeDreamBlockList(TransformerBlockList):
+    def __init__(self, modules: Iterable[Block], num_hidden=1, sqrt=False) -> None:
+        modules,s,e = self.partition(modules) 
+        print(s,"->",e)
+        super().__init__(modules, num_hidden, sqrt)
+        
+    def partition(self,modules):
+        pipe_size = config["topology"].pipe_size
+        pipe_rank = config["topology"].pipe_rank
+        part_lens = [0]+[len(modules) // pipe_size + (i < (len(modules) % pipe_size)) for i in range(pipe_rank+1)]
+        start = sum(part_lens[:pipe_rank+1])
+        end = start + part_lens[pipe_rank+1]
+        return modules[start:end],start,end
