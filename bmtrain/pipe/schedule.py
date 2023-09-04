@@ -1,6 +1,7 @@
 import sys
 from bmtrain.global_var import  config
 from bmtrain.loss import FusedCrossEntropy
+import bmtrain as bmt
 from comm import PipeCommander
 import torch
 from debug import get_logger
@@ -68,6 +69,7 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
 
     # forwrad unpack
     inp, *args = next(data_iterator)
+    optimizer = bmt.optim.AdamOptimizer(model.parameters(), lr=0.001)
     micro_batch_size = inp.shape[0]
     assert global_batch_size % micro_batch_size == 0, "The global batch size must be divisible by the micro batch size"
     num_micro_batches = global_batch_size // micro_batch_size
@@ -96,9 +98,10 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     outputs = []
     logger.debug("num_warmup: {}".format(num_warmup))
     for micro in range(num_warmup):
-        logger.debug("{} recv micro {}th from prev neighbour".format(config['rank'], micro))
         inp = commander.recv_prev(need_data=True)
+        logger.debug("{} recv micro {}th from prev neighbour".format(config['rank'], micro))
         output = forward_func(model, inp)
+        logger.debug("{} micro forward".format(micro))
         # send activations
         commander.send_next(output)
         logger.debug("{} send micro {}th to next neighbour".format(config['rank'], micro))
@@ -112,41 +115,49 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
 
     for micro in range(num_micro_batches - num_warmup):
         output = forward_func(model, inp)
-        logger.debug("{} send micro hidden state {}th to next neighbour and recv micro grad {} from next neighbour".format(config['rank'], micro + num_warmup, micro))
+        logger.debug("{} micro forward".format(micro+num_warmup))
         grad_output = commander.send_forward_recv_backward(output)
+        print(len(grad_output))
+        logger.debug("{} send micro hidden state {}th to next neighbour and recv micro grad {} from next neighbour".format(config['rank'], micro + num_warmup, micro))
         logger.debug("inp shape: {}".format(inp[0].shape))
-        logger.debug("output shape: {}".format(output[0].shape))
-        if grad_output[0] is not None:
+        if not commander.is_last_stage():
+            logger.debug("output shape: {}".format(output[0].shape))
+        if  grad_output[0] is not None :
             logger.debug("grad_output shape: {}".format(grad_output[0].shape))
         inp_grad = backward_step(inp, output, grad_output)
+        logger.debug("{} micro backward".format(micro+num_warmup))
         if micro == remain_batch - 1:
             input_tensor = None
             commander.send_prev(inp_grad)
+            logger.debug("{} send micro grad {}th to prev neighbour".format(config['rank'], micro + num_warmup))
         else:
-            logger.debug("{} send micro grad {}th to prev neighbour and recv micro hidden state {} from recv neighbour".format(config['rank'], micro, micro + num_warmup))
+            logger.debug("{} send micro grad {}th to prev neighbour and recv micro hidden state {} from recv neighbour".format(config['rank'], micro, micro + num_warmup + 1))
+            logger.debug("inp_grad shape: {}".format(inp_grad[0].shape))
             input_tensor = commander.send_backward_recv_forward(inp_grad)
+        inps.append(input_tensor)
+        outputs.append(output)
 
 
     if not forward_only:
         logger.debug("cooling stage")
         for i in range(num_warmup):
-            logger.debug("{} recv micro grad {}th from next neighbour".format(config['rank'], i))
+            logger.debug("{} recv micro grad {}th from next neighbour".format(config['rank'], num_micro_batches - num_warmup + i))
             # if i == num_warmup - 1:
                 # grad sync
                 # if config.grad_sync_func is None or rank == 0:
                 #     enable_grad_sync()
 
-            input_tensor = inp.pop(0)
-            output_tensor = output.pop(0)
+            input_tensor = inps.pop(0)
+            output_tensor = outputs.pop(0)
 
             output_tensor_grad = commander.recv_next()
-
+            logger.debug("{} micro backward".format(num_micro_batches - num_warmup + i))
             input_tensor_grad = backward_step(
                 input_tensor, output_tensor, output_tensor_grad, 
             )
-            logger.send("{} send micro grad {}th to prev neighbour".format(config['rank'], i))
+            logger.debug("{} send micro grad {}th to prev neighbour".format(config['rank'], i))
 
             commander.send_prev(input_tensor_grad)
-
+    optimizer.step()
 
     

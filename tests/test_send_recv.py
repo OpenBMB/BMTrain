@@ -5,7 +5,7 @@ import bmtrain as bmt
 from bmtrain.global_var import config
 
 def test_send_recv():
-    if config["topology"].stage_id == 0:
+    if config["topology"].pipe_rank == 0:
         a = torch.ones((2,1)) * (config["topology"].pp_zero_id+1)
         a = a.cuda()
         print(f"send {a}")

@@ -106,13 +106,12 @@ class Block(torch.nn.Module):
 
             storage_type = storage_type_cuda(param.storage_type())
             kw_name = _get_param_kw(param)
-
             if kw_name not in self._storage_info:
                 if self._mode == "PIPE" and param._tp_mode:
                     zero_comm = config["pp_tp_zero_comm"]
                 elif self._mode != "PIPE" and param._tp_mode:
                     zero_comm = config["tp_zero_comm"]
-                elif self._mode == "PIPE" and not param._tp_mode:
+                elif (self._mode == "PIPE" or self._mode == "1F1B") and not param._tp_mode:
                     zero_comm = config["pp_zero_comm"]
                 else:
                     zero_comm = config["zero_comm"]
@@ -531,7 +530,7 @@ def _block_wrapper(module, module_dict:dict, mode="BLOCK"):
         in_block = id(module) in module_dict
         new_module = Block(module, initialized=in_block, mode=mode)
         if in_block:
-            new_module.reference(modules[id(module)])
+            new_module.reference(module_dict[id(module)])
         else:
             module_dict[id(module)] = new_module
     else:
@@ -565,15 +564,14 @@ class TransformerBlockList(torch.nn.Module):
     """
     _modules: Dict[str, Block]
 
-    def __init__(self, modules: Iterable[Block], num_hidden=1) -> None:
+    def __init__(self, modules: Iterable[Block], num_hidden=1, mode="BLOCK") -> None:
         super().__init__()
         
         self._modules = {}
         pre_module = None
         module_dict = {}
-        module_dict = {}
         for i, module in enumerate(modules):
-            module = _block_wrapper(module, module_dict)
+            module = _block_wrapper(module, module_dict, mode=mode)
             module.set_pre_module(pre_module)
             pre_module = module
             module._is_first_layer = False
@@ -620,10 +618,13 @@ class TransformerBlockList(torch.nn.Module):
 
 class PipeDreamBlockList(TransformerBlockList):
     def __init__(self, modules: Iterable[Block], num_hidden=1, sqrt=False) -> None:
-        modules,s,e = self.partition(modules) 
-        print(s,"->",e)
-        super().__init__(modules, num_hidden, sqrt)
-        
+        module_dict = {}
+        mode = "1F1B"
+        for idx in range(len(modules)):
+           modules[idx] = _block_wrapper(modules[idx], module_dict,mode=mode) 
+        modules,s,e = self.partition(modules)
+        super().__init__(modules, num_hidden, "1F1B")
+
     def partition(self,modules):
         pipe_size = config["topology"].pipe_size
         pipe_rank = config["topology"].pipe_rank

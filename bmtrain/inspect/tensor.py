@@ -40,7 +40,7 @@ class InspectTensor:
 
                     assert item["inside_pipe"] is not None
                     pipe_rank = item["inside_pipe"]["pipe_rank"]
-                    stages = item["inside_pipe"]["stages"]
+                    pipe_size = item["inside_pipe"]["pipe_size"]
                     st = item["inside_pipe"]["st"]
                     ed = item["inside_pipe"]["ed"]
 
@@ -52,7 +52,7 @@ class InspectTensor:
                     if ed:
                         break
 
-                for stage in range(stages):
+                for stage in range(pipe_size):
                     if pipe_rank == stage:
                         broadcast_object(pipe_cnt, config["pipe_comm"], src = stage)
                         for k in range(i, j):
@@ -126,11 +126,11 @@ class InspectTensor:
                             tensor = broadcast(tensor, it["inside_pipe"]["pipe_rank"], config["pipe_comm"])
                             if has_grad:
                                 grad = torch.empty(it["shape"]).cuda() 
-                        tensor = tensor.chunk(stages, dim=0)[pipe_rank].clone()
+                        tensor = tensor.chunk(pipe_size, dim=0)[pipe_rank].clone()
                         it["tensor"] = tensor
                         if has_grad:
                             grad = broadcast(grad, it["inside_pipe"]["pipe_rank"], config["pipe_comm"])
-                            grad = grad.chunk(stages, dim=0)[pipe_rank].clone()
+                            grad = grad.chunk(pipe_size, dim=0)[pipe_rank].clone()
                             tensor.grad = grad
                         it["shape"] = (it["shape"][0]//config["pipe_size"],) + it["shape"][1:]
 

@@ -31,11 +31,10 @@ class PipeEmbedding(bmt.DistributedModule):
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
-        if bmt.config['topology'].pipe_rank == 0:
-            if _weight is None:
-                self.weight = bmt.DistributedParameter(torch.empty(num_embeddings, embedding_dim, dtype=dtype, device="cuda"), init_method=torch.nn.init.normal_)
-            else:
-                self.weight = bmt.DistributedParameter(_weight)
+        if _weight is None:
+            self.weight = bmt.DistributedParameter(torch.empty(num_embeddings, embedding_dim, dtype=dtype, device="cuda"), init_method=torch.nn.init.normal_)
+        else:
+            self.weight = bmt.DistributedParameter(_weight)
         self.sparse = sparse
     
     @classmethod

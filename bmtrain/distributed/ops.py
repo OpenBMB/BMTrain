@@ -6,6 +6,7 @@ from ..nccl import broadcast as ncclBroadcast
 from ..nccl import send as ncclSend
 from ..nccl import recv as ncclRecv
 from ..nccl import commCount,commRank,NCCLCommunicator,groupStart,groupEnd
+import contextlib
 DTYPE_LIST = [
     torch.float64,
     torch.float32,
@@ -17,23 +18,39 @@ DTYPE_LIST = [
     torch.bfloat16,
     torch.bool
 ]
-def send_activations_list(hidden_state_list, next_rank, comm):
-    length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
-    length[0] = len(hidden_state_list)
-    ncclSend(length.storage(), next_rank, comm)
+@contextlib.contextmanager
+def groupcall():
     groupStart()
-    for i in range(length):
-        send_activations(hidden_state_list[i], next_rank, comm)
+    yield
     groupEnd()
+
+def send_activations_list(hidden_state_list, next_rank, comm, async_op=True):
+    if async_op:
+        current_stream = torch.cuda.current_stream()
+        with torch.cuda.stream(config["pp_comm_stream"]):
+            config["pp_comm_stream"].wait_stream(current_stream)
+            length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
+            length[0] = len([h for h in hidden_state_list if h is not None])
+            ncclSend(length.storage(), next_rank, comm)
+            for i in range(len(hidden_state_list)):
+                if hidden_state_list[i] is None:
+                    continue
+                hidden_state_list[i].record_stream(config["pp_comm_stream"])
+                send_activations(hidden_state_list[i], next_rank, comm)
+    else:
+        length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
+        length[0] = len(hidden_state_list)
+        ncclSend(length.storage(), next_rank, comm)
+        for i in range(length):
+            send_activations(hidden_state_list[i], next_rank, comm)
+
 
 def recv_activations_list(prev_rank, comm):
     length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
-    ncclRecv(length.storage(), prev_rank, comm)
     hidden_state_list = []
-    groupStart()
+    ncclRecv(length.storage(), prev_rank, comm)
     for i in range(length[0].item()):
         hidden_state_list.append(recv_activations(prev_rank, comm))
-    groupEnd()
     return hidden_state_list
 
 
@@ -62,6 +79,7 @@ def recv_meta(prev_rank, comm):
     n_dims = meta_data[0].item()
     dtype = DTYPE_LIST[meta_data[1].item()]
     shape = meta_data[2:n_dims+2].tolist()
+
     return dtype,shape
 
 class OpBroadcast(torch.autograd.Function):
