@@ -101,19 +101,22 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
     grad_outs = [None] * tp_size * rounds
     local_grad_outs = grad_out.chunk(rounds, dim=0)
 
-    input_list = [None] * tp_size * rounds
-    tp_inputs = input.chunk(tp_size, dim=0)
-    for i in range(tp_size):
-        chunk_inputs = tp_inputs[i].chunk(rounds, dim=0)
-        for j in range(rounds):
-            input_list[j * tp_size + i] = chunk_inputs[j]
     inputs = [None] * rounds
-    start = 0
-    end = tp_size
-    for i in range(rounds):
-        inputs[i] = torch.cat(input_list[start:end], dim=0)
-        start = end
-        end += tp_size
+    with torch.cuda.stream(comm_stream):
+        comm_stream.wait_stream(current_stream)
+        input.record_stream(comm_stream)
+        input_list = [None] * tp_size * rounds
+        tp_inputs = input.chunk(tp_size, dim=0)
+        for i in range(tp_size):
+            chunk_inputs = tp_inputs[i].chunk(rounds, dim=0)
+            for j in range(rounds):
+                input_list[j * tp_size + i] = chunk_inputs[j]
+        start = 0
+        end = tp_size
+        for i in range(rounds):
+            inputs[i] = torch.cat(input_list[start:end], dim=0)
+            start = end
+            end += tp_size
 
     grad_input = grad_weight = grad_bias = None
 
