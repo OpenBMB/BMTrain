@@ -99,6 +99,20 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
     grad_weights = [None] * tp_size * rounds 
     grad_outs = [None] * tp_size * rounds
     local_grad_outs = grad_out.chunk(rounds, dim=0)
+    input_list = [None] * tp_size * rounds
+    tp_inputs = input.chunk(tp_size, dim=0)
+    for i in range(tp_size):
+        chunk_inputs = tp_inputs[i].chunk(rounds, dim=0)
+        for j in range(rounds):
+            input_list[j * tp_size + i] = chunk_inputs[j]
+    inputs = [None] * rounds
+    start = 0
+    end = tp_size
+    for i in range(rounds):
+        inputs[i] = torch.cat(input_list[start:end], dim=0)
+        start = end
+        end += tp_size
+
     grad_input = grad_weight = grad_bias = None
 
     grad_out = all_gather(local_grad_outs[0], config['tp_comm']) 
@@ -109,6 +123,11 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
     tmp_grad_inputs = grad_input.chunk(tp_size, dim=0)
     for j in range(tp_size):
         grad_inputs[j * rounds] = tmp_grad_inputs[j]
+
+    if weight.requires_grad:
+        dim = grad_out.dim()
+        grad_weight = grad_out.reshape(-1,
+            grad_out.shape[-1]).t().matmul(inputs[0].reshape(-1, inputs[0].shape[-1]))
 
     #async all_gather and overalap with matmul
     for i in range(rounds-1):
@@ -125,13 +144,13 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
         for j in range(tp_size):
             grad_inputs[j * rounds + i+1] = tmp_grad_inputs[j]
 
+        if weight.requires_grad:
+            dim = grad_out.dim()
+            grad_weight += grad_out.reshape(-1,
+                grad_out.shape[-1]).t().matmul(inputs[i+1].reshape(-1, inputs[i+1].shape[-1]))
+
     grad_input = torch.cat(grad_inputs, dim=0)
     grad_out = torch.cat(grad_outs, dim=0)
-
-    if weight.requires_grad:
-        dim = grad_out.dim()
-        grad_weight = grad_out.reshape(-1,
-            grad_out.shape[-1]).t().matmul(input.reshape(-1, input.shape[-1]))
 
     if bias is not None and bias.requires_grad:
         grad_bias = grad_out.reshape(-1, grad_out.shape[-1]).sum(0)
