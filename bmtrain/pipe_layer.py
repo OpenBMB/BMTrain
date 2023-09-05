@@ -142,7 +142,7 @@ class StagePreFunction(torch.autograd.Function):
             current_stream = torch.cuda.current_stream()
             with torch.cuda.stream(config['pp_comm_stream']):
                 config['pp_comm_stream'].wait_stream(current_stream) 
-                send_data.record_stream(current_stream)
+                send_data.record_stream(config['pp_comm_stream'])
                 send_activations(send_data, ctx.stage_id - 1, config['pipe_comm'])
         return grad_outputs, None
 
@@ -157,7 +157,7 @@ class StagePostFunction(torch.autograd.Function):
             current_stream = torch.cuda.current_stream()
             with torch.cuda.stream(config['pp_comm_stream']):
                 config['pp_comm_stream'].wait_stream(current_stream) 
-                send_data.record_stream(current_stream)
+                send_data.record_stream(config['pp_comm_stream'])
                 send_activations(send_data.detach(), stage_id + 1, config['pipe_comm'])
         return outputs
         
