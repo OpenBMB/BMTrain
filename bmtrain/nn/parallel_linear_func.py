@@ -110,16 +110,15 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
         grad_out = grad_out.view(-1, grad_out.shape[-1])
 
     rounds = async_chunks
-    comm_stream.wait_stream(current_stream)
     grad_inputs = [None] * tp_size * rounds 
     grad_weights = [None] * tp_size * rounds 
     grad_outs = [None] * tp_size * rounds
     local_grad_outs = grad_out.chunk(rounds, dim=0)
 
     inputs = [None] * rounds
-    if input_require_grad:
+    comm_stream.wait_stream(current_stream)
+    if weight.requires_grad:
         with torch.cuda.stream(comm_stream):
-            comm_stream.wait_stream(current_stream)
             input.record_stream(comm_stream)
             input_list = [None] * tp_size * rounds
             tp_inputs = input.chunk(tp_size, dim=0)
@@ -147,7 +146,6 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
             grad_inputs[j * rounds] = tmp_grad_inputs[j]
 
     if weight.requires_grad:
-        dim = grad_out.dim()
         grad_weight = grad_out.reshape(-1,
             grad_out.shape[-1]).t().matmul(inputs[0].reshape(-1, inputs[0].shape[-1]))
 
@@ -281,7 +279,6 @@ class OpParallelLinear(torch.autograd.Function):
         if ctx.gather_input:
             current_stream.wait_event(gather_event)
         if weight.requires_grad:
-            dim = grad_output.dim()
             grad_weight = grad_output.reshape(-1,
                 grad_output.shape[-1]).t().matmul(all_input.reshape(-1, all_input.shape[-1]))
          
