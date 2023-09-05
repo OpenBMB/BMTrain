@@ -69,7 +69,7 @@ def async_reduce_scatter_linear_func(input, weight, bias, async_chunks=2):
     input_shape = list(input.shape)
     dim = input.dim()
     if dim > 2:
-        input.view(-1, input.shape[-1])
+        input = input.view(-1, input.shape[-1])
     inputs = input.chunk(rounds*tp_size, dim=0)
     current_stream = torch.cuda.current_stream()
 
@@ -103,6 +103,11 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
     current_stream = torch.cuda.current_stream()
     comm_stream = config['tp_comm_stream']
     input_require_grad = input.requires_grad
+    dim = input.dim()
+    input_shape = input.shape
+    if dim > 2:
+        input = input.view(-1, input_shape[-1])
+        grad_out = grad_out.view(-1, grad_out.shape[-1])
 
     rounds = async_chunks
     grad_outs = grad_out.chunk(rounds, dim=0)
@@ -170,9 +175,10 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
 
     if input_require_grad:
         grad_input = torch.cat(grad_inputs, dim=0)
-    grad_out = torch.cat(grad_outs, dim=0)
+        grad_input = grad_input.view(input_shape)
 
     if bias is not None and bias.requires_grad:
+        grad_out = torch.cat(grad_outs, dim=0)
         grad_bias = grad_out.reshape(-1, grad_out.shape[-1]).sum(0)
 
     return grad_input, grad_weight, grad_bias
@@ -227,7 +233,7 @@ class OpParallelLinear(torch.autograd.Function):
         if ctx.reduce_output_type == ReduceType.REDUCE_SCATTER:
             if input.requires_grad or weight.requires_grad:
                 grad_input, grad_weight, grad_bias = async_all_gather_linear_backward_func(grad_output, input, weight, bias, ctx.async_gather_chunks)
-                return grad_input, grad_weight, grad_bias, None, None, None, None 
+                return grad_input, grad_weight, grad_bias, None, None, None, None, None 
             else:
                 grad_output = all_gather(grad_output, config['tp_comm'])
                 grad_output = grad_output.flatten(0, 1)
