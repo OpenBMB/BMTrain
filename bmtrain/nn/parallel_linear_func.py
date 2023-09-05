@@ -110,7 +110,6 @@ def async_all_gather_linear_backward_func(grad_out, input, weight, bias, async_c
         grad_out = grad_out.view(-1, grad_out.shape[-1])
 
     rounds = async_chunks
-    grad_outs = grad_out.chunk(rounds, dim=0)
     comm_stream.wait_stream(current_stream)
     grad_inputs = [None] * tp_size * rounds 
     grad_weights = [None] * tp_size * rounds 
