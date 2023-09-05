@@ -202,6 +202,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         module_dict = {}
         for idx, module in enumerate(modules):
             module = _block_wrapper(module, module_dict, "PIPE")
+            module._zero_level = 2 #currently, only support ZeRO-2 in pipeline mode
             self._modules[str(idx)] = module
 
         self.layer_ids = self.get_range_by_stage_id(self.stage_id)
