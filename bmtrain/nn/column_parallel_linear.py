@@ -8,12 +8,13 @@ from .parallel_linear_func import (
     ReduceType)
 
 class ColumnParallelLinear(bmt.DistributedModule):
-    def __init__(self, in_features : int, out_features: int, bias: bool = True, dtype = None, gather_output=False, gather_input=True) -> None:
+    def __init__(self, in_features : int, out_features: int, bias: bool = True, dtype = None, gather_output=False, gather_input=True, async_gather_chunks=2) -> None:
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.gather_output = gather_output
         self.gather_input = gather_input
+        self.async_gather_chunks = async_gather_chunks
         tp_size = config['tp_size']
         assert out_features % tp_size == 0
         self.out_features_per_partition = out_features // tp_size
@@ -27,7 +28,7 @@ class ColumnParallelLinear(bmt.DistributedModule):
         gather_input = self.gather_input 
         split_input = False
         reduce_output_type = None 
-        return OpParallelLinear.apply(input, self.weight, self.bias, gather_input, self.gather_output, split_input, reduce_output_type)
+        return OpParallelLinear.apply(input, self.weight, self.bias, gather_input, self.gather_output, split_input, reduce_output_type, self.async_gather_chunks)
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={}'.format(
