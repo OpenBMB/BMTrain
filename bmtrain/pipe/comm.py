@@ -1,6 +1,7 @@
 import torch
 from bmtrain.distributed.ops import send_activations_list, recv_activations_list, send_activations, recv_activations, groupcall
 from bmtrain.global_var import config
+from collections.abc import Iterable
 class PipeCommander:
     def __init__(self, topo, data_iterator, num_micros, num_warmup, forward_only, interleaving_size) -> None:
         self.topo = topo
@@ -9,6 +10,11 @@ class PipeCommander:
         self.num_warmup = num_warmup
         self.forward_only = forward_only
         self.interleaving_size = interleaving_size
+    
+    def get_data(self):
+        micro_batch = next(self.data_iterator) 
+        assert isinstance(micro_batch, Iterable)
+        return list(micro_batch)
 
     def send_next(self, tensors):
         if not self.is_last_stage():
@@ -32,7 +38,7 @@ class PipeCommander:
             return res
         else:
             if need_data:
-                return list(next(self.data_iterator))
+                return self.get_data()
             else:
                 return [None]
     
@@ -54,7 +60,8 @@ class PipeCommander:
     
     def send_forward_recv_backward(self, forward_state):
         if not self.is_last_stage():
-            self.send_next(forward_state)
+            if forward_state[0] is not None:
+                self.send_next(forward_state)
             backward_grad = self.recv_next()
         else:
             backward_grad = [None]
@@ -62,11 +69,12 @@ class PipeCommander:
     
     def send_backward_recv_forward(self, backward_grad, need_data=False):
         if not self.is_first_stage():
-            self.send_prev(backward_grad)
+            if backward_grad[0] is not None:
+                self.send_prev(backward_grad)
             forward_state = self.recv_prev()
         else:
             if need_data:
-                forward_state = next(self.data_iterator)
+                forward_state = self.get_data()
             else:
                 forward_state = [None]
         return forward_state

@@ -61,7 +61,7 @@ class Block(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3, initialized=False, mode="BLOCK"):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3, initialize_param=True, mode="BLOCK"):
         super().__init__()
         self._module = inner_module
         self._inputs = None
@@ -84,7 +84,7 @@ class Block(torch.nn.Module):
         self.all_input_no_grad = False
         self.all_param_no_grad = False
         self._zero_level = zero_level
-        if not initialized:
+        if initialize_param:
             self.init_param_storage()
 
     def reference(self, block):
@@ -95,7 +95,7 @@ class Block(torch.nn.Module):
         self._initialized = True
         self._need_release = False
 
-    def init_param_storage(self):
+    def init_param_storage(self, throw=False):
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
@@ -191,7 +191,9 @@ class Block(torch.nn.Module):
             # make parameter contiguous in storage
             with torch.no_grad():
                 contiguous_param = OpAllGather.apply(param)
-
+                if throw:
+                    del contiguous_param
+                    return 
             if not (param_st >= storage_end or param_end <= storage_st):
                 # copy offset in parameter storage
                 offset_st = max(storage_st - param_st, 0)
@@ -525,17 +527,18 @@ class Block(torch.nn.Module):
     def __repr__(self):
         return self._module.__repr__()
 
-def _block_wrapper(module, module_dict:dict, mode="BLOCK"):
+def _block_wrapper(module, module_dict:dict, mode="BLOCK", **kwargs):
     if not isinstance(module, Block):
-        in_block = id(module) in module_dict
-        new_module = Block(module, initialized=in_block, mode=mode)
-        if in_block:
-            new_module.reference(module_dict[id(module)])
+        if mode == "BLOCK":
+            in_block = id(module) in module_dict
+            new_module = Block(module, initialize_param=not in_block, mode=mode, **kwargs)
+            if in_block:
+                new_module.reference(module_dict[id(module)])
+        elif mode == "PIPE" or mode == "1F1B":
+            new_module = Block(module, initialize_param=False, mode=mode, **kwargs)
         else:
             module_dict[id(module)] = new_module
     else:
-        if mode == "PIPE" and module._mode != "PIPE":
-            assert False, "You must be set mode=\"PIPE\" in bmt.Block when use PipelineTransformerBlockList!"
         if id(module._module) in module_dict:
             assert False, "Duplicate bmt.Block not supported in same block list!"
         else:
@@ -621,9 +624,16 @@ class PipeDreamBlockList(TransformerBlockList):
         module_dict = {}
         mode = "1F1B"
         for idx in range(len(modules)):
-           modules[idx] = _block_wrapper(modules[idx], module_dict,mode=mode) 
-        modules,s,e = self.partition(modules)
-        super().__init__(modules, num_hidden, "1F1B")
+           modules[idx] = _block_wrapper(modules[idx], module_dict, mode=mode, zero_level=2) 
+        s,e = self.partition(modules)
+        partition_module = []
+        for idx,m in enumerate(modules):
+            if idx>=s and idx<e:
+                m.init_param_storage()
+                partition_module.append(m)
+            else:
+                m.init_param_storage(throw=True)
+        super().__init__(partition_module, num_hidden, mode=mode)
 
     def partition(self,modules):
         pipe_size = config["topology"].pipe_size
@@ -631,4 +641,4 @@ class PipeDreamBlockList(TransformerBlockList):
         part_lens = [0]+[len(modules) // pipe_size + (i < (len(modules) % pipe_size)) for i in range(pipe_rank+1)]
         start = sum(part_lens[:pipe_rank+1])
         end = start + part_lens[pipe_rank+1]
-        return modules[start:end],start,end
+        return start,end

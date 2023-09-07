@@ -81,7 +81,6 @@ class PipeEmbedding(bmt.DistributedModule):
         embedding.weight.requires_grad = not freeze
         return embedding
 
-    @router
     def forward(self, input: torch.Tensor, projection : bool = False) -> torch.Tensor:
         if not projection:
             out = F.embedding(
