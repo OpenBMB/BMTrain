@@ -193,8 +193,7 @@ class Block(torch.nn.Module):
             with torch.no_grad():
                 contiguous_param = OpAllGather.apply(param)
                 if throw:
-                    del contiguous_param
-                    return 
+                    continue
             if not (param_st >= storage_end or param_end <= storage_st):
                 # copy offset in parameter storage
                 offset_st = max(storage_st - param_st, 0)
@@ -219,7 +218,8 @@ class Block(torch.nn.Module):
                 param.data = torch.tensor([], dtype=param.dtype, device=param.device)
             # clear parameter data, but keep the dtype and device
             setattr(param, "_in_block", True)
-
+        if throw:
+            return 
         for kw in offsets.keys():
             assert offsets[kw] == self._storage_info[kw]["total"]
 
@@ -636,6 +636,29 @@ class PipeDreamBlockList(TransformerBlockList):
             else:
                 m.init_param_storage(throw=True)
         super().__init__(partition_module, num_hidden, mode=mode)
+
+    def forward(self, *args, return_hidden_states = False):
+        self.return_hidden_states = return_hidden_states
+        hidden_states = []
+        for i in range(1, len(self)):
+            if return_hidden_states:
+                for hidden_state in args[:self.num_hidden]:
+                    hidden_states.append(hidden_state)
+            outputs = self._modules[str(i)]._call_impl(*args)
+            if not isinstance(outputs, tuple):
+                outputs = (outputs, )
+            args = outputs + args[self.num_hidden:]
+
+        if return_hidden_states:
+            hidden_states = [
+                torch.stack(hidden_states[i::self.num_hidden], dim=0)
+                for i in range(self.num_hidden)
+            ]
+
+        if return_hidden_states:
+            return outputs + tuple(hidden_states)
+        else:
+            return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
 
     def partition(self,modules):
         pipe_size = config["topology"].pipe_size

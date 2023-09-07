@@ -62,11 +62,12 @@ def preprocess_func(model, data_iter):
     while True:
         try:
             inp = next(data_iter)
+            print(type(inp))
         except StopIteration:
             break
         input_ids = inp[0]
         embed = model.get_embedding()
-        yield embed(input_ids), inp[1:]
+        yield embed(input_ids), *inp[1:]
 
 def pipeline_forward_backward(model, data_iterator, global_batch_size, interleaving_size=1):
     """Forward and backward the pipeline model.
@@ -88,7 +89,7 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     assert (num_micro_batches) % config["pipe_size"] == 0, "The number of micro batches must be divisible by the pipeline size"
     config["micros"] = num_micro_batches
     topo = config["topology"]
-    logger = get_logger(config['rank'], logging.DEBUG)
+    logger = get_logger(config['rank'], logging.INFO)
     config['logger'] = logger
     logger.info("topo: {}".format(topo))
     logger.info("num_micro_batches: {}".format(num_micro_batches))
