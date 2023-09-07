@@ -10,6 +10,7 @@ def generate(iters):
         print(inp[0][0])
         yield inp
 data_loader = iter(generate(100*16))
+
 def test_pipe():
     bmt.init_distributed(seed=42, pipe_size=4)
     models = [bmt.nn.PipeEmbedding(1024,128,dtype=torch.float16)]
@@ -25,6 +26,7 @@ def test_pipe():
         print(models['0'].weight.grad)
     t = time.time() - start
     print(t)
+
 def test_dp():
     bmt.init_distributed(seed=42, pipe_size=1)
     models = [bmt.nn.PipeEmbedding(1024,128,dtype=torch.float16)]

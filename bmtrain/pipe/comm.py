@@ -3,16 +3,17 @@ from bmtrain.distributed.ops import send_activations_list, recv_activations_list
 from bmtrain.global_var import config
 from collections.abc import Iterable
 class PipeCommander:
-    def __init__(self, topo, data_iterator, num_micros, num_warmup, forward_only, interleaving_size) -> None:
+    def __init__(self, topo, input_generator, num_micros, num_warmup, forward_only, interleaving_size) -> None:
         self.topo = topo
-        self.data_iterator = data_iterator
+        self.input_generator = input_generator
         self.num_micros = num_micros
         self.num_warmup = num_warmup
         self.forward_only = forward_only
         self.interleaving_size = interleaving_size
     
     def get_data(self):
-        micro_batch = next(self.data_iterator) 
+        assert config["topology"].pipe_rank == 0
+        micro_batch = next(self.input_generator) 
         assert isinstance(micro_batch, Iterable)
         return list(micro_batch)
 
@@ -30,7 +31,6 @@ class PipeCommander:
 
     def recv_prev(self, need_data=False):
         if not self.is_first_stage():
-            # return [torch.randn((12,1024,128),device="cuda", dtype=torch.float16).requires_grad_()]
             res = recv_activations_list(self.topo.pipe_rank - 1, config["pipe_comm"])
             for t in res:
                 t.requires_grad_()
@@ -45,7 +45,6 @@ class PipeCommander:
     def recv_next(self):
         if not self.is_last_stage():
             return recv_activations_list(self.topo.pipe_rank + 1, config["pipe_comm"])
-            # return [torch.randn((12,1024,128),device="cuda", dtype=torch.float16).requires_grad_()]
         else:
             return [None]
 

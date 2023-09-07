@@ -3,14 +3,7 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 import bmtrain as bmt
-import inspect
-def router(func):
-    def wrapper(self,*args,**kwargs):
-        if bmt.config["topology"].pipe_rank == 0:
-            return func(self,*args,**kwargs)
-        else:
-            return args,kwargs
-    return wrapper
+
 
 class PipeEmbedding(bmt.DistributedModule):
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
@@ -80,7 +73,7 @@ class PipeEmbedding(bmt.DistributedModule):
             sparse=sparse)
         embedding.weight.requires_grad = not freeze
         return embedding
-
+        
     def forward(self, input: torch.Tensor, projection : bool = False) -> torch.Tensor:
         if not projection:
             out = F.embedding(

@@ -6,7 +6,7 @@ from comm import PipeCommander
 import torch
 from debug import get_logger
 import logging
-
+from typing import Iterable
 def backward_step(inp, output, grad_output):
     """Backward step through passed-in output tensor.
 
@@ -57,6 +57,17 @@ def forward_func(model, inp, micro_idx):
             hidden_state = [hidden_state]
         return hidden_state
 
+def preprocess_func(model, data_iter):
+
+    while True:
+        try:
+            inp = next(data_iter)
+        except StopIteration:
+            break
+        input_ids = inp[0]
+        embed = model.get_embedding()
+        yield embed(input_ids), inp[1:]
+
 def pipeline_forward_backward(model, data_iterator, global_batch_size, interleaving_size=1):
     """Forward and backward the pipeline model.
 
@@ -92,10 +103,10 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     else:
         num_warmup = topo.pipe_size - topo.pipe_rank - 1
 
-    commander = PipeCommander(topo, num_micros=num_micro_batches,\
+    commander = PipeCommander(topo,input_generator=preprocess_func(model, data_iterator), num_micros=num_micro_batches,\
                                 num_warmup=num_warmup, forward_only=False, \
                                 interleaving_size=interleaving_size, \
-                                data_iterator=data_iterator)
+                                )
     inps = []
     outputs = []
     logger.info("num_warmup: {}".format(num_warmup))

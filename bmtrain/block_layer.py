@@ -64,6 +64,7 @@ class Block(torch.nn.Module):
     def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3, initialize_param=True, mode="BLOCK"):
         super().__init__()
         self._module = inner_module
+        self._module._in_block = True
         self._inputs = None
         self._layer_dict = {}
         self._forward_block_ctx = None
@@ -276,8 +277,8 @@ class Block(torch.nn.Module):
         return post_out
 
     def forward(self, *args): 
+        
         arg_list = self.pre_hook(*args)
-
         if self.all_input_no_grad and not self.all_param_no_grad:
             placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
             return hook_func.OneStepNoGradFunc.apply(self, placeholder, *arg_list)
@@ -620,6 +621,7 @@ class TransformerBlockList(torch.nn.Module):
             return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
 
 class PipeDreamBlockList(TransformerBlockList):
+    
     def __init__(self, modules: Iterable[Block], num_hidden=1, sqrt=False) -> None:
         module_dict = {}
         mode = "1F1B"
@@ -642,3 +644,9 @@ class PipeDreamBlockList(TransformerBlockList):
         start = sum(part_lens[:pipe_rank+1])
         end = start + part_lens[pipe_rank+1]
         return start,end
+
+    def get_embedding(self):
+        assert config["topology"].pipe_rank == 0
+        return self._modules[str(0)]
+
+        
