@@ -142,7 +142,7 @@ class StagePreFunction(torch.autograd.Function):
             current_stream = torch.cuda.current_stream()
             with torch.cuda.stream(config['pp_comm_stream']):
                 config['pp_comm_stream'].wait_stream(current_stream) 
-                send_data.record_stream(current_stream)
+                send_data.record_stream(config['pp_comm_stream'])
                 send_activations(send_data, ctx.pipe_rank - 1, config['pipe_comm'])
         return grad_outputs, None
 
@@ -157,7 +157,7 @@ class StagePostFunction(torch.autograd.Function):
             current_stream = torch.cuda.current_stream()
             with torch.cuda.stream(config['pp_comm_stream']):
                 config['pp_comm_stream'].wait_stream(current_stream) 
-                send_data.record_stream(current_stream)
+                send_data.record_stream(config['pp_comm_stream'])
                 send_activations(send_data.detach(), pipe_rank + 1, config['pipe_comm'])
         return outputs
         
@@ -202,6 +202,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
         module_dict = {}
         for idx, module in enumerate(modules):
             module = _block_wrapper(module, module_dict, "PIPE")
+            module._zero_level = 2 #currently, only support ZeRO-2 in pipeline mode
             self._modules[str(idx)] = module
 
         self.layer_ids = self.get_range_by_pipe_rank(self.pipe_rank)
