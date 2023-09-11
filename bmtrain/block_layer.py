@@ -96,7 +96,7 @@ class Block(torch.nn.Module):
         self._initialized = True
         self._need_release = False
 
-    def init_param_storage(self, throw=False):
+    def init_param_storage(self):
         # sort parameters by name
         ordered_parameters = list(self._module.named_parameters())
 
@@ -192,8 +192,6 @@ class Block(torch.nn.Module):
             # make parameter contiguous in storage
             with torch.no_grad():
                 contiguous_param = OpAllGather.apply(param)
-                if throw:
-                    continue
             if not (param_st >= storage_end or param_end <= storage_st):
                 # copy offset in parameter storage
                 offset_st = max(storage_st - param_st, 0)
@@ -218,8 +216,6 @@ class Block(torch.nn.Module):
                 param.data = torch.tensor([], dtype=param.dtype, device=param.device)
             # clear parameter data, but keep the dtype and device
             setattr(param, "_in_block", True)
-        if throw:
-            return 
         for kw in offsets.keys():
             assert offsets[kw] == self._storage_info[kw]["total"]
 
@@ -631,16 +627,24 @@ class PipeDreamBlockList(TransformerBlockList):
         partition_module = []
         for idx,m in enumerate(modules):
             if idx>=s and idx<e:
+                print(idx)
                 m.init_param_storage()
                 partition_module.append(m)
             else:
-                m.init_param_storage(throw=True)
+                m.init_param_storage()
+                del m
+        if  config['topology'].pipe_rank == 0:
+            self.no_emb_forward = True
+        else:
+            self.no_emb_forward = False
         super().__init__(partition_module, num_hidden, mode=mode)
 
     def forward(self, *args, return_hidden_states = False):
         self.return_hidden_states = return_hidden_states
         hidden_states = []
-        for i in range(1, len(self)):
+        for i in range(len(self)):
+            if i == 0 and self.no_emb_forward:
+                continue
             if return_hidden_states:
                 for hidden_state in args[:self.num_hidden]:
                     hidden_states.append(hidden_state)
@@ -659,6 +663,7 @@ class PipeDreamBlockList(TransformerBlockList):
             return outputs + tuple(hidden_states)
         else:
             return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
+
 
     def partition(self,modules):
         pipe_size = config["topology"].pipe_size

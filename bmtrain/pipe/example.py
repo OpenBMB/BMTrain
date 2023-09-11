@@ -9,40 +9,43 @@ def generate(iters):
         inp = (torch.randint(0,1024,size=(12,1024),device="cuda", dtype=torch.int32),)
         yield inp
 data_loader = iter(generate(100*16))
+iters=10
+dtype=torch.half
 
 def test_pipe():
     bmt.init_distributed(seed=42, pipe_size=4)
-    models = [bmt.nn.PipeEmbedding(1024,128,dtype=torch.float16)]
+    models = [bmt.nn.PipeEmbedding(1024,128,dtype=dtype)]
     for i in range(11):
-        models.append(bmt.nn.Linear(128,128,dtype=torch.float16))
-    # print(models[0].weight)
+        models.append(bmt.nn.Linear(128,128,dtype=dtype))
     bmt.init_parameters(models)
     models = bmt.PipeDreamBlockList(models)
+    optimizer = bmt.optim.AdamOptimizer(models.parameters(), lr=0.001)
     start = time.time()
-    for i in range(1):
+    for i in range(iters):
         pipeline_forward_backward(models,  data_loader, 12*16)
-    if bmt.config['topology'].pipe_rank == 0:
-        print(models['0'].weight.grad)
+        if bmt.config['topology'].pipe_rank == 0:
+            print(models['0'].weight.grad)
+        optimizer.step()
     t = time.time() - start
-    print(t)
 
 def test_dp():
     bmt.init_distributed(seed=42, pipe_size=1)
-    models = [bmt.nn.PipeEmbedding(1024,128,dtype=torch.float16)]
+    models = [bmt.nn.PipeEmbedding(1024,128,dtype=dtype)]
     for i in range(11):
-        models.append(bmt.nn.Linear(128,128,dtype=torch.float16))
+        models.append(bmt.nn.Linear(128,128,dtype=dtype))
     bmt.init_parameters(models)
     models = bmt.TransformerBlockList(models)
-    for iter in range(1):
-        loss = 0
+    optimizer = bmt.optim.AdamOptimizer(models.parameters(), lr=0.001)
+    for it in range(iters):
         for i in range(16):
-            loss_tmp = models(*next(data_loader))
+            inp = next(data_loader)
+            loss_tmp = models(*inp)
             loss_tmp = loss_tmp.mean()
-            print(loss_tmp.item())
-            loss += loss_tmp
-        print(loss)
-        loss.backward()
-    print(models['0'].weight.grad)
+            loss_tmp.backward()
+
+        print(models['0'].weight.grad)
+        optimizer.step()
+    
 if __name__ == "__main__":
     if sys.argv[1] == "dp":
         print("dp")

@@ -24,7 +24,7 @@ def groupcall():
     yield
     groupEnd()
 
-def send_activations_list(hidden_state_list, next_rank, comm, async_op=True):
+def send_activations_list(hidden_state_list, next_rank, comm, async_op=False):
     if async_op:
         current_stream = torch.cuda.current_stream()
         with torch.cuda.stream(config["pp_comm_stream"]):
@@ -34,7 +34,7 @@ def send_activations_list(hidden_state_list, next_rank, comm, async_op=True):
             ncclSend(length.storage(), next_rank, comm)
             for i in range(len(hidden_state_list)):
                 if hidden_state_list[i] is None:
-                    continue
+                    hidden_state_list[i] = torch.tensor([12306],dtype=torch.int,device="cuda")
                 hidden_state_list[i].record_stream(config["pp_comm_stream"])
                 send_activations(hidden_state_list[i], next_rank, comm)
     else:
@@ -50,7 +50,12 @@ def recv_activations_list(prev_rank, comm):
     hidden_state_list = []
     ncclRecv(length.storage(), prev_rank, comm)
     for i in range(length[0].item()):
-        hidden_state_list.append(recv_activations(prev_rank, comm))
+        recv = recv_activations(prev_rank, comm)
+        if len(recv.shape) == 1 and recv.shape[0] == 1 and recv.item() == 12306:
+            hidden_state_list.append(None)
+        else:
+            hidden_state_list.append(recv)
+
     return hidden_state_list
 
 

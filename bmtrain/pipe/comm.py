@@ -1,5 +1,5 @@
 import torch
-from bmtrain.distributed.ops import send_activations_list, recv_activations_list, send_activations, recv_activations, groupcall
+from bmtrain.distributed.ops import send_activations_list, recv_activations_list, send_activations, recv_activations, groupcall,all_reduce
 from bmtrain.global_var import config
 from collections.abc import Iterable
 class PipeCommander:
@@ -10,7 +10,12 @@ class PipeCommander:
         self.num_warmup = num_warmup
         self.forward_only = forward_only
         self.interleaving_size = interleaving_size
-    
+
+    def param_reduce(self, module):
+        for name, param in module.named_parameters():
+            p = all_reduce(param, "sum", config["pipe_tied_comm"])
+            param.data = p
+
     def get_data(self):
         assert config["topology"].pipe_rank == 0
         micro_batch = next(self.input_generator) 
@@ -19,22 +24,22 @@ class PipeCommander:
 
     def send_next(self, tensors):
         if not self.is_last_stage():
-            if not isinstance(tensors, list):
+            if not isinstance(tensors, Iterable):
                 tensors = [tensors]
-            send_activations_list(tensors, self.topo.pipe_rank + 1, config["pipe_comm"])
+            send_activations_list(tensors, self.topo.pipe_rank + 1, config["pipe_comm"], async_op=True)
     
     def send_prev(self, tensors):
         if not self.is_first_stage():
-            if not isinstance(tensors, list):
+            if not isinstance(tensors, Iterable):
                 tensors = [tensors]
-            send_activations_list(tensors, self.topo.pipe_rank - 1, config["pipe_comm"])
+            send_activations_list(tensors, self.topo.pipe_rank - 1, config["pipe_comm"], async_op=True)
 
     def recv_prev(self, need_data=False):
         if not self.is_first_stage():
             res = recv_activations_list(self.topo.pipe_rank - 1, config["pipe_comm"])
-            for t in res:
-                t.requires_grad_()
-                
+            for idx,tensor in enumerate(res):
+                if idx == 0:
+                    tensor.requires_grad_()
             return res
         else:
             if need_data:

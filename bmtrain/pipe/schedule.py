@@ -2,9 +2,9 @@ import sys
 from bmtrain.global_var import  config
 from bmtrain.loss import FusedCrossEntropy
 import bmtrain as bmt
-from comm import PipeCommander
+from .debug import get_logger
+from .comm import PipeCommander
 import torch
-from debug import get_logger
 import logging
 from typing import Iterable
 def backward_step(inp, output, grad_output):
@@ -42,32 +42,17 @@ def backward_step(inp, output, grad_output):
     return input_grad 
 
 def forward_func(model, inp, micro_idx):
-    if not isinstance(inp, list):
-        inp = [inp]
     if config["topology"].pipe_rank == config["topology"].pipe_size - 1:
-        output = model(*inp)
-        config['logger'].info("inp shape: {}".format(output.shape))
-        loss = output.mean()
+        loss = model(*inp)
         config['logger'].info("loss: {}".format(loss.item()))
          
         return loss
     else:
         hidden_state = model(*inp)
-        if not isinstance(hidden_state, list):
+        config['logger'].info("inp shape: {}".format(hidden_state[0].shape))
+        if not isinstance(hidden_state, Iterable):
             hidden_state = [hidden_state]
         return hidden_state
-
-def preprocess_func(model, data_iter):
-
-    while True:
-        try:
-            inp = next(data_iter)
-            print(type(inp))
-        except StopIteration:
-            break
-        input_ids = inp[0]
-        embed = model.get_embedding()
-        yield embed(input_ids), *inp[1:]
 
 def pipeline_forward_backward(model, data_iterator, global_batch_size, interleaving_size=1):
     """Forward and backward the pipeline model.
@@ -82,14 +67,13 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     """
 
     # forwrad unpack
-    optimizer = bmt.optim.AdamOptimizer(model.parameters(), lr=0.001)
-    micro_batch_size = 12
+    micro_batch_size = 2
     assert global_batch_size % micro_batch_size == 0, "The global batch size must be divisible by the micro batch size"
     num_micro_batches = global_batch_size // micro_batch_size
     assert (num_micro_batches) % config["pipe_size"] == 0, "The number of micro batches must be divisible by the pipeline size"
     config["micros"] = num_micro_batches
     topo = config["topology"]
-    logger = get_logger(config['rank'], logging.INFO)
+    logger = get_logger(config['rank'], logging.DEBUG)
     config['logger'] = logger
     logger.info("topo: {}".format(topo))
     logger.info("num_micro_batches: {}".format(num_micro_batches))
@@ -103,11 +87,15 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
         num_warmup = num_micro_batches
     else:
         num_warmup = topo.pipe_size - topo.pipe_rank - 1
-
-    commander = PipeCommander(topo,input_generator=preprocess_func(model, data_iterator), num_micros=num_micro_batches,\
+    def generator(data_iterator):
+        yield model.preprocess_func(next(data_iterator))
+    commander = PipeCommander(topo,input_generator=generator(data_iterator), num_micros=num_micro_batches,\
                                 num_warmup=num_warmup, forward_only=False, \
                                 interleaving_size=interleaving_size, \
                                 )
+    # if commander.is_first_stage() or commander.is_last_stage():
+        # module = model.head_layer() if commander.is_first_stage() else model.tail_layer()
+        # commander.param_reduce(module)
     inps = []
     outputs = []
     logger.info("num_warmup: {}".format(num_warmup))
@@ -162,11 +150,6 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
         logger.info("cooling stage")
         for i in range(num_warmup):
             logger.info("{} recv micro grad {}th from next neighbour".format(config['rank'], num_micro_batches - num_warmup + i))
-            # if i == num_warmup - 1:
-                # grad sync
-                # if config.grad_sync_func is None or rank == 0:
-                #     enable_grad_sync()
-
             inp = inps.pop(0)
             output = outputs.pop(0)
 
@@ -178,6 +161,6 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
             logger.info("{} send micro grad {}th to prev neighbour".format(config['rank'], i))
 
             commander.send_prev(input_grad)
-    optimizer.step()
+    bmt.synchronize()
 
     
