@@ -1,4 +1,4 @@
-from .utils import print_block, print_dict, print_rank, see_memory, load_nccl_pypi
+from .utils import print_block, print_dict, print_rank, print_rank_pp, see_memory, load_nccl_pypi
 try:
     from . import nccl
 except:

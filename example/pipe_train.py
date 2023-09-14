@@ -70,7 +70,7 @@ def main():
     avg_time_recorder = bmt.utils.AverageRecorder()
     avg_loss_recorder = bmt.utils.AverageRecorder()
     bmt.init_parameters(model)
-    for iteration in range(1000):
+    for iteration in range(1):
         # load data
         st = time.time()
         global_loss = pipeline_forward_backward(model, data_loader(), batch_size) 
@@ -93,21 +93,23 @@ def main():
 
         # record time and loss
         iteration_time = time.time() - st
-
-        avg_time_recorder.record(iteration_time)
-        avg_loss_recorder.record(global_loss)
-
+        # avg_time_recorder.record(iteration_time)
+        # avg_loss_recorder.record(global_loss)
+        if global_loss is not None:
+            print(global_loss)
+        # print("hello")
         # print time and loss
-        bmt.print_rank(
-            "| Iter: {:6d} | loss: {:.4f} average_loss: {:.4f} | lr: {:.4e} scale: {:10.4f} | time: {:.4f}".format(
-                iteration,
-                global_loss,
-                avg_loss_recorder.value,
-                lr_scheduler.current_lr,
-                optim_manager.loss_scale,
-                avg_time_recorder.value
-            )
-        )
+        # if config['topology'].pipe_rank == config['topology'].pipe_size - 1:
+        #     bmt.print_rank_pp(
+        #         "| Iter: {:6d} | loss: {:.4f} average_loss: {:.4f} | lr: {:.4e} scale: {:10.4f} | time: {:.4f}".format(
+        #             iteration,
+        #             global_loss,
+        #             avg_loss_recorder.value,
+        #             lr_scheduler.current_lr,
+        #             optim_manager.loss_scale,
+        #             avg_time_recorder.value
+        #         ), pipe_rank=config['pipe_size'] - 1
+        #     )
 
     
 

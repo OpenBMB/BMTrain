@@ -581,7 +581,7 @@ class TransformerBlockList(torch.nn.Module):
 
         self._modules[str(0)]._is_first_layer = True
         self._modules[str(len(modules)-1)]._is_last_layer = True
-    
+        self.module_dict = module_dict 
         self.num_hidden = num_hidden
             
     def __len__(self) -> int:
@@ -624,10 +624,11 @@ class PipeDreamBlockList(TransformerBlockList):
         for idx in range(len(modules)):
            modules[idx] = _block_wrapper(modules[idx], module_dict, mode=mode, zero_level=2) 
         s,e = self.partition(modules)
+        self.head_idx = 0
+        self.tail_idx = e-s-1
         partition_module = []
         for idx,m in enumerate(modules):
             if idx>=s and idx<e:
-                print(idx)
                 m.init_param_storage()
                 partition_module.append(m)
             else:
@@ -642,7 +643,7 @@ class PipeDreamBlockList(TransformerBlockList):
     def forward(self, *args, return_hidden_states = False):
         self.return_hidden_states = return_hidden_states
         hidden_states = []
-        for i in range(len(self)):
+        for i in range(self.head_idx, self.tail_idx+1):
             if i == 0 and self.no_emb_forward:
                 continue
             if return_hidden_states:
@@ -665,7 +666,7 @@ class PipeDreamBlockList(TransformerBlockList):
             return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
 
 
-    def partition(self,modules):
+    def partition(self, modules):
         pipe_size = config["topology"].pipe_size
         pipe_rank = config["topology"].pipe_rank
         part_lens = [0]+[len(modules) // pipe_size + (i < (len(modules) % pipe_size)) for i in range(pipe_rank+1)]
@@ -673,8 +674,33 @@ class PipeDreamBlockList(TransformerBlockList):
         end = start + part_lens[pipe_rank+1]
         return start,end
 
-    def get_embedding(self):
-        assert config["topology"].pipe_rank == 0
-        return self._modules[str(0)]
-
+    def add_head(self, module):
+        module = _block_wrapper(module, self.module_dict, mode="1F1B")
+        module.init_param_storage()
+        if config['topology'].pipe_rank != 0:
+            return
+        lens = len(self)
+        self.head_idx += 1
+        self.tail_idx += 1
+        for i in range(len(self), 0, -1):
+            self._modules[str(i)] = self._modules[str(i-1)]
+            self.add_module(str(i), self._modules[str(i-1)])
+        self._modules['0'] = module
+        self.add_module('0', module)
+        self._modules['1'].set_pre_module(module)
+        self._modules['0'].set_pre_module(None)
+        self._modules['1']._is_first_layer = False
+        self._modules['0']._is_first_layer = True
+    
+    def add_tail(self, module):
+        module = _block_wrapper(module, self.module_dict, mode="1F1B")
+        module.init_param_storage()
+        if config['topology'].pipe_rank != config['topology'].pipe_size - 1:
+            return
+        lens = len(self)
+        self._modules[str(lens)] = module
+        self.add_module(str(lens), module)
+        self._modules[str(lens)].set_pre_module(self._modules[str(lens-1)])
+        self._modules[str(lens-1)]._is_last_layer = False
+        self._modules[str(lens)]._is_last_layer = True
         

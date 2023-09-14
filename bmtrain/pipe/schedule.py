@@ -7,6 +7,21 @@ from .comm import PipeCommander
 import torch
 import logging
 from typing import Iterable
+def obj_str(objs):
+    string = ""
+    for o in objs:
+        if isinstance(o, torch.Tensor):
+            string += repr(o.shape)
+        elif o is None:
+            string += "None" 
+        else:
+            string += repr(o)
+
+        string += " ,"
+    return string.rstrip(",")
+        
+
+
 def backward_step(inp, output, grad_output):
     """Backward step through passed-in output tensor.
 
@@ -21,13 +36,15 @@ def backward_step(inp, output, grad_output):
     for x in inp:
         if x is not None and x.requires_grad:
             x.retain_grad()
-    if not isinstance(output, list):
+    if not isinstance(output, Iterable):
         output = [output]
-    if not isinstance(grad_output, list):
+    if not isinstance(grad_output, Iterable):
         grad_output = [grad_output]
     #TODO scale the grad
     # if output_tensor_grad[0] is None and config.grad_scale_func is not None:
     #     output_tensor[0] = config.grad_scale_func(output_tensor[0])
+    config['logger'].debug(obj_str(grad_output))
+    # config['logger'].debug(obj_str(output))
     torch.autograd.backward(output[0], grad_tensors=grad_output[0])
 
     input_grad = [None]
@@ -44,16 +61,18 @@ def backward_step(inp, output, grad_output):
 def forward_func(model, inp, micro_idx):
     if config["topology"].pipe_rank == config["topology"].pipe_size - 1:
         loss = model(*inp)
+        global global_loss
+        global_loss += loss
         config['logger'].info("loss: {}".format(loss.item()))
          
-        return loss
+        return [loss]
     else:
         hidden_state = model(*inp)
         config['logger'].info("inp shape: {}".format(hidden_state[0].shape))
         if not isinstance(hidden_state, Iterable):
             hidden_state = [hidden_state]
         return hidden_state
-
+global_loss = 0
 def pipeline_forward_backward(model, data_iterator, global_batch_size, interleaving_size=1):
     """Forward and backward the pipeline model.
 
@@ -67,14 +86,20 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     """
 
     # forwrad unpack
+    global global_loss 
+    global_loss = 0
     micro_batch_size = 2
     assert global_batch_size % micro_batch_size == 0, "The global batch size must be divisible by the micro batch size"
     num_micro_batches = global_batch_size // micro_batch_size
     assert (num_micro_batches) % config["pipe_size"] == 0, "The number of micro batches must be divisible by the pipeline size"
     config["micros"] = num_micro_batches
     topo = config["topology"]
-    logger = get_logger(config['rank'], logging.DEBUG)
-    config['logger'] = logger
+    
+    logger = config['logger']
+    
+    logger.info("model arch {}".format(model))
+    logger.info("model partition s: {} , e: {} ".format(model.transformers.head_idx,model.transformers.tail_idx))
+    logger.info("model length:{}".format(str(len(model.transformers))))
     logger.info("topo: {}".format(topo))
     logger.info("num_micro_batches: {}".format(num_micro_batches))
     logger.info("micro_batch_size: {}".format(micro_batch_size))
@@ -88,7 +113,12 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     else:
         num_warmup = topo.pipe_size - topo.pipe_rank - 1
     def generator(data_iterator):
-        yield model.preprocess_func(next(data_iterator))
+        while True:
+            try:
+                yield model.preprocess_func(next(data_iterator))
+            except StopIteration:
+                break
+
     commander = PipeCommander(topo,input_generator=generator(data_iterator), num_micros=num_micro_batches,\
                                 num_warmup=num_warmup, forward_only=False, \
                                 interleaving_size=interleaving_size, \
@@ -117,10 +147,13 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
 
     for micro in range(num_micro_batches - num_warmup):
         output = forward_func(model, inp, micro + num_warmup)
+        logger.debug("output :{}".format(obj_str(output)))
         logger.info("{} micro forward".format(micro+num_warmup))
+        logger.debug("send forward and recv backward")
         grad_output = commander.send_forward_recv_backward(output)
         inps.append(inp)
         outputs.append(output)
+        logger.debug("grad output :{}".format(obj_str(grad_output)))
         logger.info("{} send micro hidden state {}th to next neighbour and recv micro grad {} from next neighbour".format(config['rank'], micro + num_warmup, micro))
         logger.debug("inp shape: {}".format(inp[0].shape))
         if not commander.is_last_stage():
@@ -138,8 +171,10 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
             commander.send_prev(inp_grad)
             logger.info("{} send micro grad {}th to prev neighbour".format(config['rank'], micro + num_warmup))
         else:
+            logger.debug("grad inp :{}".format(obj_str(inp_grad)))
             if inp_grad[0] is not None:
                 logger.debug("inp_grad shape: {}".format(inp_grad[0].shape))
+            logger.debug("send backward and recv forward")
             inp = commander.send_backward_recv_forward(inp_grad, need_data=True)
             logger.debug("inp type: {}".format(type(inp)))
             logger.debug("inp shape: {}".format(inp[0].shape))
@@ -162,5 +197,6 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
 
             commander.send_prev(input_grad)
     bmt.synchronize()
+    return global_loss
 
     

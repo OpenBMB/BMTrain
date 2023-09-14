@@ -36,7 +36,7 @@ class GPTPipe(bmt.DistributedModule):
             word_emb = bmt.nn.PipeEmbedding(vocab_size, dim_model, dtype=dtype)
         pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
         # self.inp_emb = InputWrapper([word_emb, pos_emb])
-        blocklist = [word_emb]
+        blocklist = []
         blocklist += [
                 TransformerEncoder(
                     dim_model, dim_head, num_heads, dim_ff, bias, dtype
@@ -46,9 +46,15 @@ class GPTPipe(bmt.DistributedModule):
         self.transformers = bmt.PipeDreamBlockList(
             blocklist,
         )
-        if config['topology'].pipe_rank == config['topology'].pipe_size - 1:
-            self.word_emb = word_emb
+        self.transformers.add_tail(layernorm)
+        self.transformers.add_tail(word_emb)
+        self.transformers.add_head(word_emb)
+        self.transformers.add_head(pos_emb)
 
+        if config['topology'].pipe_rank == config['topology'].pipe_size - 1:
+            self.word_emb = self.transformers[str(len(self.transformers) - 1)]
+            print(self.word_emb._module.__class__.__name__)
+            print(self.transformers.head_idx, self.transformers.tail_idx, config['topology'].pipe_rank)
         if config['tp_size'] > 1:
             self.loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=True)
         else:
@@ -69,16 +75,19 @@ class GPTPipe(bmt.DistributedModule):
             if config['tp_size'] > 1:
                 logits = self.word_emb.projection(out)
             else:
-                logits = self.word_emb(out, projection=True)
-
+                logits = self.word_emb(out, True)
+            logits = logits.float().view(-1, logits.shape[-1])
+            target = target.view(-1)
             return self.loss_func(logits, target)
         else:
             return out, pos, mask, target
-
     def preprocess_func(self, inp):
         if config['topology'].pipe_rank == 0:
-            inp_pos = inp[:1]
-            return self.transformers['0'](*inp_pos), *inp[1:]
+            inp_id = inp[0]
+            pos = inp[1]
+            output =torch.randn((2,512,2560),dtype=torch.float16,device="cuda")
+            # return self.transformers['0'](inp_id)+self.transformers['1'](pos), *inp[1:]
+            return output, *inp[1:]
         else:
             return None
         
