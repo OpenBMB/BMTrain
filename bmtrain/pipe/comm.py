@@ -19,7 +19,6 @@ class PipeCommander:
     def get_data(self):
         assert config["topology"].pipe_rank == 0
         micro_batch = next(self.input_generator) 
-        config['logger'].debug("Input id ",micro_batch)
         assert isinstance(micro_batch, Iterable)
         return list(micro_batch)
 

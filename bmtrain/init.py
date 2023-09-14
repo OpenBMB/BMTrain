@@ -17,7 +17,7 @@ def init_distributed(
         pipe_size: int = -1,
         num_micro_batches: int = None,
         tp_size : int = 1,
-        debug_level="DEBUG",
+        debug=False,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -84,7 +84,8 @@ def init_distributed(
     config["zero_rank"] = config['topology'].get_group_rank("zero")
     config["tp_rank"] = config['topology'].get_group_rank("tp")
     config["tp_zero_rank"] = config['topology'].get_group_rank("tp_zero")
-    config["logger"] = get_logger(rank, debug_level)
+    if debug:
+        config["logger"] = get_logger(rank, "DEBUG")
     cpus_this_worker = None
     
     all_available_cpus = sorted(list(os.sched_getaffinity(0)))

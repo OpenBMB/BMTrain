@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 import bmtrain as bmt
-import inspect
+
 
 class Embedding(bmt.DistributedModule):
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
@@ -77,13 +77,11 @@ class Embedding(bmt.DistributedModule):
 
     def forward(self, input: torch.Tensor, projection : bool = False) -> torch.Tensor:
         if not projection:
-            out = F.embedding(
+            return F.embedding(
                 input, self.weight, self.padding_idx, self.max_norm,
                 self.norm_type, self.scale_grad_by_freq, self.sparse)
-            return out
         else:
-            out = F.linear(input, self.weight)
-            return out
+            return F.linear(input, self.weight) / math.sqrt(self.embedding_dim)
 
     def extra_repr(self) -> str:
         s = '{num_embeddings}, {embedding_dim}'

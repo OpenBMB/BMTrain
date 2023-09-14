@@ -115,7 +115,9 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     def generator(data_iterator):
         while True:
             try:
-                yield model.preprocess_func(next(data_iterator))
+                inp = next(data_iterator)
+                logger.debug("Input id {}".format(inp))
+                yield model.preprocess_func(inp)
             except StopIteration:
                 break
 

@@ -12,6 +12,7 @@ def main():
         seed=0,
         tp_size=1,
         pipe_size=4,
+        debug=True
     )
 
     model = GPTPipe(
