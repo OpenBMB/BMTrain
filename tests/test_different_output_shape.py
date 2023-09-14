@@ -33,18 +33,18 @@ if __name__ == "__main__":
     bmt.init_distributed()
     x = torch.tensor([1,2,3.])
 
-    b = bmt.CheckpointBlock(Block0())
+    b = bmt.Block(Block0())
     y = b(x)
     assert isinstance(y, torch.Tensor)
 
-    b = bmt.CheckpointBlock(Block1())
+    b = bmt.Block(Block1())
     y = b(x)
     assert isinstance(y, tuple) and len(y)==1
 
-    b = bmt.CheckpointBlock(Block2())
+    b = bmt.Block(Block2())
     y = b(x)
     assert isinstance(y, tuple) and len(y)==2
 
-    b = bmt.CheckpointBlock(Block10())
+    b = bmt.Block(Block10())
     y = b(x)
     assert isinstance(y, tuple) and len(y)==10

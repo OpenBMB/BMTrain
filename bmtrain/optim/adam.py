@@ -40,8 +40,9 @@ class AdamOptimizer(torch.optim.Optimizer):
                 if p in self.state:
                     state = self.state[p]
                     if len(state) > 0:
-                        state['exp_avg'] *= delta
-                        state['exp_avg_sq'] *= delta
+                        if p.dtype == torch.float16:
+                            state['exp_avg'] *= delta
+                            state['exp_avg_sq'] *= delta
 
     @torch.no_grad()
     def step(self, closure=None, scale=1):
@@ -63,45 +64,32 @@ class AdamOptimizer(torch.optim.Optimizer):
                 if p.grad is not None and p.requires_grad:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-                    if p.dtype not in [torch.float16, torch.float32]:
-                        raise RuntimeError('Adam only supports fp32 or fp16 gradients')
+                    if p.dtype not in [torch.float32, torch.half, torch.bfloat16]:
+                        raise RuntimeError('Adam only supports fp32, fp16 and bf16 gradients')
 
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
                         state['step'] = 0
                         # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.zeros(p.size(), dtype=p.dtype, device=p.device) # on device
+                        if p.dtype == torch.float16:
+                            state['exp_avg'] = torch.zeros(p.size(), dtype=torch.float16, device=p.device) # on device
+                        else:
+                            state['exp_avg'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device) # on device
                         # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device)   # on device
-
-                        if p.dtype == torch.half:
+                        state['exp_avg_sq'] = torch.zeros(p.size(), dtype=torch.float32, device=p.device)# on device
+                  
+                        if p.dtype != torch.float32:
                             state['_param_fp32'] = torch.empty(p.size(), dtype=torch.float32, device=p.device)   # on device
                             state['_param_fp32'].copy_(p)
 
                     # update the steps for each param group update
-                    state['step'] += 1
-
                     if ('maximize' in group) and (group['maximize'] is True):
                         grad = -p.grad
                     else:
                         grad = p.grad
                         
-                    if p.dtype == torch.half:
-                        F.adam(
-                            state["_param_fp32"],    # fp32
-                            p,                      # fp16
-                            grad,                 # fp16
-                            state['exp_avg'],       # fp16: m
-                            state["exp_avg_sq"],    # fp32: v
-                            group['betas'][0], group['betas'][1],
-                            group['eps'],
-                            0.0 if state["step"] <= self._hold_steps else group['lr'],
-                            scale,
-                            group['weight_decay'],
-                            state['step']
-                        )
-                    else:
+                    if p.dtype == torch.float32:
                         other_kwargs = {}
                         if 'maximize' in inspect.signature(torch.optim._functional.adam).parameters:
                             other_kwargs['maximize'] = False
@@ -116,11 +104,30 @@ class AdamOptimizer(torch.optim.Optimizer):
                             amsgrad=False,
                             beta1=group['betas'][0],
                             beta2=group['betas'][1],
-                            lr=0.0 if state["step"] <= self._hold_steps else group['lr'],
+                            lr=0.0 if state["step"] < self._hold_steps else group['lr'],
                             weight_decay=group['weight_decay'],
                             eps=group['eps'],
                             **other_kwargs
                         )
+                        state['step'] += 1
+                    else:
+                        f = F.adam_fp16 if p.dtype == torch.float16 else F.adam_bf16
+                        state['step'] += 1
+                        f(
+                            state["_param_fp32"],    # fp32
+                            p,                      # fp16
+                            grad,                 # fp16
+                            state['exp_avg'],       # fp16: m
+                            state["exp_avg_sq"],    # fp32: v
+                            group['betas'][0], group['betas'][1],
+                            group['eps'],
+                            0.0 if state["step"] < self._hold_steps else group['lr'],
+                            scale,
+                            group['weight_decay'],
+                            state['step']
+                        )
+
+
 
         return loss
 
@@ -159,11 +166,11 @@ class AdamOptimizer(torch.optim.Optimizer):
             if k in id_map:
                 param = id_map[k]
 
-                if param.dtype == torch.half and "_param_fp32" not in v:
+                if param.dtype != torch.float32 and "_param_fp32" not in v:
                     v["_param_fp32"] = torch.empty(param.size(), dtype=torch.float32, device=param.device)
                     v["_param_fp32"].copy_(param)
 
-                for name, dtype in [("exp_avg", param.dtype), ("exp_avg_sq", torch.float32), ("_param_fp32", torch.float32)]:
+                for name, dtype in [("exp_avg", torch.float16 if param.dtype == torch.float16 else torch.float32), ("exp_avg_sq", torch.float32), ("_param_fp32", torch.float32)]:
                     if name in v:
                         v[name] = v[name].to(param.device).to(dtype)
 

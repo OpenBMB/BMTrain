@@ -17,7 +17,7 @@ class OutterModule(bmt.DistributedModule):
         super().__init__()
 
         self.blk = bmt.TransformerBlockList([
-            bmt.CheckpointBlock(InnerModule())
+            bmt.Block(InnerModule())
             for _ in range(5)
         ])
     

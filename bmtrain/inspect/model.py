@@ -1,7 +1,7 @@
 import torch
 from ..store import broadcast_object
 from ..pipe_layer import PipelineTransformerBlockList
-from ..block_layer import CheckpointBlock
+from ..block_layer import Block
 from ..parameter import DistributedParameter
 from .. import nccl
 from ..global_var import config
@@ -63,13 +63,13 @@ def inspect_pipeline_transformer_block_list(pipe_model: PipelineTransformerBlock
                 nccl.allGather(
                     model._storage_params[kw].storage(),
                     _param_buffer[kw],
-                    config["zero_comm"]
+                    val["zero_comm"]
                 )
                 if model._storage_params[kw].grad is not None:
                     nccl.allGather(
                         model._storage_params[kw].grad.storage(),
                         _grad_buffer[kw],
-                        config["zero_comm"]
+                        val["zero_comm"]
                     )
 
             nccl.groupEnd()
@@ -117,7 +117,7 @@ def inspect_pipeline_transformer_block_list(pipe_model: PipelineTransformerBlock
     return ret
 
 
-def inspect_checkpoint_block(model : CheckpointBlock, param_name : str, prefix : str = ''):
+def inspect_block(model : Block, param_name : str, prefix : str = ''):
     # fast check
     pass_fast_check = False
     for param in model._param_info:
@@ -210,8 +210,8 @@ def inspect_model(model : torch.nn.Module, param_name : str, prefix : str = ''):
     """
     if isinstance(model, PipelineTransformerBlockList):
         return inspect_pipeline_transformer_block_list(model, param_name, prefix)
-    elif isinstance(model, CheckpointBlock):
-        return inspect_checkpoint_block(model, param_name, prefix)
+    elif isinstance(model, Block):
+        return inspect_block(model, param_name, prefix)
     else:
         ret = []
         for name, param in model._parameters.items():
@@ -220,6 +220,8 @@ def inspect_model(model : torch.nn.Module, param_name : str, prefix : str = ''):
                     p = _gather_value(param.data, param.storage().size(), param._original_shape)
                 else:
                     p = param
+                if p is None:
+                    continue
                 stats = {
                     'name': prefix + name,
                     'shape': tuple(p.size()),

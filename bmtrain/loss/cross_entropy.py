@@ -1,6 +1,10 @@
 from typing import Optional
 import torch
 from . import _function as F
+from bmtrain.nn import parallel_cross_entropy_func
+from bmtrain.global_var import config
+from bmtrain.distributed import all_gather
+
 class OpFusedCrossEntropy(torch.autograd.Function):
     """
     CrossEntropy dim = 1
@@ -30,36 +34,6 @@ class OpFusedCrossEntropy(torch.autograd.Function):
             softmax,
             ctx.ignore_index,
         )
-        return (softmax, None, None)
-
-class OpFusedCrossEntropyInplace(torch.autograd.Function):
-    """
-    CrossEntropy dim = 1
-    """
-    @staticmethod
-    def forward(ctx, x : torch.Tensor, target : torch.Tensor, ignore_index: int):
-        assert x.ndim == 2
-        out = torch.empty(x.size(0), device=x.device, dtype=torch.float)
-        F.cross_entropy_forward_inplace(
-            x.size(0), x.size(1),
-            x, target,
-            out,
-            ignore_index,
-        ) # x is inplace modify to softmax result
-        ctx.ignore_index = ignore_index
-        ctx.save_for_backward(x, target)
-        return out # float tensor
-        
-    @staticmethod
-    def backward(ctx, grad_output : torch.Tensor):
-        grad_output = grad_output.contiguous()
-        softmax, target = ctx.saved_tensors
-        F.cross_entropy_backward_inplace(
-            softmax.size(0), softmax.size(1),
-            grad_output, target,
-            softmax,
-            ctx.ignore_index,
-        ) # softmax is inplace modify to grad_input
         return (softmax, None, None)
 
 class FusedCrossEntropy(torch.nn.Module):
@@ -176,6 +150,7 @@ class FusedCrossEntropy(torch.nn.Module):
                  reduction: str = 'mean',
                  label_smoothing: float = 0.0, # TODO not supported yet
                  inplace: bool = False,
+                 parallel: bool = False,
                 ) -> None:
         super().__init__()
         self.weight = weight
@@ -183,12 +158,26 @@ class FusedCrossEntropy(torch.nn.Module):
         self.reduction = reduction
         self.label_smoothing = label_smoothing
         self.inplace = inplace
+        self.parallel = parallel
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        if self.inplace:
-            ret = OpFusedCrossEntropyInplace.apply(input, target.int(), self.ignore_index) # return float tensor
+        if self.parallel:
+            target = all_gather(target, comm=config['tp_comm']).flatten(0,1)
+            ret = parallel_cross_entropy_func(input, target.long(), self.ignore_index)
         else:
-            ret = OpFusedCrossEntropy.apply(input, target.int(), self.ignore_index) # return float tensor
+            if input.dtype == torch.float32:
+                return torch.nn.functional.cross_entropy(
+                        input, 
+                        target.long(),
+                        weight=self.weight, 
+                        ignore_index=self.ignore_index, 
+                        reduction=self.reduction,
+                        label_smoothing=self.label_smoothing)
+
+            if self.inplace:
+                ret = OpFusedCrossEntropyInplace.apply(input, target.int(), self.ignore_index) # return float tensor
+            else:
+                ret = OpFusedCrossEntropy.apply(input, target.int(), self.ignore_index) # return float tensor
 
         if self.weight is not None:
             if self.weight.dim() != 1 or self.weight.size(0) != input.size(1):
@@ -199,6 +188,12 @@ class FusedCrossEntropy(torch.nn.Module):
             w = (target != self.ignore_index).int()
 
         ret = w * ret
+
+        if self.parallel and config['tp_size'] > 1:
+            ret_list = ret.chunk(config['tp_size'], dim=0)
+            ret = ret_list[config['topology'].tp_id]
+            w_list = w.chunk(config['tp_size'], dim=0)
+            w = w_list[config['topology'].tp_id]
         
         if self.reduction == "none":
             return ret

@@ -1,6 +1,8 @@
 import torch
 from .parameter import DistributedParameter
+from .global_var import config
 import itertools
+from .utils import tp_split_tensor
 
 class DistributedModule(torch.nn.Module):
     """
@@ -10,8 +12,8 @@ class DistributedModule(torch.nn.Module):
 
     def __getattr__(self, name: str):
         ret = super().__getattr__(name)
-        # gather distributed parameters if not in CheckpointBlock
-        if isinstance(ret, DistributedParameter) and not ret._in_checkpoint_block:
+        # gather distributed parameters if not in bmt.Block
+        if isinstance(ret, DistributedParameter) and not ret._in_block: 
             return ret.gather()
         return ret
     
@@ -30,8 +32,11 @@ class DistributedModule(torch.nn.Module):
         """
         for name, param in self._parameters.items():
             if param is not None:
-                if isinstance(param, DistributedParameter) and not param._in_checkpoint_block:
-                    destination[prefix + name] = param.gather().detach().cpu()  # sync operation
+                if isinstance(param, DistributedParameter):#and not param._in_block:
+                    if param._in_block:
+                        destination[prefix + name] = param.tp_gather().detach().cpu()  # sync operation
+                    else:
+                        destination[prefix + name] = param.gather_all().detach().cpu()  # sync operation
                 else:
                     destination[prefix + name] = param if keep_vars else param.detach().cpu()
         for name, buf in self._buffers.items():
@@ -81,6 +86,7 @@ class DistributedModule(torch.nn.Module):
         for name, param in local_state.items():
             key = prefix + name
             if key in state_dict:
+                tp_mode = param._tp_mode
                 input_param = state_dict[key]
                 if input_param.__class__.__name__ == "DistributedTensorWrapper":
                     input_param = input_param.broadcast()
@@ -98,13 +104,17 @@ class DistributedModule(torch.nn.Module):
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
-                if not is_param_lazy and isinstance(param, DistributedParameter) and input_param.shape != param._original_shape:
+                verify_shape = torch.Size(param._original_shape if not tp_mode else param._tp_original_shape)
+                if not is_param_lazy and isinstance(param, DistributedParameter) and input_param.shape != verify_shape:
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
-                                      .format(key, input_param.shape, param.shape))
+                                      .format(key, input_param.shape, verify_shape))
                 try:
                     with torch.no_grad():
                         if isinstance(param, DistributedParameter):
+                            tp_split_dim = param._tp_split_dim
+                            if tp_mode and tp_split_dim >= 0:
+                                input_param = tp_split_tensor(input_param, tp_split_dim)
                             param._copy_data(input_param)
                         else:
                             param.copy_(input_param)

@@ -1,6 +1,7 @@
 import torch
 import bmtrain as bmt
 from layers import TransformerEncoder, Layernorm, Embedding, TransformerEncoder
+from bmtrain.global_var import config
 
 class GPT(bmt.DistributedModule):
     def __init__(self,
@@ -13,17 +14,31 @@ class GPT(bmt.DistributedModule):
 
         self.max_distance = max_distance
 
-        self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
+        if config['tp_size'] > 1:
+            self.word_emb = bmt.nn.ParallelEmbedding(vocab_size, dim_model, dtype=dtype)
+        else:
+            self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         self.pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
         
-        self.transformers = bmt.TransformerBlockList([
-            bmt.CheckpointBlock(
-                TransformerEncoder(
-                    dim_model, dim_head, num_heads, dim_ff, bias, dtype
+        if config['pipe_size'] > 1:
+            self.transformers = bmt.PipelineTransformerBlockList([
+                bmt.Block(
+                    TransformerEncoder(
+                        dim_model, dim_head, num_heads, dim_ff, bias, dtype
+                    )
+                    , mode="PIPE"
                 )
-            )
-            for _ in range(num_layers)
-        ])
+                for _ in range(num_layers)
+            ])
+        else:
+            self.transformers = bmt.TransformerBlockList([
+                bmt.Block(
+                    TransformerEncoder(
+                        dim_model, dim_head, num_heads, dim_ff, bias, dtype
+                    )
+                )
+                for _ in range(num_layers)
+            ])
 
         self.layernorm = Layernorm(dim_model, dtype=dtype)
 
@@ -42,7 +57,10 @@ class GPT(bmt.DistributedModule):
         out = self.transformers(out, mask_2d, None)
         out = self.layernorm(out)
 
-        logits = self.word_emb(out, projection=True)
+        if config['tp_size'] > 1:
+            logits = self.word_emb.projection(out)
+        else:
+            logits = self.word_emb(out, projection=True)
         bmt.inspect.record_tensor(logits, "logits")
 
         return logits

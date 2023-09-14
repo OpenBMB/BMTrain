@@ -107,6 +107,13 @@ def see_memory(message, detail=False):
         """)
     torch.cuda.reset_peak_memory_stats()
 
+def tp_split_tensor(tensor, split_dim):
+    tensor_list = tensor.chunk(config['tp_size'], dim=split_dim)
+    sub_tensor = tensor_list[config['topology'].tp_id].contiguous()
+    tmp_tensor = torch.empty(sub_tensor.shape, device=sub_tensor.device, dtype=sub_tensor.dtype)
+    tmp_tensor.copy_(sub_tensor)
+    return tmp_tensor
+
 class AverageRecorder:
     """A utility class to record the average value of a quantity over time.
 

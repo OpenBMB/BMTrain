@@ -4,13 +4,13 @@ import torch
 
 from .pipe_layer import PipelineTransformerBlockList
 from .global_var import config
-from .block_layer import CheckpointBlock
+from .block_layer import Block
 from . import nccl
 import io, pickle
 from typing import Mapping
 
 def _save_to_state_dict(model : torch.nn.Module, destination, prefix):
-    if isinstance(model, CheckpointBlock):
+    if isinstance(model, Block):
         if config['rank'] != 0:
             destination = OrderedDict() # creates an temporary ordered dict
             destination._metadata = OrderedDict()

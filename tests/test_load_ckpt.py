@@ -41,7 +41,7 @@ def test_main():
     ckpt_path = "test_ckpt.pt"
     # Transformer BlockList
     m = Linear_Normal(256, 256).cuda()
-    m2 = bmt.TransformerBlockList([bmt.CheckpointBlock(Linear_BMT(256, 256))])
+    m2 = bmt.TransformerBlockList([bmt.Block(Linear_BMT(256, 256))])
     if bmt.rank() == 0:
         torch.save(m.state_dict(), ckpt_path)
     dic2 = m.state_dict()
@@ -56,13 +56,13 @@ def test_main():
         os.remove(ckpt_path)
     print("Transformer Blocklist load_state_dict and state_dict test passed")
 
-    # CheckpointBlock 
-    m3 = bmt.CheckpointBlock(Linear_BMT(256, 256))
+    # Block 
+    m3 = bmt.Block(Linear_BMT(256, 256))
     m3.load_state_dict(m.state_dict())
     for key in m.state_dict():
         assert key in m3.state_dict(), "wrong key in bmtrain model"
         assert (m.state_dict()[key] == m3.state_dict()[key].cuda()).all(), "wrong param in bmtrain model"
-    print("CheckpointBlock load_state_dict and state_dict test passed")
+    print("Block load_state_dict and state_dict test passed")
 
     # normal Distributed module
     m4 = Linear_BMT(256, 256)
