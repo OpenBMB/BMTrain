@@ -10,7 +10,6 @@ def main():
     bmt.init_distributed(
         seed=0,
         tp_size=1,
-        pipe_size=4,
     )
 
     model = GPT(
@@ -25,8 +24,7 @@ def main():
         dtype=torch.half
     )
 
-    bmt.init_parameters(model)
-
+    bmt.load(model, "./ckpt-0.pt")
     bmt.print_rank("Model memory")
     bmt.print_rank(torch.cuda.memory_summary())
     bmt.synchronize()
@@ -52,7 +50,7 @@ def main():
 
         if i == bmt.rank():
             break
-    
+    print(enc_input)
     if config['tp_size'] > 1:
         loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=True)
     else:
@@ -68,7 +66,6 @@ def main():
     
     avg_time_recorder = bmt.utils.AverageRecorder()
     avg_loss_recorder = bmt.utils.AverageRecorder()
-
     for iteration in range(1000):
         # load data
         st = time.time()
@@ -80,6 +77,7 @@ def main():
                 pos,
                 pos < enc_length[:, None]
             )
+            print(logits)
             batch, seq_len, vocab_out_size = logits.size()
 
             if config['tp_size'] > 1:
@@ -98,7 +96,7 @@ def main():
         if iteration % 100 == 0:
             bmt.print_rank(
                 inspect.format_summary(
-                    inspector.get_summary()
+                    inspector.get_summary(
                 )
             )
             bmt.print_rank(
@@ -106,8 +104,8 @@ def main():
                     inspect.inspect_model(model, "*")
                 )
             )
-
-        optim_manager.step()
+        if (iteration + 1) % 4 == 0:
+            optim_manager.step()
 
         # record time and loss
         iteration_time = time.time() - st

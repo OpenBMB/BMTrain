@@ -16,9 +16,6 @@ class InputWrapper(bmt.DistributedModule):
             output_list.append(self._module[str(idx)](i))
         return sum(output_list)
 
-
-
-
 class GPTPipe(bmt.DistributedModule):
     def __init__(self,
             num_layers : int, vocab_size : int,
@@ -33,7 +30,7 @@ class GPTPipe(bmt.DistributedModule):
         if config['tp_size'] > 1:
             word_emb = bmt.nn.ParallelEmbedding(vocab_size, dim_model, dtype=dtype)
         else:
-            word_emb = bmt.nn.PipeEmbedding(vocab_size, dim_model, dtype=dtype)
+            word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
         # self.inp_emb = InputWrapper([word_emb, pos_emb])
         blocklist = []
@@ -46,19 +43,20 @@ class GPTPipe(bmt.DistributedModule):
         self.transformers = bmt.PipeDreamBlockList(
             blocklist,
         )
-        self.transformers.add_tail(layernorm)
-        self.transformers.add_tail(word_emb)
-        self.transformers.add_head(word_emb)
         self.transformers.add_head(pos_emb)
+        self.transformers.add_tail(layernorm)
+        self.transformers.add_head_tail(word_emb)
 
-        if config['topology'].pipe_rank == config['topology'].pipe_size - 1:
-            self.word_emb = self.transformers[str(len(self.transformers) - 1)]
-            print(self.word_emb._module.__class__.__name__)
-            print(self.transformers.head_idx, self.transformers.tail_idx, config['topology'].pipe_rank)
+        if config['topology'].pipe_rank == config['topology'].pipe_size - 1 :
+            self.word_emb = self.transformers.get_last_layer
+        if config['topology'].pipe_rank == 0:
+            self.word_emb = self.transformers.get_first_layer
+        
         if config['tp_size'] > 1:
             self.loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=True)
         else:
             self.loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
+
     def forward(self,
             input : torch.LongTensor,   # (batch, seq_len)
             pos : torch.LongTensor,     # (batch, seq_len)
@@ -73,21 +71,24 @@ class GPTPipe(bmt.DistributedModule):
         out = self.transformers(input, mask_2d, None)
         if config['topology'].pipe_rank == config['topology'].pipe_size - 1:
             if config['tp_size'] > 1:
-                logits = self.word_emb.projection(out)
+                logits = self.word_emb().projection(out)
             else:
-                logits = self.word_emb(out, True)
+                logits = self.word_emb()(out, True)
             logits = logits.float().view(-1, logits.shape[-1])
             target = target.view(-1)
+            config["logger"].debug("logits:{}".format(logits))
             return self.loss_func(logits, target)
         else:
             return out, pos, mask, target
+
     def preprocess_func(self, inp):
         if config['topology'].pipe_rank == 0:
             inp_id = inp[0]
             pos = inp[1]
-            output =torch.randn((2,512,2560),dtype=torch.float16,device="cuda")
-            # return self.transformers['0'](inp_id)+self.transformers['1'](pos), *inp[1:]
-            return output, *inp[1:]
+            # output =torch.randn((2,512,2560),dtype=torch.float16,device="cuda")
+            config['logger'].debug("preprocess emb type{}".format(self.transformers['0']._module.__class__.__name__))
+            return self.transformers['0'](inp_id)+self.transformers['1'](pos), *inp[1:]
+            # return output, *inp[1:]
         else:
             return None
         

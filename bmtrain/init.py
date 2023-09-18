@@ -10,7 +10,6 @@ from .global_var import config
 
 from . import nccl
 from .synchronize import synchronize
-
 def init_distributed(
         init_method : str = "env://",
         seed : int = 0,
@@ -225,7 +224,7 @@ class topology:
         elif group_name == "tp":
             return self.tp_id
         
-    def is_last_rank(self, group_name):
+    def is_last_rank(self, group_name="pipe"):
         if group_name == "pipe":
             return self.pipe_rank == self.pipe_size - 1
         elif group_name == "zero":

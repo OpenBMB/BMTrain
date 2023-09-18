@@ -73,6 +73,15 @@ def send_activations(hidden_state, next_rank, comm):
     send_meta(hidden_state, next_rank, comm)
     ncclSend(hidden_state.storage(), next_rank, comm)
 
+def send_activations_inplace(hidden_state, next_rank, comm):
+    hidden_state = hidden_state.contiguous()
+    ncclSend(hidden_state.storage(), next_rank, comm)
+
+def recv_activations_inplace(hidden_state, prev_rank, comm):
+    hidden_state = hidden_state.contiguous()
+    ncclRecv(hidden_state.storage(), prev_rank, comm)
+    return hidden_state
+
 def recv_activations(prev_rank, comm):
     dtype, shape = recv_meta(prev_rank, comm)
     hidden_state = torch.empty(shape, dtype=dtype, device="cuda")

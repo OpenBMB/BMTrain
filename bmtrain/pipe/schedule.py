@@ -61,8 +61,6 @@ def backward_step(inp, output, grad_output):
 def forward_func(model, inp, micro_idx):
     if config["topology"].pipe_rank == config["topology"].pipe_size - 1:
         loss = model(*inp)
-        global global_loss
-        global_loss += loss
         config['logger'].info("loss: {}".format(loss.item()))
          
         return [loss]
@@ -72,7 +70,6 @@ def forward_func(model, inp, micro_idx):
         if not isinstance(hidden_state, Iterable):
             hidden_state = [hidden_state]
         return hidden_state
-global_loss = 0
 def pipeline_forward_backward(model, data_iterator, global_batch_size, interleaving_size=1):
     """Forward and backward the pipeline model.
 
@@ -86,8 +83,6 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     """
 
     # forwrad unpack
-    global global_loss 
-    global_loss = 0
     micro_batch_size = 2
     assert global_batch_size % micro_batch_size == 0, "The global batch size must be divisible by the micro batch size"
     num_micro_batches = global_batch_size // micro_batch_size
@@ -96,10 +91,14 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     topo = config["topology"]
     
     logger = config['logger']
-    
-    logger.info("model arch {}".format(model))
-    logger.info("model partition s: {} , e: {} ".format(model.transformers.head_idx,model.transformers.tail_idx))
-    logger.info("model length:{}".format(str(len(model.transformers))))
+
+    logger.debug("model arch {}".format(model))
+    logger.debug("model partition s: {} , e: {} ".format(model.transformers.head_idx,model.transformers.tail_idx))
+    logger.debug("model length:{}".format(str(len(model.transformers))))
+    if config["topology"].pipe_rank == 0 or config["topology"].is_last_rank():
+        lens = len(model.transformers)
+        emb = model.transformers['0'] if config["topology"].pipe_rank == 0 else model.transformers[str(lens - 1)]
+        logger.debug("embedding weight param {}".format(emb.weight))
     logger.info("topo: {}".format(topo))
     logger.info("num_micro_batches: {}".format(num_micro_batches))
     logger.info("micro_batch_size: {}".format(micro_batch_size))
@@ -199,6 +198,5 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
 
             commander.send_prev(input_grad)
     bmt.synchronize()
-    return global_loss
 
     
