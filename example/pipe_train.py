@@ -6,7 +6,7 @@ from bmtrain import optim
 from bmtrain.global_var import config
 from bmtrain import inspect
 from bmtrain.pipe import pipeline_forward_backward
-from inspect import custom_redirection, lookup_output
+from inspect_tools import custom_redirection, lookup_output
 
 def main():
     bmt.init_distributed(
@@ -25,7 +25,7 @@ def main():
         dim_ff=8192,
         max_distance=1024,
         bias=True,
-        dtype=torch.half
+        dtype=torch.float32
     )
 
 
@@ -37,7 +37,7 @@ def main():
     # generate dummy data for each rank
     torch.manual_seed(1234)
 
-    batch_size = 2 * 4
+    batch_size = 2 * 16
     seq_len = 512
     def data_loader(): 
         for i in range(1000):
@@ -70,22 +70,44 @@ def main():
     bmt.synchronize()
     avg_time_recorder = bmt.utils.AverageRecorder()
     avg_loss_recorder = bmt.utils.AverageRecorder()
-    model.transformers.sync_tied_module()
+
+    # lookup_output(model)
     for iteration in range(10):
         # load data
         st = time.time()
         rank = bmt.config["topology"].pipe_rank
-        with custom_redirection(open(f"pp_output_{rank}","w")):
-            lookup_output(model)
-            global_loss = pipeline_forward_backward(model, data_loader(), batch_size) 
+        if iteration == 4:
+            lookup_output(model, look_weight=False)
+        if iteration >= 4:
+            with custom_redirection(f"pp_output_{rank}"):
+                global_loss = pipeline_forward_backward(model, data_loader(), batch_size, optim_manager) 
+        else:
+            global_loss = pipeline_forward_backward(model, data_loader(), batch_size, optim_manager) 
         
-   
 
-        optim_manager.step()
-
+        bmt.synchronize()
+        if iteration == 4:
+            bmt.save(model, f"pipe_{rank}_iter4.ckpt")
+            if bmt.config["topology"].is_last_rank() or bmt.config["topology"].pipe_rank == 0:
+                is_head = bmt.config["topology"].pipe_rank == 0
+                torch.save(model.word_emb.weight.grad, f"word_emb.ckpt_{int(is_head)}")
         # record time and loss
         iteration_time = time.time() - st
    
+        if bmt.config["topology"].is_last_rank():
+            avg_time_recorder.record(iteration_time)
+            avg_loss_recorder.record(global_loss)
+            print(
+                "| Iter: {:6d} | loss: {:.10f} average_loss: {:.4f} | lr: {:.4e} scale: {:10.4f} | time: {:.4f}".format(
+                    iteration,
+                    global_loss,
+                    avg_loss_recorder.value,
+                    lr_scheduler.current_lr,
+                    optim_manager.loss_scale,
+                    avg_time_recorder.value
+                )
+            )
+
     
 
 if __name__ == '__main__':

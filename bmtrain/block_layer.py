@@ -616,17 +616,22 @@ class TransformerBlockList(torch.nn.Module):
         else:
             return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
 
+def DummyForward(*args, **kwargs):
+    """
+    Only useful for embedding and layernorm layer
+    """
+    return args[0]
+
 class PipeDreamBlockList(TransformerBlockList):
     
     def __init__(self, modules: Iterable[Block], num_hidden=1, sqrt=False) -> None:
         module_dict = {}
         mode = "1F1B"
         for idx in range(len(modules)):
-           modules[idx] = _block_wrapper(modules[idx], module_dict, mode=mode, zero_level=2) 
+           modules[idx] = _block_wrapper(modules[idx], module_dict, mode=mode, zero_level=2, use_checkpoint=False) 
         s,e = self.partition(modules)
-        self.head_idx = 0
-        self.tail_idx = e-s-1
-        self.tied_modules = []
+        self.head_idx = s
+        self.tail_idx = e
         partition_modules = []
         for idx,m in enumerate(modules):
             if idx>=s and idx<e:
@@ -635,13 +640,16 @@ class PipeDreamBlockList(TransformerBlockList):
             else:
                 m.init_param_storage()
                 del m
-
         super().__init__(partition_modules, num_hidden, mode=mode)
+        self.fisrt_module = (self._modules['0'],)
+        self.last_module = (self._modules[str(len(self._modules) - 1)],)
+        self.tied_modules = []
 
     def forward(self, *args, return_hidden_states = False):
+
         self.return_hidden_states = return_hidden_states
         hidden_states = []
-        for i in range(self.head_idx, self.tail_idx+1):
+        for i in range(len(self)):
             if return_hidden_states:
                 for hidden_state in args[:self.num_hidden]:
                     hidden_states.append(hidden_state)
@@ -671,37 +679,30 @@ class PipeDreamBlockList(TransformerBlockList):
         return start,end
 
     def _add_head(self, module):
-        self.head_idx += 1
-        self.tail_idx += 1
-        for i in range(len(self), 0, -1):
-            self._modules[str(i)] = self._modules[str(i-1)]
-            self.add_module(str(i), self._modules[str(i-1)])
-        self._modules['0'] = module
-        self.add_module('0', module)
-        self._modules['1'].set_pre_module(module)
-        self._modules['0'].set_pre_module(None)
-        self._modules['1']._is_first_layer = False
-        self._modules['0']._is_first_layer = True
+        self.fisrt_module[0]._is_first_layer = False
+        module._is_first_layer = True
+        self.fisrt_module[0].set_pre_module(module)
+        self.fisrt_module = (module,)
 
     def add_head(self, module):
         module = _block_wrapper(module, self.module_dict, mode="1F1B")
         module.init_param_storage()
         if config['topology'].pipe_rank != 0:
-            return
+            return DummyForward
         self._add_head(module)
+        return module
 
     def get_first_layer(self):
         return self._modules['0']
     
     def get_last_layer(self):
         return self._modules[str(len(self)-1)]
-    
 
     def add_head_tail(self, module): 
         module = _block_wrapper(module, self.module_dict, mode="1F1B")
         module.init_param_storage()
         if config['topology'].pipe_rank != 0 and not config['topology'].is_last_rank():
-            return
+            return DummyForward
         else:
             if config['topology'].pipe_rank == 0:
                 module._tied = "head"
@@ -710,42 +711,38 @@ class PipeDreamBlockList(TransformerBlockList):
                 module._tied = "tail"
                 self._add_tail(module)
             self.tied_modules.append(module) 
+        return module
 
-    def sync_tied_module(self):
-        if config['topology'].pipe_rank != 0 and not config['topology'].is_last_rank():
-            return
-        else:
-            for tied_m in self.tied_modules:
-                for name, param in tied_m.named_parameters():
-                    if config['topology'].pipe_rank == 0:
-                        send_activations_inplace(param, 1, config["pipe_tied_comm"])
-                    elif config['topology'].is_last_rank():
-                        recv_activations_inplace(param, 0, config["pipe_tied_comm"])
-
+                
     def reduce_tied_module(self):
         if config['topology'].pipe_rank != 0 and not config['topology'].is_last_rank():
             return
         else:
             for tied_m in self.tied_modules:
                 for name, param in tied_m.named_parameters():
-                    if config['topology'].pipe_rank == 0:
-                        send_activations_inplace(param.gard, 1, config["pipe_tied_comm"])
-                    elif config['topology'].is_last_rank():
+                    if config['topology'].pipe_rank == 0 and param.grad is not None:
+                        with torch.no_grad():
+                            grad = torch.empty_like(param)
+                            param.grad += recv_activations_inplace(grad, 1, config["pipe_tied_comm"])
+                            send_activations_inplace(param.grad, 1, config["pipe_tied_comm"])
+                    elif config['topology'].pipe_rank == 0 and param.grad is None:
                         grad = torch.empty_like(param)
-                        param.grad += recv_activations_inplace(grad, 0, config["pipe_tied_comm"])
+                        param.grad = recv_activations_inplace(grad, 1, config["pipe_tied_comm"])
+                    elif config['topology'].is_last_rank() and param.grad is not None:
+                        send_activations_inplace(param.grad, 0, config["pipe_tied_comm"])
+                        param.grad = recv_activations_inplace(param.grad, 0, config["pipe_tied_comm"])
 
     def _add_tail(self, module):
-        lens = len(self)
-        self._modules[str(lens)] = module
-        self.add_module(str(lens), module)
-        self._modules[str(lens)].set_pre_module(self._modules[str(lens-1)])
-        self._modules[str(lens-1)]._is_last_layer = False
-        self._modules[str(lens)]._is_last_layer = True
-        
+        self.last_module[0]._is_last_layer = False
+        module._is_last_layer = True 
+        self.last_module[0].set_pre_module(module)
+        self.last_module = (module,) 
+
     def add_tail(self, module):
         module = _block_wrapper(module, self.module_dict, mode="1F1B")
         module.init_param_storage()
         if config['topology'].pipe_rank != config['topology'].pipe_size - 1:
-            return
+            return DummyForward
         else:
             self._add_tail(module)
+        return module

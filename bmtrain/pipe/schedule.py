@@ -1,28 +1,12 @@
 import sys
 from bmtrain.global_var import  config
-from bmtrain.loss import FusedCrossEntropy
 import bmtrain as bmt
-from .debug import get_logger
 from .comm import PipeCommander
 import torch
-import logging
 from typing import Iterable
-def obj_str(objs):
-    string = ""
-    for o in objs:
-        if isinstance(o, torch.Tensor):
-            string += repr(o.shape)
-        elif o is None:
-            string += "None" 
-        else:
-            string += repr(o)
 
-        string += " ,"
-    return string.rstrip(",")
         
-
-
-def backward_step(inp, output, grad_output):
+def backward_step(inp, output, grad_output, optim_manager=None):
     """Backward step through passed-in output tensor.
 
     If last stage, output_tensor_grad is None, otherwise gradient of loss
@@ -43,10 +27,13 @@ def backward_step(inp, output, grad_output):
     #TODO scale the grad
     # if output_tensor_grad[0] is None and config.grad_scale_func is not None:
     #     output_tensor[0] = config.grad_scale_func(output_tensor[0])
-    config['logger'].debug(obj_str(grad_output))
-    # config['logger'].debug(obj_str(output))
-    torch.autograd.backward(output[0], grad_tensors=grad_output[0])
-
+    if optim_manager is not None and config["topology"].is_last_rank():
+        output = optim_manager.scale_loss(output[0])
+    else:
+        output = output[0]
+    torch.autograd.backward(output, grad_tensors=grad_output[0])
+    current_stream = torch.cuda.current_stream()
+    current_stream.wait_stream(config['load_stream'])
     input_grad = [None]
     if inp is not None:
         input_grad = []
@@ -58,10 +45,9 @@ def backward_step(inp, output, grad_output):
 
     return input_grad 
 
-def forward_func(model, inp, micro_idx):
+def forward_func(model, inp, micro_idx, is_last_micro=False):
     if config["topology"].pipe_rank == config["topology"].pipe_size - 1:
         loss = model(*inp)
-        config['logger'].info("loss: {}".format(loss.item()))
          
         return [loss]
     else:
@@ -70,7 +56,8 @@ def forward_func(model, inp, micro_idx):
         if not isinstance(hidden_state, Iterable):
             hidden_state = [hidden_state]
         return hidden_state
-def pipeline_forward_backward(model, data_iterator, global_batch_size, interleaving_size=1):
+
+def pipeline_forward_backward(model, data_iterator, global_batch_size, optim_manager, interleaving_size=1):
     """Forward and backward the pipeline model.
 
     Args:
@@ -83,22 +70,15 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
     """
 
     # forwrad unpack
+    loss = None
+    optim_manager.zero_grad()
     micro_batch_size = 2
     assert global_batch_size % micro_batch_size == 0, "The global batch size must be divisible by the micro batch size"
     num_micro_batches = global_batch_size // micro_batch_size
     assert (num_micro_batches) % config["pipe_size"] == 0, "The number of micro batches must be divisible by the pipeline size"
     config["micros"] = num_micro_batches
     topo = config["topology"]
-    
     logger = config['logger']
-
-    logger.debug("model arch {}".format(model))
-    logger.debug("model partition s: {} , e: {} ".format(model.transformers.head_idx,model.transformers.tail_idx))
-    logger.debug("model length:{}".format(str(len(model.transformers))))
-    if config["topology"].pipe_rank == 0 or config["topology"].is_last_rank():
-        lens = len(model.transformers)
-        emb = model.transformers['0'] if config["topology"].pipe_rank == 0 else model.transformers[str(lens - 1)]
-        logger.debug("embedding weight param {}".format(emb.weight))
     logger.info("topo: {}".format(topo))
     logger.info("num_micro_batches: {}".format(num_micro_batches))
     logger.info("micro_batch_size: {}".format(micro_batch_size))
@@ -115,7 +95,6 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
         while True:
             try:
                 inp = next(data_iterator)
-                logger.debug("Input id {}".format(inp))
                 yield model.preprocess_func(inp)
             except StopIteration:
                 break
@@ -124,9 +103,6 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
                                 num_warmup=num_warmup, forward_only=False, \
                                 interleaving_size=interleaving_size, \
                                 )
-    # if commander.is_first_stage() or commander.is_last_stage():
-        # module = model.head_layer() if commander.is_first_stage() else model.tail_layer()
-        # commander.param_reduce(module)
     inps = []
     outputs = []
     logger.info("num_warmup: {}".format(num_warmup))
@@ -147,56 +123,49 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, interleav
         inp = commander.recv_prev(need_data=True)
 
     for micro in range(num_micro_batches - num_warmup):
-        output = forward_func(model, inp, micro + num_warmup)
-        logger.debug("output :{}".format(obj_str(output)))
+        is_last_micro = micro == num_micro_batches - num_warmup - 1
+        output = forward_func(model, inp, micro + num_warmup, is_last_micro)
+        if commander.is_last_stage():
+            loss = output[0]    
         logger.info("{} micro forward".format(micro+num_warmup))
-        logger.debug("send forward and recv backward")
         grad_output = commander.send_forward_recv_backward(output)
+
         inps.append(inp)
         outputs.append(output)
-        logger.debug("grad output :{}".format(obj_str(grad_output)))
+
         logger.info("{} send micro hidden state {}th to next neighbour and recv micro grad {} from next neighbour".format(config['rank'], micro + num_warmup, micro))
-        logger.debug("inp shape: {}".format(inp[0].shape))
-        if not commander.is_last_stage():
-            logger.debug("output shape: {}".format(output[0].shape))
-        if  grad_output[0] is not None :
-            logger.debug("grad_output shape: {}".format(grad_output[0].shape))
+
         inp = inps.pop(0)
         output = outputs.pop(0)
+
         for x in inp:
             logger.info("inp requires_grad: {}".format(x.requires_grad))
-        inp_grad = backward_step(inp, output, grad_output)
+        inp_grad = backward_step(inp, output, grad_output, optim_manager)
         logger.info("{} micro backward".format(micro+num_warmup))
         if micro == remain_batch - 1:
             inp = None
             commander.send_prev(inp_grad)
             logger.info("{} send micro grad {}th to prev neighbour".format(config['rank'], micro + num_warmup))
         else:
-            logger.debug("grad inp :{}".format(obj_str(inp_grad)))
-            if inp_grad[0] is not None:
-                logger.debug("inp_grad shape: {}".format(inp_grad[0].shape))
-            logger.debug("send backward and recv forward")
+            logger.info("send backward and recv forward")
             inp = commander.send_backward_recv_forward(inp_grad, need_data=True)
-            logger.debug("inp type: {}".format(type(inp)))
-            logger.debug("inp shape: {}".format(inp[0].shape))
-            logger.info("{} send micro grad {}th to prev neighbour and recv micro hidden state {} from prev neighbour".format(config['rank'], micro, micro + num_warmup + 1))
-
-
     if not forward_only:
         logger.info("cooling stage")
         for i in range(num_warmup):
             logger.info("{} recv micro grad {}th from next neighbour".format(config['rank'], num_micro_batches - num_warmup + i))
             inp = inps.pop(0)
             output = outputs.pop(0)
-
             grad_output = commander.recv_next()
             logger.info("{} micro backward".format(num_micro_batches - num_warmup + i))
             input_grad = backward_step(
-                inp, output , grad_output, 
+                inp, output , grad_output,
             )
             logger.info("{} send micro grad {}th to prev neighbour".format(config['rank'], i))
 
             commander.send_prev(input_grad)
+    model.transformers.reduce_tied_module()
+    optim_manager.step()
     bmt.synchronize()
+    return loss
 
     

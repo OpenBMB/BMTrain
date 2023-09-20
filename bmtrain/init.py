@@ -223,7 +223,15 @@ class topology:
             return self.tp_zero_id
         elif group_name == "tp":
             return self.tp_id
-        
+
+    def is_first_rank(self, group_name="pipe"):
+        if group_name == "pipe":
+            return self.pipe_rank == 0
+        elif group_name == "zero":
+            return self.zero_id == 0
+        elif group_name == "tp":
+            return self.tp_id == 0
+
     def is_last_rank(self, group_name="pipe"):
         if group_name == "pipe":
             return self.pipe_rank == self.pipe_size - 1
@@ -235,15 +243,16 @@ class topology:
 def is_initialized() -> bool:
     return config["initialized"]
 
-def get_logger(rank, level):
+def get_logger(rank, level, print_to_screen=False):
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     logger = logging.getLogger('pipeline')
     logger.setLevel(level)
-    if rank == 0:
-        ch = logging.StreamHandler()
-        ch.setLevel(level)
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
+    if print_to_screen:
+        if rank == 0:
+            ch = logging.StreamHandler()
+            ch.setLevel(level)
+            ch.setFormatter(formatter)
+            logger.addHandler(ch)
     fh = logging.FileHandler(f'pipe_{rank}.log',mode="w")
     fh.setLevel(level)
     fh.setFormatter(formatter)

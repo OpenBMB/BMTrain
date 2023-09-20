@@ -43,15 +43,9 @@ class GPTPipe(bmt.DistributedModule):
         self.transformers = bmt.PipeDreamBlockList(
             blocklist,
         )
-        self.transformers.add_head(pos_emb)
-        self.transformers.add_tail(layernorm)
-        self.transformers.add_head_tail(word_emb)
-
-        if config['topology'].pipe_rank == config['topology'].pipe_size - 1 :
-            self.word_emb = self.transformers.get_last_layer
-        if config['topology'].pipe_rank == 0:
-            self.word_emb = self.transformers.get_first_layer
-        
+        self.pos_emb = self.transformers.add_head(pos_emb)
+        self.layernorm = self.transformers.add_tail(layernorm)
+        self.word_emb = self.transformers.add_head_tail(word_emb)
         if config['tp_size'] > 1:
             self.loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=True)
         else:
@@ -69,14 +63,14 @@ class GPTPipe(bmt.DistributedModule):
 
         # for layer in self.transformers:
         out = self.transformers(input, mask_2d, None)
+        out = self.layernorm(out)
         if config['topology'].pipe_rank == config['topology'].pipe_size - 1:
             if config['tp_size'] > 1:
-                logits = self.word_emb().projection(out)
+                logits = self.word_emb.projection(out)
             else:
-                logits = self.word_emb()(out, True)
+                logits = self.word_emb(out, True)
             logits = logits.float().view(-1, logits.shape[-1])
             target = target.view(-1)
-            config["logger"].debug("logits:{}".format(logits))
             return self.loss_func(logits, target)
         else:
             return out, pos, mask, target
@@ -85,10 +79,7 @@ class GPTPipe(bmt.DistributedModule):
         if config['topology'].pipe_rank == 0:
             inp_id = inp[0]
             pos = inp[1]
-            # output =torch.randn((2,512,2560),dtype=torch.float16,device="cuda")
-            config['logger'].debug("preprocess emb type{}".format(self.transformers['0']._module.__class__.__name__))
-            return self.transformers['0'](inp_id)+self.transformers['1'](pos), *inp[1:]
-            # return output, *inp[1:]
+            return self.pos_emb(pos) + self.word_emb(inp_id) , *inp[1:]
         else:
             return None
         
