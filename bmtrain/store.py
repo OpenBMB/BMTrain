@@ -3,23 +3,40 @@ from typing import Dict
 import torch
 
 from .pipe_layer import PipelineTransformerBlockList
+from .block_layer import TransformerBlockList
 from .global_var import config
 from .block_layer import Block
 from . import nccl
 import io, pickle
 from typing import Mapping
 
-def _save_to_state_dict(model : torch.nn.Module, destination, prefix):
+def _save_to_state_dict(model : torch.nn.Module, rank, destination, prefix):
     if isinstance(model, Block):
-        if config['rank'] != 0:
+        if rank != 0:
             destination = OrderedDict() # creates an temporary ordered dict
             destination._metadata = OrderedDict()
         model.state_dict(destination=destination, prefix=prefix, keep_vars=False)
     else:
-        if config['rank'] != 0:
+        if rank != 0:
             destination = OrderedDict() # creates an temporary ordered dict
             destination._metadata = OrderedDict()
         model._save_to_state_dict(destination, prefix, False)
+
+def _save_to_local_rank0(model : torch.nn.Module, destination=None, prefix=''):
+    if destination is None:
+        destination = OrderedDict()
+        destination._metadata = OrderedDict()
+    destination._metadata[prefix[:-1]] = local_metadata = dict(version=model._version)
+    _save_to_state_dict(model, config['local_rank'], destination, prefix)
+    for name, module in model._modules.items():
+        if module is not None:
+            _save_to_local_rank0(module, destination, prefix + name + '.')
+    for hook in model._state_dict_hooks.values():
+        hook_result = hook(model, destination, prefix, local_metadata)
+        if hook_result is not None:
+            destination = hook_result
+    return destination
+
 
 def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
     if destination is None:
@@ -27,7 +44,7 @@ def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
         destination._metadata = OrderedDict()
     destination._metadata[prefix[:-1]] = local_metadata = dict(version=model._version)
     if not isinstance(model, PipelineTransformerBlockList):
-        _save_to_state_dict(model, destination, prefix)
+        _save_to_state_dict(model, config['rank'], destination, prefix)
         for name, module in model._modules.items():
             if module is not None:
                 _save_to_rank0(module, destination, prefix + name + '.')
@@ -38,6 +55,30 @@ def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
     else:
         model._save_to_state_dict(destination, prefix, False)
     return destination
+
+def _save_to_infer_model(model : torch.nn.Module, infer_model, destination=None, prefix=''):
+    config['save_param_to_cpu'] = False
+    if destination is None:
+        destination = OrderedDict()
+        destination._metadata = OrderedDict()
+    destination._metadata[prefix[:-1]] = local_metadata = dict(version=model._version)
+    _save_to_state_dict(model, config['local_rank'], destination, prefix)
+    for name, module in model._modules.items():
+        if module is not None:
+            if isinstance(module, TransformerBlockList):
+                for local_name, local_module in module._modules.items():
+                    local_state_dict = _save_to_local_rank0(local_module, None, prefix + name + "." + local_name + '.')
+                    if config['local_rank'] == 0:
+                        infer_model.load_layer_state_dict(local_state_dict)
+            else:
+                _save_to_infer_model(module, infer_model, destination, prefix + name + '.')
+    for hook in model._state_dict_hooks.values():
+        hook_result = hook(model, destination, prefix, local_metadata)
+        if hook_result is not None:
+            destination = hook_result
+
+    if config['local_rank'] == 0:
+        infer_model.load_layer_state_dict(destination)
         
 
 
