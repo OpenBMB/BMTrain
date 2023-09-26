@@ -33,16 +33,12 @@ class DistributedModule(torch.nn.Module):
         for name, param in self._parameters.items():
             if param is not None:
                 if isinstance(param, DistributedParameter):#and not param._in_block:
-                    if config['save_param_to_cpu']:
-                        if param._in_block:
-                            destination[prefix + name] = param.tp_gather().detach().cpu()  # sync operation
-                        else:
-                            destination[prefix + name] = param.gather_all().detach().cpu()  # sync operation
+                    if param._in_block:
+                        destination[prefix + name] = param.tp_gather().detach() # sync operation
                     else:
-                        if param._in_block:
-                            destination[prefix + name] = param.tp_gather().detach() # sync operation
-                        else:
-                            destination[prefix + name] = param.gather_all().detach() # sync operation
+                        destination[prefix + name] = param.gather_all().detach() # sync operation
+                    if config['save_param_to_cpu']:
+                        destination[prefix + name] = destination[prefix + name].cpu()
                 else:
                     if config['save_param_to_cpu']:
                         destination[prefix + name] = param if keep_vars else param.detach().cpu()
