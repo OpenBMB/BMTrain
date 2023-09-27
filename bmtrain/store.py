@@ -70,13 +70,11 @@ def save(model : torch.nn.Module, file_name : str, non_blocking : bool=True):
                 config['finish_save'] = True
 
             if config['finish_save'] is False:
-                print("join save thread")
                 config['save_thread'].join()
 
             config['finish_save'] = False
             config['save_thread'] = threading.Thread(target=async_save_to_file, args=(state_dict, file_name))
             config['save_thread'].start()
-            print("async save")
 
 DTYPE_LIST = [
     torch.float64,
