@@ -120,29 +120,32 @@ def init_distributed(
         unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
         config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id)
 
-    if topo.tp_id == 0:
-        unique_id = nccl.getUniqueId()
-        store.set(f"TP_UNIQUE_ID{topo.tp_idx}", unique_id.hex())
-    unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
-    config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
+        if topo.pp_zero_id == 0:
+            unique_id = nccl.getUniqueId()
+            store.set(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}", unique_id.hex() )
+        unique_id = bytes.fromhex(store.get(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}").decode())
+        config['pp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['pipe_size'], topo.pp_zero_id)
 
-    if topo.tp_zero_id == 0:
-        unique_id = nccl.getUniqueId()
-        store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
-    unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
-    config['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['tp_size'], topo.tp_zero_id)
+    if config['tp_size'] > 1:
+        if topo.tp_id == 0:
+            unique_id = nccl.getUniqueId()
+            store.set(f"TP_UNIQUE_ID{topo.tp_idx}", unique_id.hex())
+        unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
+        config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
 
-    if topo.pp_zero_id == 0:
-        unique_id = nccl.getUniqueId()
-        store.set(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}", unique_id.hex() )
-    unique_id = bytes.fromhex(store.get(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}").decode())
-    config['pp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['pipe_size'], topo.pp_zero_id)
+        if topo.tp_zero_id == 0:
+            unique_id = nccl.getUniqueId()
+            store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
+        unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
+        config['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['tp_size'], topo.tp_zero_id)
 
-    if topo.pp_tp_zero_id == 0:
-        unique_id = nccl.getUniqueId()
-        store.set(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}", unique_id.hex() )
-    unique_id = bytes.fromhex(store.get(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}").decode())
-    config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id)
+
+    if config['pipe_size'] > 1 and config['tp_size'] > 1:
+        if topo.pp_tp_zero_id == 0:
+            unique_id = nccl.getUniqueId()
+            store.set(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}", unique_id.hex() )
+        unique_id = bytes.fromhex(store.get(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}").decode())
+        config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id)
 
     config ['zero_comm'] = config['comm']
 
