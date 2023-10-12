@@ -97,14 +97,14 @@ setup(
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",
     packages=find_packages(),
-    #install_requires=[
-    #    "numpy",
-	#	"nvidia-nccl-cu11>=2.14.3"
-    #],
-    #setup_requires=[
-    #    "pybind11",
-    #    "nvidia-nccl-cu11>=2.14.3"
-    #],
+    install_requires=[
+        "numpy",
+		"nvidia-nccl-cu11>=2.14.3"
+    ],
+    setup_requires=[
+        "pybind11",
+        "nvidia-nccl-cu11>=2.14.3"
+    ],
     ext_modules=ext_modules,
     cmdclass={
         'build_ext': CMakeBuild
