@@ -76,11 +76,7 @@ class DistributedParameter(torch.nn.Parameter):
             torch.Tensor: The gathered data.
         
         """
-        with torch.cuda.stream(config['load_stream']):
-            output_tensor = OpAllGather.apply(self)
-        current_stream = torch.cuda.current_stream()
-        output_tensor.record_stream( current_stream )
-        current_stream.wait_stream(config['load_stream'])
+        output_tensor = OpAllGather.apply(self)
         return output_tensor
 
     def _copy_data(self, data : torch.Tensor):
