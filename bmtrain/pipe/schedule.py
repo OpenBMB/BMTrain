@@ -18,7 +18,7 @@ def backward_step(inp, output, grad_output, optim_manager=None):
     if not isinstance(inp, list) :
         inp = [inp]
     for x in inp:
-        if x is not None and x.requires_grad:
+        if x is not None and (torch.is_tensor(x) and x.requires_grad):
             x.retain_grad()
     if not isinstance(output, Iterable):
         output = [output]
@@ -28,7 +28,11 @@ def backward_step(inp, output, grad_output, optim_manager=None):
     # if output_tensor_grad[0] is None and config.grad_scale_func is not None:
     #     output_tensor[0] = config.grad_scale_func(output_tensor[0])
     if optim_manager is not None and config["topology"].is_last_rank():
-        output = optim_manager.scale_loss(output[0])
+        if isinstance(output[0], Iterable):
+            output = optim_manager.scale_loss(output[0][0])
+        else:
+            output = optim_manager.scale_loss(output[0])
+        
     else:
         output = output[0]
     torch.autograd.backward(output, grad_tensors=grad_output[0])
@@ -38,7 +42,7 @@ def backward_step(inp, output, grad_output, optim_manager=None):
     if inp is not None:
         input_grad = []
         for x in inp:
-            if x is None or not x.requires_grad:
+            if x is None or (not torch.is_tensor(x)) or (not x.requires_grad):
                 input_grad.append(None)
             else:
                 input_grad.append(x.grad)
@@ -51,13 +55,14 @@ def forward_func(model, inp, micro_idx, is_last_micro=False):
          
         return [loss]
     else:
+        config['logger'].info("inp shape: {}".format(inp[0].shape))
         hidden_state = model(*inp)
         config['logger'].info("inp shape: {}".format(hidden_state[0].shape))
         if not isinstance(hidden_state, Iterable):
             hidden_state = [hidden_state]
         return hidden_state
 
-def pipeline_forward_backward(model, data_iterator, global_batch_size, optim_manager, interleaving_size=1):
+def pipeline_forward_backward(model, data_iterator, micro_batch_size, num_micros, optim_manager, clip_grad=1.0):
     """Forward and backward the pipeline model.
 
     Args:
@@ -72,9 +77,9 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, optim_man
     # forwrad unpack
     loss = None
     optim_manager.zero_grad()
-    micro_batch_size = 2
-    assert global_batch_size % micro_batch_size == 0, "The global batch size must be divisible by the micro batch size"
-    num_micro_batches = global_batch_size // micro_batch_size
+    micro_batch_size = micro_batch_size
+    num_micro_batches = num_micros
+    global_batch_size = micro_batch_size * num_micro_batches
     assert (num_micro_batches) % config["pipe_size"] == 0, "The number of micro batches must be divisible by the pipeline size"
     config["micros"] = num_micro_batches
     topo = config["topology"]
@@ -83,7 +88,6 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, optim_man
     logger.info("num_micro_batches: {}".format(num_micro_batches))
     logger.info("micro_batch_size: {}".format(micro_batch_size))
     logger.info("global_batch_size: {}".format(global_batch_size))
-    logger.info("interleaving_size: {}".format(interleaving_size))
     # construct Pipe Commander
     forward_only = False
     logger.info("forward_only: {}".format(forward_only))
@@ -98,7 +102,7 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, optim_man
                 yield model.preprocess_func(inp)
             except StopIteration:
                 break
-
+    interleaving_size = 1
     commander = PipeCommander(topo,input_generator=generator(data_iterator), num_micros=num_micro_batches,\
                                 num_warmup=num_warmup, forward_only=False, \
                                 interleaving_size=interleaving_size, \
@@ -108,12 +112,12 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, optim_man
     logger.info("num_warmup: {}".format(num_warmup))
     for micro in range(num_warmup):
         inp = commander.recv_prev(need_data=True)
-        logger.info("{} recv micro {}th from prev neighbour".format(config['rank'], micro))
+        logger.info("{} recv micro {}th from prev neighbour".format(bmt.config["topology"].pipe_rank, micro))
         output = forward_func(model, inp, micro)
         logger.info("{} micro forward".format(micro))
         # send activations
         commander.send_next(output)
-        logger.info("{} send micro {}th to next neighbour".format(config['rank'], micro))
+        logger.info("{} send micro {}th to next neighbour".format(bmt.config["topology"].pipe_rank, micro))
         if not forward_only:
             inps.append(inp)
             outputs.append(output)
@@ -121,38 +125,38 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, optim_man
     logger.info("remain_batch: {}".format(remain_batch))
     if remain_batch > 0:
         inp = commander.recv_prev(need_data=True)
-
+    logger.info("recv micro from prev neighbour")
+    loss_items = []
     for micro in range(num_micro_batches - num_warmup):
         is_last_micro = micro == num_micro_batches - num_warmup - 1
         output = forward_func(model, inp, micro + num_warmup, is_last_micro)
         if commander.is_last_stage():
             loss = output[0]    
+            loss_items.append(loss)
         logger.info("{} micro forward".format(micro+num_warmup))
         grad_output = commander.send_forward_recv_backward(output)
 
         inps.append(inp)
         outputs.append(output)
 
-        logger.info("{} send micro hidden state {}th to next neighbour and recv micro grad {} from next neighbour".format(config['rank'], micro + num_warmup, micro))
+        logger.info("{} send micro hidden state {}th to next neighbour and recv micro grad {} from next neighbour".format(bmt.config["topology"].pipe_rank, micro + num_warmup, micro))
 
         inp = inps.pop(0)
         output = outputs.pop(0)
 
-        for x in inp:
-            logger.info("inp requires_grad: {}".format(x.requires_grad))
         inp_grad = backward_step(inp, output, grad_output, optim_manager)
         logger.info("{} micro backward".format(micro+num_warmup))
         if micro == remain_batch - 1:
             inp = None
             commander.send_prev(inp_grad)
-            logger.info("{} send micro grad {}th to prev neighbour".format(config['rank'], micro + num_warmup))
+            logger.info("{} send micro grad {}th to prev neighbour".format(bmt.config["topology"].pipe_rank, micro + num_warmup))
         else:
             logger.info("send backward and recv forward")
             inp = commander.send_backward_recv_forward(inp_grad, need_data=True)
     if not forward_only:
         logger.info("cooling stage")
         for i in range(num_warmup):
-            logger.info("{} recv micro grad {}th from next neighbour".format(config['rank'], num_micro_batches - num_warmup + i))
+            logger.info("{} recv micro grad {}th from next neighbour".format(bmt.config["topology"].pipe_rank, num_micro_batches - num_warmup + i))
             inp = inps.pop(0)
             output = outputs.pop(0)
             grad_output = commander.recv_next()
@@ -160,12 +164,15 @@ def pipeline_forward_backward(model, data_iterator, global_batch_size, optim_man
             input_grad = backward_step(
                 inp, output , grad_output,
             )
-            logger.info("{} send micro grad {}th to prev neighbour".format(config['rank'], i))
+            logger.info("{} send micro grad {}th to prev neighbour".format(bmt.config["topology"].pipe_rank, i))
 
             commander.send_prev(input_grad)
-    model.transformers.reduce_tied_module()
+    blocklist = model.get_blocklist()
+    blocklist.reduce_tied_module()
+    grad_norm = optim_manager.clip_grad_norm(optim_manager.optimizers[0].param_groups, clip_grad, norm_type=2)
     optim_manager.step()
+    
     bmt.synchronize()
-    return loss
+    return loss_items, grad_norm
 
     

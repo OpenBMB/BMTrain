@@ -5,6 +5,7 @@ from collections.abc import Iterable
 class PipeCommander:
     def __init__(self, topo, input_generator, num_micros, num_warmup, forward_only, interleaving_size) -> None:
         self.topo = topo
+        self.comm = self.topo.get_comm("pipe")
         self.input_generator = input_generator
         self.num_micros = num_micros
         self.num_warmup = num_warmup
@@ -27,7 +28,9 @@ class PipeCommander:
         if not self.is_last_stage():
             if not isinstance(tensors, Iterable):
                 tensors = [tensors]
-            handle.append(send_activations_list(tensors, self.topo.pipe_rank + 1, config["pipe_comm"], async_op=True))
+            elif not isinstance(tensors, list):
+                tensors = list(tensors)
+            handle.append(send_activations_list(tensors, self.topo.pipe_rank + 1, self.comm, async_op=True))
         for h in handle:
             h.wait() 
 
@@ -36,13 +39,15 @@ class PipeCommander:
         if not self.is_first_stage():
             if not isinstance(tensors, Iterable):
                 tensors = [tensors]
-            handle.append(send_activations_list(tensors, self.topo.pipe_rank - 1, config["pipe_comm"], async_op=True))
+            elif not isinstance(tensors, list):
+                tensors = list(tensors)
+            handle.append(send_activations_list(tensors, self.topo.pipe_rank - 1, self.comm, async_op=True))
         for h in handle:
             h.wait() 
 
     def recv_prev(self, need_data=False):
         if not self.is_first_stage():
-            res = recv_activations_list(self.topo.pipe_rank - 1, config["pipe_comm"])
+            res = recv_activations_list(self.topo.pipe_rank - 1, self.comm)
             for idx,tensor in enumerate(res):
                 if idx == 0:
                     tensor.requires_grad_()
@@ -55,7 +60,7 @@ class PipeCommander:
     
     def recv_next(self):
         if not self.is_last_stage():
-            return recv_activations_list(self.topo.pipe_rank + 1, config["pipe_comm"])
+            return recv_activations_list(self.topo.pipe_rank + 1, self.comm)
         else:
             return [None]
 

@@ -109,9 +109,9 @@ class Block(torch.nn.Module):
             storage_type = storage_type_cuda(param.storage_type())
             kw_name = _get_param_kw(param)
             if kw_name not in self._storage_info:
-                if self._mode == "PIPE" and param._tp_mode:
+                if (self._mode == "PIPE" or self._mode == "1F1B") and param._tp_mode:
                     zero_comm = config["pp_tp_zero_comm"]
-                elif self._mode != "PIPE" and param._tp_mode:
+                elif (self._mode != "PIPE" and self._mode != "1F1B") and param._tp_mode:
                     zero_comm = config["tp_zero_comm"]
                 elif (self._mode == "PIPE" or self._mode == "1F1B") and not param._tp_mode:
                     zero_comm = config["pp_zero_comm"]
@@ -735,7 +735,7 @@ class PipeDreamBlockList(TransformerBlockList):
     def _add_tail(self, module):
         self.last_module[0]._is_last_layer = False
         module._is_last_layer = True 
-        self.last_module[0].set_pre_module(module)
+        module.set_pre_module(self.last_module[0])
         self.last_module = (module,) 
 
     def add_tail(self, module):

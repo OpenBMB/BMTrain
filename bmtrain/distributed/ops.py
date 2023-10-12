@@ -1,5 +1,6 @@
 import torch
-from ..global_var import config
+import bmtrain as bmt
+from ..global_var import config, rank
 from ..nccl import allGather as ncclAllGather, recv
 from ..nccl import allReduce as ncclAllReduce
 from ..nccl import broadcast as ncclBroadcast
@@ -7,6 +8,7 @@ from ..nccl import send as ncclSend
 from ..nccl import recv as ncclRecv
 from ..nccl import commCount,commRank,NCCLCommunicator,groupStart,groupEnd
 import contextlib
+import pickle
 DTYPE_LIST = [
     torch.float64,
     torch.float32,
@@ -31,19 +33,47 @@ class handler:
     def wait(self):
         torch.cuda.current_stream().wait_stream(self.stream)
 
+def send_object(obj, next_rank, comm):
+    data_bytes: bytes = pickle.dumps(obj)
+    data_length: int = len(data_bytes)
+
+    gpu_data_length = torch.tensor([data_length], device="cuda", dtype=torch.long)
+    ncclSend(gpu_data_length.storage(), next_rank, comm)
+    byte_storage = torch.ByteStorage.from_buffer(data_bytes).cuda()
+    ncclSend(byte_storage, next_rank, comm)
+
+def recv_object(prev_rank, comm):
+    data_length = torch.tensor([0], device="cuda", dtype=torch.long)
+    ncclRecv(data_length.storage(), prev_rank, comm)
+    data_bytes_stor = torch.cuda.ByteStorage(data_length.item())
+    ncclRecv(data_bytes_stor, prev_rank, comm)
+    tensor = torch.ByteTensor(data_bytes_stor.cpu())
+    data = pickle.loads(tensor.numpy().tobytes())
+    return data
+    
 def send_activations_list(hidden_state_list, next_rank, comm, async_op=False):
     if async_op:
         current_stream = torch.cuda.current_stream()
         with torch.cuda.stream(config["pp_comm_stream"]):
             config["pp_comm_stream"].wait_stream(current_stream)
-            length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
-            length[0] = len([h for h in hidden_state_list ])
+            length = torch.tensor(data=[len([h for h in hidden_state_list ])], device="cuda", dtype=torch.int)
             ncclSend(length.storage(), next_rank, comm)
+            flags = torch.tensor(data=[0 for _ in range(len(hidden_state_list))], device="cuda",dtype=torch.int)
             for i in range(len(hidden_state_list)):
                 if hidden_state_list[i] is None:
-                    hidden_state_list[i] = torch.tensor([12306],dtype=torch.int,device="cuda")
-                hidden_state_list[i].record_stream(config["pp_comm_stream"])
-                send_activations(hidden_state_list[i], next_rank, comm)
+                    flag = -1
+                elif torch.is_tensor(hidden_state_list[i]):
+                    flag = 0
+                else:
+                    flag = 1
+                flags[i] = flag
+            ncclSend(flags.contiguous().storage(), next_rank, comm)
+            for i in range(len(hidden_state_list)):
+                if flags[i] == 0:
+                    hidden_state_list[i].record_stream(config["pp_comm_stream"])
+                    send_activations(hidden_state_list[i], next_rank, comm)
+                elif flags[i] == 1:
+                    send_object(hidden_state_list[i], next_rank, comm)
         return handler(config["pp_comm_stream"])
     else:
         length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
@@ -58,14 +88,22 @@ def recv_activations_list(prev_rank, comm, async_op = True):
         length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
         hidden_state_list = []
         ncclRecv(length.storage(), prev_rank, comm)
+        flags = torch.tensor(data=[0 for _ in range(length)], device="cuda",dtype=torch.int)
+        ncclRecv(flags.storage(), prev_rank, comm)
+        bmt.synchronize(bmt.config["pp_zero_comm"])
         for i in range(length[0].item()):
-            recv = recv_activations(prev_rank, comm)
-            if len(recv.shape) == 1 and recv.shape[0] == 1 and recv.item() == 12306:
+            flag = flags[i].item()
+            if flag == -1:
                 hidden_state_list.append(None)
-            else:
+            elif flag == 0:
+                recv = recv_activations(prev_rank, comm)
                 hidden_state_list.append(recv)
-
+            elif flag == 1:
+                recv = recv_object(prev_rank, comm)
+                hidden_state_list.append(recv)
+        
         return hidden_state_list
+
 
 
 def send_activations(hidden_state, next_rank, comm):

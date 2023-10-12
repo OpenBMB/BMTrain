@@ -83,6 +83,7 @@ def init_distributed(
     config["zero_rank"] = config['topology'].get_group_rank("zero")
     config["tp_rank"] = config['topology'].get_group_rank("tp")
     config["tp_zero_rank"] = config['topology'].get_group_rank("tp_zero")
+    config["pipe_rank"] = config['topology'].get_group_rank("pipe")
     if debug:
         config["logger"] = get_logger(rank, "DEBUG")
     cpus_this_worker = None
@@ -203,6 +204,9 @@ class topology:
         self.zero_idx = 0
         self.zero_id = self.rank
 
+    def get_comm(self, group_name):
+        if group_name == "pipe":
+            return config["pipe_comm"]
 
     def get_group_id(self,group_name):
         if group_name == "pipe":
