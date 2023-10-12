@@ -1,5 +1,0 @@
-sphinx>=4.0.0
-recommonmark
-sphinx_markdown_tables
-sphinx_rtd_theme>=0.3.0
-torch
