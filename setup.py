@@ -91,6 +91,10 @@ class CMakeBuild(build_ext):
 ext_modules = [
     CMakeExtension("bmtrain.C"),
 ]
+
+# 移步version.py里去修改__version__
+import version
+
 setup(
     name='bmtrain',
     version='0.2.3.post2',
