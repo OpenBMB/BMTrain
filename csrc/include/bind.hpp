@@ -71,3 +71,4 @@ void adam_bf16_launcher(
     float bias_correction2,
     uintptr_t stream
 );
+void cuda_spin(int timeout, std::uintptr_t stream);

@@ -16,6 +16,7 @@ def init_distributed(
         pipe_size: int = -1,
         num_micro_batches: int = None,
         tp_size : int = 1,
+        timeout: int = 18 * 60 * 1000 # miliseconds
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -55,13 +56,12 @@ def init_distributed(
     addr = os.environ["MASTER_ADDR"]
     port = os.environ["MASTER_PORT"]
     master = addr+":"+port
-    timeout = datetime.timedelta(seconds=1800)
+    timeout_rdz = datetime.timedelta(seconds=timeout // 1000)
     rendezvous_iterator = dist.rendezvous(
-        init_method, rank, world_size, timeout=timeout
-    )   
-
+        init_method, rank, world_size, timeout=timeout_rdz
+    )
     store, rank, world_size = next(rendezvous_iterator)
-    store.set_timeout(timeout)
+    store.set_timeout(timeout_rdz)
     store = dist.PrefixStore("bmtrain", store)
     torch.cuda.set_device(local_rank)
     config["initialized"] = True
@@ -110,35 +110,34 @@ def init_distributed(
         store.set("BMTRAIN_UNIQUE_ID", unique_id.hex() )
     
     unique_id = bytes.fromhex(store.get("BMTRAIN_UNIQUE_ID").decode())
-    config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
     topo = config['topology']
-
+    config['comm'] = nccl.commInitRank(unique_id, world_size, rank, timeout)
     if config['pipe_enabled']:
         config["micros"] = num_micro_batches if num_micro_batches else config["pipe_size"]
         if topo.stage_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"PIPE_UNIQUE_ID{topo.pipe_idx}", unique_id.hex())
         unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
-        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id)
+        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id, timeout, False)
 
         if topo.pp_zero_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}", unique_id.hex() )
         unique_id = bytes.fromhex(store.get(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}").decode())
-        config['pp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['pipe_size'], topo.pp_zero_id)
+        config['pp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['pipe_size'], topo.pp_zero_id, timeout)
 
     if config['tp_size'] > 1:
         if topo.tp_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"TP_UNIQUE_ID{topo.tp_idx}", unique_id.hex())
         unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
-        config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
+        config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id, timeout)
 
         if topo.tp_zero_id == 0:
             unique_id = nccl.getUniqueId()
             store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
         unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
-        config['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['tp_size'], topo.tp_zero_id)
+        config['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['tp_size'], topo.tp_zero_id, timeout)
 
 
     if config['pipe_size'] > 1 and config['tp_size'] > 1:
@@ -146,7 +145,7 @@ def init_distributed(
             unique_id = nccl.getUniqueId()
             store.set(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}", unique_id.hex() )
         unique_id = bytes.fromhex(store.get(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}").decode())
-        config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id)
+        config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id, timeout)
 
     config ['zero_comm'] = config['comm']
 

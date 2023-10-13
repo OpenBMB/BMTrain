@@ -1,10 +1,10 @@
 from utils import *
-
+import os
 import bmtrain as bmt
 import torch
-
-def test_main(dtype):
-    x = torch.full((1,), bmt.rank() + 1, dtype=dtype, device="cuda").requires_grad_(True)
+import time
+def test_main():
+    x = torch.full((1,), bmt.rank() + 1, dtype=torch.half, device="cuda").requires_grad_(True)
     y = bmt.distributed.all_reduce(x, "prod").view(-1)
     loss = (y * y).sum() / 2
     loss.backward()
@@ -37,6 +37,7 @@ def test_reducescatter():
         assert torch.allclose(ref_g, pgrad, atol=1e-3, rtol=1e-3)
 
 if __name__ == "__main__":
+    os.environ["WORLD_SIZE"] = "2"
     bmt.init_distributed()
     test_reducescatter()
     test_main(torch.half)

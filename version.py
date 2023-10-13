@@ -5,13 +5,14 @@ import re
 ##########################
 # 发版改这里的版本号, 会自动打tag & 自动编译py3.7～3.10的 wheel package 到 https://mirror.in.zhihu.com/simple/libcpm/
 # 默认 MR 和 Master 不发版情况下，只做py310的编译过程, 每个 MR 都跑 py3.7～3.10 的编译过程的话，速度会比较慢
-# libcpm release version
+# bmtrain release version
 __package__ = 'bmtrain-zh'
-__version__ = 'v0.2.3'
+__version__ = 'v0.2.5'
 
 ##########################
 
 VersionPattern = "^[v]?[0-9]{1,}[.][0-9]{1,}[.][0-9]{1,}$"
+
 
 def is_newer_version(tags):
     vers = tags.split(" ")
@@ -22,10 +23,11 @@ def is_newer_version(tags):
             return False
     return True
 
+
 def _cmp_version(v1, v2):
     a = _parse_version(v1)
     b = _parse_version(v2)
-    if a is None or b is None: # skip
+    if a is None or b is None:  # skip
         return False
     for i in range(len(a)):
         if a[i] == b[i]:
@@ -36,6 +38,7 @@ def _cmp_version(v1, v2):
             return False
     return False
 
+
 def _parse_version(version):
     ver = version.strip()
     if re.match(VersionPattern, ver) is None:
@@ -44,6 +47,7 @@ def _parse_version(version):
     tokens = ver.split(".")
     return int(tokens[0]), int(tokens[1]), int(tokens[2])
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     tags = "v3.1.0 v2.9.9 v3.9.7, v4.9.1.dev0"
     print(is_newer_version(tags))

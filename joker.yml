@@ -1,13 +1,28 @@
-version: 2.0
+version: 3.0
 base_image: bionic
+compoments:
+  python: 3.7
+label: klara-ci
+features:
+  - enable-docker-run-gpu-1
 
 deps:
   - libxml2-dev
-  - python-pip
+  - python3-pip
+  - build-essential
+  - cmake
 
 build:
-  - ./scripts/publish.sh
+  - ./scripts/build.sh
 
 test:
   unittest:
-    - echo 0
+    - echo 0 #./scripts/run_tests.sh
+
+post_build:
+  scripts:
+    - ./scripts/publish.sh
+
+cache:
+  directories:
+    - build/

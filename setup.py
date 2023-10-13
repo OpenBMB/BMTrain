@@ -36,8 +36,9 @@ class CMakeBuild(build_ext):
             extdir += os.path.sep
 
         debug = int(os.environ.get("DEBUG", 0)) if self.debug is None else self.debug
-        cfg = "Debug" if debug else "Release"
+        cfg = "Debug" if debug else "RelWithDebInfo"
 
+        avx_flags = os.environ.get("AVX_FLAGS", "")
         # CMake lets you override the generator - we need to check this.
         # Can be set with Conda-Build, for example.
         cmake_generator = os.environ.get("CMAKE_GENERATOR", "")
@@ -51,6 +52,7 @@ class CMakeBuild(build_ext):
             f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DPYTHON_VERSION={sys.version_info.major}.{sys.version_info.minor}",
             f"-DCMAKE_BUILD_TYPE={cfg}",  # not used on MSVC, but no harm
+            f"-DAVX_FLAGS={avx_flags}"
         ]
 
         build_args = []
