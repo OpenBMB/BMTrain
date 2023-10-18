@@ -85,24 +85,26 @@ def send_activations_list(hidden_state_list, next_rank, comm, async_op=False):
 
 def recv_activations_list(prev_rank, comm, async_op = True):
     if async_op:
-        length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
-        hidden_state_list = []
-        ncclRecv(length.storage(), prev_rank, comm)
-        flags = torch.tensor(data=[0 for _ in range(length)], device="cuda",dtype=torch.int)
-        ncclRecv(flags.storage(), prev_rank, comm)
-        bmt.synchronize(bmt.config["pp_zero_comm"])
-        for i in range(length[0].item()):
-            flag = flags[i].item()
-            if flag == -1:
-                hidden_state_list.append(None)
-            elif flag == 0:
-                recv = recv_activations(prev_rank, comm)
-                hidden_state_list.append(recv)
-            elif flag == 1:
-                recv = recv_object(prev_rank, comm)
-                hidden_state_list.append(recv)
-        
-        return hidden_state_list
+        with torch.cuda.stream(config["pp_comm_stream"]):
+            length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
+            hidden_state_list = []
+            ncclRecv(length.storage(), prev_rank, comm)
+            flags = torch.tensor(data=[0 for _ in range(length)], device="cuda",dtype=torch.int)
+            ncclRecv(flags.storage(), prev_rank, comm)
+            for i in range(length[0].item()):
+                flag = flags[i].item()
+                if flag == -1:
+                    hidden_state_list.append(None)
+                elif flag == 0:
+                    recv = recv_activations(prev_rank, comm)
+                    hidden_state_list.append(recv)
+                elif flag == 1:
+                    recv = recv_object(prev_rank, comm)
+                    hidden_state_list.append(recv)
+        for hidden_state in hidden_state_list:
+            if torch.is_tensor(hidden_state):
+                hidden_state.record_stream(torch.cuda.current_stream())
+        return hidden_state_list, handler(config["pp_comm_stream"])
 
 
 

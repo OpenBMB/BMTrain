@@ -11,8 +11,8 @@ from inspect_tools import custom_redirection, lookup_output
 def main():
     bmt.init_distributed(
         seed=0,
-        tp_size=1,
         pipe_size=4,
+        tp_size=1,
         debug=True
     )
 
@@ -25,7 +25,7 @@ def main():
         dim_ff=8192,
         max_distance=1024,
         bias=True,
-        dtype=torch.float32
+        dtype=torch.float16
     )
 
 
@@ -36,8 +36,9 @@ def main():
     # data
     # generate dummy data for each rank
     torch.manual_seed(1234)
-
-    batch_size = 2 * 16
+    micro = 2
+    num_micros = 16
+    batch_size = micro * num_micros
     seq_len = 512
     def data_loader(): 
         for i in range(1000):
@@ -80,21 +81,14 @@ def main():
             lookup_output(model, look_weight=False)
         if iteration >= 4:
             with custom_redirection(f"pp_output_{rank}"):
-                global_loss = pipeline_forward_backward(model, data_loader(), batch_size, optim_manager) 
+                global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
         else:
-            global_loss = pipeline_forward_backward(model, data_loader(), batch_size, optim_manager) 
-        
-
-        bmt.synchronize()
-        if iteration == 4:
-            bmt.save(model, f"pipe_{rank}_iter4.ckpt")
-            if bmt.config["topology"].is_last_rank() or bmt.config["topology"].pipe_rank == 0:
-                is_head = bmt.config["topology"].pipe_rank == 0
-                torch.save(model.word_emb.weight.grad, f"word_emb.ckpt_{int(is_head)}")
+            global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
         # record time and loss
         iteration_time = time.time() - st
    
         if bmt.config["topology"].is_last_rank():
+            global_loss = sum(list(global_loss))/len(global_loss)
             avg_time_recorder.record(iteration_time)
             avg_loss_recorder.record(global_loss)
             print(

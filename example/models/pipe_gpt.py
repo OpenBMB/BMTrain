@@ -2,19 +2,6 @@ import torch
 import bmtrain as bmt
 from layers import TransformerEncoder, Layernorm, Embedding, TransformerEncoder
 from bmtrain.global_var import config
-class InputWrapper(bmt.DistributedModule):
-    def __init__(self, module_list):
-        super().__init__()
-
-        self._module = {}
-        for i in range(len(module_list)):
-            self._module[str(i)] = module_list[i]
-        
-    def forward(self, *args):
-        output_list = []
-        for idx,i in enumerate(args):
-            output_list.append(self._module[str(idx)](i))
-        return sum(output_list)
 
 class GPTPipe(bmt.DistributedModule):
     def __init__(self,
@@ -27,12 +14,11 @@ class GPTPipe(bmt.DistributedModule):
 
         self.max_distance = max_distance
 
-        if config['tp_size'] > 1:
-            word_emb = bmt.nn.ParallelEmbedding(vocab_size, dim_model, dtype=dtype)
-        else:
-            word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
+        # if config['tp_size'] > 1:
+        #     word_emb = bmt.nn.ParallelEmbedding(vocab_size, dim_model, dtype=dtype)
+        # else:
+        word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
-        # self.inp_emb = InputWrapper([word_emb, pos_emb])
         blocklist = []
         blocklist += [
                 TransformerEncoder(
@@ -47,9 +33,12 @@ class GPTPipe(bmt.DistributedModule):
         self.layernorm = self.transformers.add_tail(layernorm)
         self.word_emb = self.transformers.add_head_tail(word_emb)
         if config['tp_size'] > 1:
-            self.loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=True)
+            self.loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=False)
         else:
             self.loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
+
+    def get_blocklist(self):
+        return self.transformers
 
     def forward(self,
             input : torch.LongTensor,   # (batch, seq_len)
@@ -65,10 +54,7 @@ class GPTPipe(bmt.DistributedModule):
         out = self.transformers(input, mask_2d, None)
         out = self.layernorm(out)
         if config['topology'].pipe_rank == config['topology'].pipe_size - 1:
-            if config['tp_size'] > 1:
-                logits = self.word_emb.projection(out)
-            else:
-                logits = self.word_emb(out, True)
+            logits = self.word_emb(out, True)
             logits = logits.float().view(-1, logits.shape[-1])
             target = target.view(-1)
             return self.loss_func(logits, target)

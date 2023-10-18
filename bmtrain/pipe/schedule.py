@@ -28,9 +28,9 @@ def backward_step(inp, output, grad_output, optim_manager=None):
     # if output_tensor_grad[0] is None and config.grad_scale_func is not None:
     #     output_tensor[0] = config.grad_scale_func(output_tensor[0])
     if optim_manager is not None and config["topology"].is_last_rank():
-        if isinstance(output[0], Iterable):
+        if not torch.is_tensor(output[0]) and isinstance(output[0], Iterable):
             output = optim_manager.scale_loss(output[0][0])
-        else:
+        elif torch.is_tensor(output[0]):
             output = optim_manager.scale_loss(output[0])
         
     else:
@@ -95,17 +95,10 @@ def pipeline_forward_backward(model, data_iterator, micro_batch_size, num_micros
         num_warmup = num_micro_batches
     else:
         num_warmup = topo.pipe_size - topo.pipe_rank - 1
-    def generator(data_iterator):
-        while True:
-            try:
-                inp = next(data_iterator)
-                yield model.preprocess_func(inp)
-            except StopIteration:
-                break
     interleaving_size = 1
-    commander = PipeCommander(topo,input_generator=generator(data_iterator), num_micros=num_micro_batches,\
+    commander = PipeCommander(topo,model=model, data_iter=data_iterator, num_micros=num_micro_batches,\
                                 num_warmup=num_warmup, forward_only=False, \
-                                interleaving_size=interleaving_size, \
+                                interleaving_size=interleaving_size \
                                 )
     inps = []
     outputs = []
@@ -168,7 +161,7 @@ def pipeline_forward_backward(model, data_iterator, micro_batch_size, num_micros
 
             commander.send_prev(input_grad)
     blocklist = model.get_blocklist()
-    blocklist.reduce_tied_module()
+    # blocklist.reduce_tied_module()
     grad_norm = optim_manager.clip_grad_norm(optim_manager.optimizers[0].param_groups, clip_grad, norm_type=2)
     optim_manager.step()
     
