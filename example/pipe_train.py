@@ -27,8 +27,7 @@ def main():
         bias=True,
         dtype=torch.float16
     )
-
-
+    inspect_iter = -1
     bmt.print_rank("Model memory")
     bmt.print_rank(torch.cuda.memory_summary())
     bmt.synchronize()
@@ -77,8 +76,10 @@ def main():
         # load data
         st = time.time()
         rank = bmt.config["topology"].pipe_rank
-        if iteration >= 4:
-            global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
+        if iteration == inspect_iter:
+            lookup_output(model)
+            with custom_redirection(f"outputs/pp_output_{pipe_rank}"):
+                global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
         else:
             global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
         # record time and loss

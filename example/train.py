@@ -23,6 +23,7 @@ def main():
         bias=True,
         dtype=torch.half
     )
+    inspect_iter = -1
     bmt.load(model, "./ckpt-0.pt")
     bmt.print_rank("Model memory")
     bmt.print_rank(torch.cuda.memory_summary())
@@ -66,8 +67,9 @@ def main():
     for iteration in range(10):
         # load data
         st = time.time()
-        # if iteration == 1:
-            # lookup_output(model, look_weight=True)
+        if iteration == inspect_iter:
+            lookup_output(model)
+        sum_loss = 0
         for micro in range(global_batch // batch_size):
             # for i in range(bmt.world_size()):
             sent = torch.randint(0, 10240, (batch_size, seq_len + 1))
@@ -88,7 +90,7 @@ def main():
             pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
             # if iteration == 4:
                 # lookup_output(model)
-            if iteration >= 4:
+            if iteration == inspect_iter:
                 with custom_redirection("dp_ref.output"):
                     logits = model(
                         enc_input,
@@ -108,9 +110,8 @@ def main():
             else:
                 loss = loss_func(logits.float().view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
             global_loss = loss.item()
-            optim_manager.zero_grad()
             optim_manager.backward(loss)
-         
+            sum_loss += global_loss 
         # print inspected tensors in the forward & backward pass
         # print parameters of the model
         if iteration % 100 == 0:
@@ -120,17 +121,18 @@ def main():
                 )
             )
         optim_manager.step()
+        optim_manager.zero_grad()
         # record time and loss
         iteration_time = time.time() - st
 
         avg_time_recorder.record(iteration_time)
-        avg_loss_recorder.record(global_loss)
-
+        num_micro = global_batch // batch_size
+        avg_loss_recorder.record(sum_loss/num_micro)
         # print time and loss
         bmt.print_rank(
             "| Iter: {:6d} | loss: {:.10f} average_loss: {:.4f} | lr: {:.4e} scale: {:10.4f} | time: {:.4f}".format(
                 iteration,
-                global_loss,
+                sum_loss / num_micro,
                 avg_loss_recorder.value,
                 lr_scheduler.current_lr,
                 optim_manager.loss_scale,
