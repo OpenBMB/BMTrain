@@ -77,11 +77,8 @@ def main():
         # load data
         st = time.time()
         rank = bmt.config["topology"].pipe_rank
-        if iteration == 4:
-            lookup_output(model, look_weight=False)
         if iteration >= 4:
-            with custom_redirection(f"pp_output_{rank}"):
-                global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
+            global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
         else:
             global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
         # record time and loss

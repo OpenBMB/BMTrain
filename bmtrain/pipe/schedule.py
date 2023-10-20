@@ -58,7 +58,7 @@ def forward_func(model, inp, micro_idx, is_last_micro=False):
         config['logger'].info("inp shape: {}".format(inp[0].shape))
         hidden_state = model(*inp)
         config['logger'].info("inp shape: {}".format(hidden_state[0].shape))
-        if not isinstance(hidden_state, Iterable):
+        if torch.is_tensor(hidden_state) or (not isinstance(hidden_state, Iterable)):
             hidden_state = [hidden_state]
         return hidden_state
 

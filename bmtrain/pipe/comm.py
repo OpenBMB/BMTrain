@@ -15,11 +15,27 @@ class PipeCommander:
         self.model = model
         self.send_handle = {"next":[], "prev":[]}
         self.recv_handle = {"next":[], "prev":[]}
+
+    def is_first_stage(self):
+        if self.interleaving_size == 1:
+            return self.topo.is_first_rank("pipe")
+        else:
+            raise ValueError("Now only supoort interleaving_size == 1")
+
+    def is_last_stage(self):
+        if self.interleaving_size == 1:
+            return self.topo.is_last_rank("pipe")
+        else:
+            raise ValueError("Now only supoort interleaving_size == 1")
+
     def generator(self, data_iterator):
         while True:
             try:
                 inp = next(data_iterator)
-                yield self.model.preprocess_func(inp)
+                if self.is_first_stage():
+                    yield self.model.preprocess_func(inp)
+                else:
+                    yield inp
             except StopIteration:
                 break
 
@@ -51,15 +67,19 @@ class PipeCommander:
                 tensors = list(tensors)
             self.send_handle["prev"].append(send_activations_list(tensors, self.topo.pipe_rank - 1, self.comm, async_op=True))
 
+    def wait(self):
+        torch.cuda.current_stream().wait_stream(config["pp_comm_stream"])
+        
     def recv_prev(self, need_data=False):
         if not self.is_first_stage():
-            res, h = recv_activations_list(self.topo.pipe_rank - 1, self.comm)
-            self.recv_handle["prev"].append(h)
+            res, handle = recv_activations_list(self.topo.pipe_rank - 1, self.comm)
+            self.recv_handle["prev"].append(handle)
             synchronize(config["pp_zero_comm"])
             for idx,tensor in enumerate(res):
                 if idx == 0:
                     tensor.requires_grad_()
-            return res
+            data = self.get_data()
+            return res + data[1:]
         else:
             if need_data:
                 return self.get_data()
@@ -68,20 +88,14 @@ class PipeCommander:
     
     def recv_next(self):
         if not self.is_last_stage():
-            res, h = recv_activations_list(self.topo.pipe_rank + 1, self.comm)
-            self.recv_handle["next"].append(h)
+            res, handle = recv_activations_list(self.topo.pipe_rank + 1, self.comm)
+            self.recv_handle["next"].append(handle)
             return res
         else:
             return [None]
 
     def allocate_tensor(self, shape, dtype):
         return torch.empty(shape, dtype=dtype, device="cuda")
-
-    def is_first_stage(self):
-        return self.topo.pipe_rank == 0
-
-    def is_last_stage(self):
-        return self.topo.pipe_rank == self.topo.pipe_size - 1
 
     def is_even_rank(self):
         return self.topo.pipe_rank % 2 == 0

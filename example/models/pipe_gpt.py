@@ -59,7 +59,7 @@ class GPTPipe(bmt.DistributedModule):
             target = target.view(-1)
             return self.loss_func(logits, target)
         else:
-            return out, pos, mask, target
+            return out
 
     def preprocess_func(self, inp):
         if config['topology'].pipe_rank == 0:
