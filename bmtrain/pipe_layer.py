@@ -245,7 +245,7 @@ class PipelineTransformerBlockList(torch.nn.Module):
             hidden_state = StagePreFunction.apply(hidden_state, self.pipe_rank)
 
             for idx,layer_id in enumerate(self.layer_ids):
-                self._modules[str(layer_id)]._micro_idx = micro_idx
+                # self._modules[str(layer_id)]._micro_idx = micro_idx
                 if return_hidden_states:
                     micro_hidden_states.append(hidden_state)
                 hidden_state = self._modules[str(layer_id)](hidden_state, *arg)

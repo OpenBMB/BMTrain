@@ -4,7 +4,7 @@ from .global_var import config
 from .synchronize import wait_loader
 
 class ZeroContext:
-    def __init__(self, block : 'Block', ctx_dict : dict = None, pipe = False) -> None:
+    def __init__(self, block : 'Block', ctx_dict : dict = None) -> None:
         self.block = block
         self.ctx_dict = ctx_dict
         self._param_buffer = {}
@@ -16,6 +16,10 @@ class ZeroContext:
     def enter(self, flag=0, requires_grad=False):
         """
         gather parameters
+        flags = 0: normal mode
+        flags = 1: gather param and not release , then save in ctx_dict
+        flags = 2: not gather param and use the param in ctx_dict
+
         """
         if self.block._ready:
             return
