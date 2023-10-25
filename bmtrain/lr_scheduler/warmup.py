@@ -16,7 +16,7 @@ class WarmupLRScheduler:
         self.warmup_iter = warmup_iter
         self.end_iter = end_iter
         self.optimizer = optimizer
-        self.num_iter = num_iter
+        self.num_iter = 0 
         self._current_lr = None
         
         self.step(self.num_iter)
@@ -37,9 +37,11 @@ class WarmupLRScheduler:
     def current_lr(self):
         return self._current_lr
 
-    def step(self, num_iter = None) -> None:
-        if num_iter is None:
+    def step(self, num_step = None) -> None:
+        if num_step is None:
             num_iter = self.num_iter + 1
+        else:
+            num_iter = self.num_iter + num_step
         self.num_iter = num_iter
 
         lr = self.get_lr()

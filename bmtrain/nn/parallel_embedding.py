@@ -54,7 +54,7 @@ class ParallelEmbedding(bmt.DistributedModule):
             embed_list = embeds.chunk(config['tp_size'], dim=0)
             embeds = embed_list[config['topology'].tp_id].flatten(0,1)
             
-        return embeds.clone()
+        return embeds
 
     def projection(self, x: torch.Tensor):
         """

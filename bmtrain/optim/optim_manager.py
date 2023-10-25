@@ -140,7 +140,10 @@ class OptimManager:
                 optimizer.step()
 
             if lr_scheduler is not None:
-                lr_scheduler.step()
+                if config["pipe_size"] > 1:
+                    lr_scheduler.step(config["micros"] // config["pipe_size"] // config["zero_size"])
+                else:
+                    lr_scheduler.step()
 
         if self.loss_scale_enabled:
             self.steps_since_last_scale += 1
