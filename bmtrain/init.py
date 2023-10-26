@@ -86,6 +86,8 @@ def init_distributed(
     config["pipe_rank"] = config['topology'].get_group_rank("pipe")
     if debug:
         config["logger"] = get_logger(rank, "DEBUG")
+    else:
+        config["logger"] = get_logger(rank, "ERROR")
     cpus_this_worker = None
     
     all_available_cpus = sorted(list(os.sched_getaffinity(0)))

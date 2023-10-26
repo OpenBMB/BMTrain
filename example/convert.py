@@ -4,7 +4,7 @@ from models import GPT, GPTPipe
 import re
 from collections import OrderedDict
 
-def partition(pipe_rank,pipe_size,len_modules):
+def partition(pipe_rank, pipe_size, len_modules):
     part_lens = [0]+[(len_modules // pipe_size + (i < (len_modules % pipe_size))) for i in range(pipe_rank+1)]
     start = sum(part_lens[:pipe_rank+1])
     end = start + part_lens[pipe_rank+1]
