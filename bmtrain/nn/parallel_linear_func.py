@@ -193,7 +193,7 @@ class OpParallelLinear(torch.autograd.Function):
         ctx.reduce_output_type = reduce_output_type
         ctx.async_gather_chunks = async_gather_chunks
 
-        if gather_input and config['tp_size'] > 1 and async_gather_chunks > 1:
+        if gather_input and config['tp_size'] > 1 and async_gather_chunks > 1 and split_input == False:
             out = async_all_gather_linear_func(input, weight, bias, async_gather_chunks)
         elif reduce_output_type == ReduceType.REDUCE_SCATTER:
             return async_reduce_scatter_linear_func(input, weight, bias, async_gather_chunks)
@@ -212,13 +212,6 @@ class OpParallelLinear(torch.autograd.Function):
         if reduce_output_type == ReduceType.ALL_REDUCE:
             nccl.allReduce(out.storage(), out.storage(), "sum", config['tp_comm'])
             return out 
-
-        elif reduce_output_type == ReduceType.REDUCE_SCATTER:
-            shape = list(out.shape)
-            shape[0] = shape[0] // config['tp_size']
-            reduce_out = torch.empty(shape, dtype=out.dtype, device=out.device)
-            nccl.reduceScatter(out.storage(), reduce_out.storage(), "sum", config['tp_comm'])
-            return reduce_out
         else:
             assert False, "no support reduce type{}".format(reduce_output_type)
             
