@@ -85,7 +85,7 @@ class OptimManager:
 
     def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
 
-        return loss * (self.loss_scale / config['world_size'] * config['pipe_size']) # loss scale
+        return loss * (self.loss_scale / config['world_size'] * config['pipe_size'] * config['tp_size']) # loss scale
 
     def backward(self, loss : torch.Tensor):
         """
