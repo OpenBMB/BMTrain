@@ -102,6 +102,8 @@ def recv_activations_list(prev_rank, comm, async_op = True):
                 elif flag == 1:
                     recv = recv_object(prev_rank, comm)
                     hidden_state_list.append(recv)
+        current_stream = torch.cuda.current_stream()
+        current_stream.wait_stream(config["pp_comm_stream"])
         for hidden_state in hidden_state_list:
             if torch.is_tensor(hidden_state):
                 hidden_state.record_stream(torch.cuda.current_stream())
