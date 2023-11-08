@@ -633,11 +633,14 @@ def DummyForward(*args, **kwargs):
 
 class PipeDreamBlockList(TransformerBlockList):
     
-    def __init__(self, modules: Iterable[Block], num_hidden=1, sqrt=False) -> None:
+    def __init__(self, modules: Iterable[Block], num_hidden=1, use_checkpoint=False) -> None:
         module_dict = {}
         mode = "1F1B"
+        if isinstance(use_checkpoint, bool):
+            use_checkpoint = [use_checkpoint for _ in range(len(modules))]
+        assert isinstance(use_checkpoint,Iterable) and len(use_checkpoint) == len(modules), "use_checkpoint should be a list of bool variable or a bool variable"
         for idx in range(len(modules)):
-           modules[idx] = _block_wrapper(modules[idx], module_dict, mode=mode, zero_level=2, use_checkpoint=False) 
+           modules[idx] = _block_wrapper(modules[idx], module_dict, mode=mode, zero_level=2, use_checkpoint=use_checkpoint[idx]) 
         s,e = self.partition(modules)
         self.head_idx = s
         self.tail_idx = e
@@ -693,8 +696,8 @@ class PipeDreamBlockList(TransformerBlockList):
         self.fisrt_module[0].set_pre_module(module)
         self.fisrt_module = (module,)
 
-    def add_head(self, module):
-        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=False)
+    def add_head(self, module, use_checkpoint=False):
+        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=use_checkpoint)
         module.init_param_storage()
         if config['topology'].pipe_rank != 0:
             return DummyForward
@@ -707,8 +710,8 @@ class PipeDreamBlockList(TransformerBlockList):
     def get_last_layer(self):
         return self._modules[str(len(self)-1)]
 
-    def add_head_tail(self, module): 
-        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=False)
+    def add_head_tail(self, module, use_checkpoint=False): 
+        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=use_checkpoint)
         module.init_param_storage()
         if config['topology'].pipe_rank != 0 and not config['topology'].is_last_rank():
             return DummyForward
@@ -747,8 +750,8 @@ class PipeDreamBlockList(TransformerBlockList):
         module.set_pre_module(self.last_module[0])
         self.last_module = (module,) 
 
-    def add_tail(self, module):
-        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=False)
+    def add_tail(self, module, use_checkpoint=False):
+        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=use_checkpoint)
         module.init_param_storage()
         if config['topology'].pipe_rank != config['topology'].pipe_size - 1:
             return DummyForward
