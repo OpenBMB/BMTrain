@@ -17,6 +17,7 @@ def init_distributed(
         num_micro_batches: int = None,
         tp_size : int = 1,
         timeout: int = 18 * 60 * 1000 # miliseconds
+        nccl_sync = True,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -83,6 +84,7 @@ def init_distributed(
     config["tp_rank"] = config['topology'].get_group_rank("tp")
     config["tp_zero_rank"] = config['topology'].get_group_rank("tp_zero")
     config["save_param_to_cpu"] = True
+    config["nccl_sync"] = nccl_sync
     cpus_this_worker = None
     
     all_available_cpus = sorted(list(os.sched_getaffinity(0)))

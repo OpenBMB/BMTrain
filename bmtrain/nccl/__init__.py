@@ -3,6 +3,7 @@ from typing_extensions import Literal
 import torch
 from .. import C
 from .enums import *
+from bmtrain.global_var import config
 
 class NCCLCommunicator:
     """
@@ -138,6 +139,10 @@ def allReduce(
         comm.ptr,
         torch.cuda.current_stream().cuda_stream
     )
+
+    if config['nccl_sync'] is True:
+        torch.cuda.synchronize()
+
 def send(src : torch.storage._StorageBase,
          peer : int,
          comm : NCCLCommunicator
@@ -161,6 +166,9 @@ def send(src : torch.storage._StorageBase,
         comm.ptr,
         torch.cuda.current_stream().cuda_stream
     )
+    if config['nccl_sync'] is True:
+        torch.cuda.synchronize()
+
 def recv(dst : torch.storage._StorageBase,
          peer : int,
          comm : NCCLCommunicator
@@ -176,6 +184,8 @@ def recv(dst : torch.storage._StorageBase,
         comm.ptr,
         torch.cuda.current_stream().cuda_stream
     )
+    if config['nccl_sync'] is True:
+        torch.cuda.synchronize()
     
 def broadcast(
         src : torch.storage._StorageBase,
@@ -215,6 +225,8 @@ def broadcast(
         comm.ptr, 
         torch.cuda.current_stream().cuda_stream
     )
+    if config['nccl_sync'] is True:
+        torch.cuda.synchronize()
 
 def reduce(
         src : torch.storage._StorageBase,
@@ -248,6 +260,8 @@ def reduce(
 
     assert dst.size() == src.size(), "Buffer size not aligned"
     C.ncclReduce(sendbuff, recvbuff, count, datatype, operator, root, comm.ptr, torch.cuda.current_stream().cuda_stream)
+    if config['nccl_sync'] is True:
+        torch.cuda.synchronize()
 
 def allGather(
         src : torch.storage._StorageBase,
@@ -282,6 +296,8 @@ def allGather(
         comm.ptr, 
         torch.cuda.current_stream().cuda_stream
     )
+    if config['nccl_sync'] is True:
+        torch.cuda.synchronize()
 
 
 def reduceScatter(
@@ -322,15 +338,21 @@ def reduceScatter(
         comm.ptr,
         torch.cuda.current_stream().cuda_stream
     )
+    if config['nccl_sync'] is True:
+        torch.cuda.synchronize()
 
 def groupStart():
     """
     NCCL API: `ncclGroupStart <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/group.html#ncclgroupstart>`_
     """
     C.ncclGroupStart()
+    if config['nccl_sync'] is True:
+        torch.cuda.synchronize()
 
 def groupEnd():
     """
     NCCL API: `ncclGroupEnd <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/group.html#ncclgroupend>`_
     """
     C.ncclGroupEnd()
+    if config['nccl_sync'] is True:
+        torch.cuda.synchronize()
