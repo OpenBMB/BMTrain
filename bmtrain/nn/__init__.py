@@ -4,4 +4,3 @@ from .row_parallel_linear import RowParallelLinear
 from .parallel_embedding import ParallelEmbedding 
 from .parallel_cross_entropy_func import parallel_cross_entropy_func
 from .parallel_linear_func import OpParallelLinear
-from .pipe_embedding import PipeEmbedding

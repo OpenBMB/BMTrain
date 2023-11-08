@@ -30,6 +30,8 @@ class ZeroContext:
         with torch.cuda.stream(config["load_stream"]):
             for kw, val in self.block._storage_info.items():
                 assert self.block._storage_params[kw].is_cuda
+                if nccl.commCount(val['zero_comm']) == 1:
+                    continue
                 assert kw not in self._grad_buffer
                 assert kw not in self._param_buffer
                 local_param = self.block._storage_params[kw]    
@@ -45,6 +47,8 @@ class ZeroContext:
             if flag != 2:
                 nccl.groupStart()
                 for kw, val in self.block._storage_info.items():
+                    if nccl.commCount(val['zero_comm']) == 1:
+                        continue
                     nccl.allGather(
                         self.block._storage_params[kw].storage(),
                         self._param_buffer[kw],
@@ -57,6 +61,8 @@ class ZeroContext:
         
         # set wait stream for each storage
         for kw in self.block._storage_info.keys():
+            if nccl.commCount(self.block._storage_info[kw]['zero_comm']) == 1:
+                continue
             if flag != 2:
                 self._param_tensor[kw].record_stream(current_stream)
             if requires_grad and kw in self._grad_tensor:
@@ -67,6 +73,9 @@ class ZeroContext:
             kw_name = param["kw_name"]
             offset = param["offset"]
             shape = param["shape"]
+
+            if nccl.commCount(self.block._storage_info[kw_name]["zero_comm"]):
+                continue
 
             if flag != 2:
                 dtype = self._param_buffer[kw_name].dtype
@@ -94,8 +103,11 @@ class ZeroContext:
         self.block._ready = False
         if backward:
             for kw, val in self.block._storage_info.items():
-                local_param = self.block._storage_params[kw]
 
+                if nccl.commCount(val['zero_comm']) == 1:
+                    continue
+
+                local_param = self.block._storage_params[kw]
                 # accumulate previous gradient
                 if local_param.requires_grad:
                     if local_param.grad is None:
@@ -110,8 +122,11 @@ class ZeroContext:
             with torch.cuda.stream(config["load_stream"]):
                 nccl.groupStart()
                 for kw, val in self.block._storage_info.items():
-                    local_param = self.block._storage_params[kw]
 
+                    if nccl.commCount(val["zero_comm"]):
+                        continue
+
+                    local_param = self.block._storage_params[kw]
                     # scatter gradient
                     if local_param.requires_grad:
                         nccl.reduceScatter(
@@ -131,6 +146,8 @@ class ZeroContext:
         # Release all parameters from buffer to block_storge
         for param in self.block._param_info:
             kw_name = param["kw_name"]
+            if nccl.commCount(self.block._storage_info[kw_name]["zero_comm"]):
+                continue
             dtype = self.block._storage_params[kw_name].dtype
             device = self.block._storage_params[kw_name].device
             if "begin" not in param:

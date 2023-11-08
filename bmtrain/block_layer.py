@@ -189,7 +189,7 @@ class Block(torch.nn.Module):
             # copy values to buffer for normal parameter
             storage_st = self._storage_info[kw_name]["begin"]
             storage_end = self._storage_info[kw_name]["end"]
-            
+            comm = self._storage_info[kw_name]["zero_comm"] 
             # make parameter contiguous in storage
             with torch.no_grad():
                 contiguous_param = OpAllGather.apply(param)
@@ -207,11 +207,16 @@ class Block(torch.nn.Module):
                 # PyTorch 1.11 changed the API of storage.__getitem__
                 d_dtype = self._storage_params[kw_name].dtype
                 d_device = self._storage_params[kw_name].device
-                param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
                 self._param_info[-1]["begin"] = to_offset_st
                 self._param_info[-1]["end"] = (to_offset_end - to_offset_st,)
-                param.data[:] = \
-                    torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
+                if nccl.commCount(comm) != 1:
+                    param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
+                    param.data[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
+                else:
+                    param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self._storage_params[kw_name].storage(), to_offset_st, param_shape)
+                    param.data[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, param_shape)[:]
                 del contiguous_param
             else:
                 param.data = torch.tensor([], dtype=param.dtype, device=param.device)
@@ -455,8 +460,12 @@ class Block(torch.nn.Module):
                 # PyTorch 1.11 changed the API of storage.__getitem__
                 d_dtype = self._storage_params[kw_name].dtype
                 d_device = self._storage_params[kw_name].device
-                param.data[:] = \
-                    torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, (offset_end - offset_st,))[:]
+                if nccl.commCount(self._storage_info[kw_name]["zero_comm"]) == 1:
+                    param.data[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, it["shape"])[:]
+                else:
+                    param.data[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, (offset_end - offset_st,))[:]
                 del tmp_tensor
 
         
