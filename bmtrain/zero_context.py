@@ -30,7 +30,7 @@ class ZeroContext:
         with torch.cuda.stream(config["load_stream"]):
             for kw, val in self.block._storage_info.items():
                 assert self.block._storage_params[kw].is_cuda
-                if nccl.commCount(val['zero_comm']) == 1:
+                if val["world_size"] == 1:
                     continue
                 assert kw not in self._grad_buffer
                 assert kw not in self._param_buffer
@@ -47,7 +47,7 @@ class ZeroContext:
             if flag != 2:
                 nccl.groupStart()
                 for kw, val in self.block._storage_info.items():
-                    if nccl.commCount(val['zero_comm']) == 1:
+                    if val["world_size"] == 1:
                         continue
                     nccl.allGather(
                         self.block._storage_params[kw].storage(),
@@ -61,7 +61,7 @@ class ZeroContext:
         
         # set wait stream for each storage
         for kw in self.block._storage_info.keys():
-            if nccl.commCount(self.block._storage_info[kw]['zero_comm']) == 1:
+            if self.block._storage_info[kw]['world_size'] == 1:
                 continue
             if flag != 2:
                 self._param_tensor[kw].record_stream(current_stream)
@@ -74,7 +74,7 @@ class ZeroContext:
             offset = param["offset"]
             shape = param["shape"]
 
-            if nccl.commCount(self.block._storage_info[kw_name]["zero_comm"]):
+            if self.block._storage_info[kw_name]["world_size"] == 1:
                 continue
 
             if flag != 2:
@@ -104,7 +104,7 @@ class ZeroContext:
         if backward:
             for kw, val in self.block._storage_info.items():
 
-                if nccl.commCount(val['zero_comm']) == 1:
+                if val['world_size'] == 1:
                     continue
 
                 local_param = self.block._storage_params[kw]
@@ -123,7 +123,7 @@ class ZeroContext:
                 nccl.groupStart()
                 for kw, val in self.block._storage_info.items():
 
-                    if nccl.commCount(val["zero_comm"]):
+                    if val["world_size"] == 1:
                         continue
 
                     local_param = self.block._storage_params[kw]
@@ -146,7 +146,7 @@ class ZeroContext:
         # Release all parameters from buffer to block_storge
         for param in self.block._param_info:
             kw_name = param["kw_name"]
-            if nccl.commCount(self.block._storage_info[kw_name]["zero_comm"]):
+            if self.block._storage_info[kw_name]["world_size"] == 1:
                 continue
             dtype = self.block._storage_params[kw_name].dtype
             device = self.block._storage_params[kw_name].device

@@ -694,7 +694,7 @@ class PipeDreamBlockList(TransformerBlockList):
         self.fisrt_module = (module,)
 
     def add_head(self, module):
-        module = _block_wrapper(module, self.module_dict, mode="1F1B")
+        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=False)
         module.init_param_storage()
         if config['topology'].pipe_rank != 0:
             return DummyForward
@@ -708,7 +708,7 @@ class PipeDreamBlockList(TransformerBlockList):
         return self._modules[str(len(self)-1)]
 
     def add_head_tail(self, module): 
-        module = _block_wrapper(module, self.module_dict, mode="1F1B")
+        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=False)
         module.init_param_storage()
         if config['topology'].pipe_rank != 0 and not config['topology'].is_last_rank():
             return DummyForward
@@ -748,7 +748,7 @@ class PipeDreamBlockList(TransformerBlockList):
         self.last_module = (module,) 
 
     def add_tail(self, module):
-        module = _block_wrapper(module, self.module_dict, mode="1F1B")
+        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=False)
         module.init_param_storage()
         if config['topology'].pipe_rank != config['topology'].pipe_size - 1:
             return DummyForward
