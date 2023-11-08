@@ -16,7 +16,7 @@ def init_distributed(
         pipe_size: int = -1,
         num_micro_batches: int = None,
         tp_size : int = 1,
-        timeout: int = 18 * 60 * 1000 # miliseconds
+        timeout: int = 18 * 60 * 1000, # miliseconds
         nccl_sync = True,
     ):
     """Initialize distributed training.
