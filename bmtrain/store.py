@@ -10,6 +10,7 @@ from . import nccl
 import io, pickle
 from typing import Mapping
 import threading
+import bmtrain as bmt
 
 def _save_to_state_dict(model : torch.nn.Module, rank, destination, prefix):
     if isinstance(model, Block):
@@ -116,6 +117,7 @@ def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False):
             config['finish_save'] = False
             config['save_thread'] = threading.Thread(target=async_save_to_file, args=(state_dict, file_name))
             config['save_thread'].start()
+    bmt.synchronize()
 
 DTYPE_LIST = [
     torch.float64,
