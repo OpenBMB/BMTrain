@@ -17,7 +17,7 @@ def init_distributed(
         num_micro_batches: int = None,
         tp_size : int = 1,
         timeout: int = 18 * 60 * 1000, # miliseconds
-        nccl_sync = True,
+        nccl_sync = False,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
