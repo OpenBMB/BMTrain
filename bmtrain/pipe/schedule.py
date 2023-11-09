@@ -32,7 +32,7 @@ def backward_step(inp, output, grad_output, optim_manager=None):
             output = optim_manager.scale_loss(output[0][0])
         elif torch.is_tensor(output[0]):
             output = optim_manager.scale_loss(output[0])
-        
+        output = output / config['micros']
     else:
         output = output[0]
     torch.autograd.backward(output, grad_tensors=grad_output[0])
