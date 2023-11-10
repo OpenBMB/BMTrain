@@ -200,8 +200,8 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     state[param]["_grad_fp32"] = torch.empty(param.size(), dtype=torch.float32, pin_memory=True)   # on host
                 else:
                     # initialize placeholders
-                    state[param]["_param_fp16"] = torch.empty(param.size(), dtype=torch.float16, pin_memory=True)  # on host
-                    state[param]["_grad_fp16"] = torch.empty(param.size(), dtype=torch.float16, pin_memory=True)   # on host
+                    state[param]["_param_fp16"] = torch.empty(param.size(), dtype=param.dtype, pin_memory=True)  # on host
+                    state[param]["_grad_fp16"] = torch.empty(param.size(), dtype=param.dtype, pin_memory=True)   # on host
             else:
                 state[k] = v
 

@@ -87,7 +87,7 @@ def async_save_to_file(state_dict, file_path):
     config['finish_save'] = True
     print("finish save state_dict to ", file_path) 
 
-def save(model : torch.nn.Module, file_name : str, non_blocking : bool=True):
+def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False):
     """Saves the model to the file.
 
     Similar to torch.save, but it used for distributed modules.
