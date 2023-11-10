@@ -1,7 +1,7 @@
 from collections import OrderedDict
 from typing import Dict
 import torch
-
+from .pipe import save_model_pipe, load_model_pipe
 from .pipe_layer import PipelineTransformerBlockList
 from .block_layer import TransformerBlockList
 from .global_var import config
@@ -102,7 +102,12 @@ def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False):
         >>> bmtrain.save(model, "model.pt")
     """
     torch.cuda.synchronize()
+    if config["pipe_size"] > 1:
+        save_model_pipe(model, file_name)
+        return 
+        
     state_dict = _save_to_rank0(model)
+        
     if config["rank"] == 0:
         if non_blocking is False:
             torch.save(state_dict, file_name)
