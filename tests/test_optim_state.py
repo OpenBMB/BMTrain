@@ -2,7 +2,7 @@ import torch
 import bmtrain as bmt
 import os
 from copy import deepcopy
-from bmtrain import optim
+from bmtrain import optim, lr_scheduler
 
 class TestSubModule(bmt.DistributedModule):
     def __init__(self):
@@ -71,10 +71,13 @@ def main():
     opt1 = optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
     opt2 = optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-3)
     opt3 = torch.optim.Adam(model3.parameters(), weight_decay=1e-3)
+    lrs1 = lr_scheduler.Noam(opt1, start_lr=20, warmup_iter=0, end_iter=300, num_iter=1)
+    lrs2 = lr_scheduler.Noam(opt2, start_lr=20, warmup_iter=0, end_iter=300, num_iter=1)
+    lrs3 = lr_scheduler.Noam(opt3, start_lr=20, warmup_iter=0, end_iter=300, num_iter=1)
     optim_manager = optim.OptimManager(loss_scale=256)
-    optim_manager.add_optimizer(opt1)
-    optim_manager.add_optimizer(opt2)
-    optim_manager.add_optimizer(opt3)
+    optim_manager.add_optimizer(opt1, lrs1)
+    optim_manager.add_optimizer(opt2, lrs2)
+    optim_manager.add_optimizer(opt3, lrs3)
 
     train(model1, model2, model3, optim_manager)
 
@@ -82,21 +85,30 @@ def main():
     bmt.save(model2, f"test_optim_state_model2.pt")
     bmt.save(model3, f"test_optim_state_model3.pt")
 
-    torch.save(opt1.state_dict(), f"test_optim_state_opt1_{bmt.rank()}.opt")
-    torch.save(opt2.state_dict(), f"test_optim_state_opt2_{bmt.rank()}.opt")
-    torch.save(opt3.state_dict(), f"test_optim_state_opt3_{bmt.rank()}.opt")
+    torch.save(optim_manager.state_dict(), f"test_optim_manager_{bmt.rank()}.opt")
 
     manual_seed()
     train(model1, model2, model3, optim_manager)
     state_2 = deepcopy([list(model1.parameters()), list(model2.parameters()), list(model3.parameters())])
 
+    model1 = TestModule()
+    model2 = TestModule()
+    model3 = TestModule()
     bmt.load(model1, f"test_optim_state_model1.pt")
     bmt.load(model2, f"test_optim_state_model2.pt")
     bmt.load(model3, f"test_optim_state_model3.pt")
 
-    opt1.load_state_dict(torch.load(f"test_optim_state_opt1_{bmt.rank()}.opt"))
-    opt2.load_state_dict(torch.load(f"test_optim_state_opt2_{bmt.rank()}.opt"))
-    opt3.load_state_dict(torch.load(f"test_optim_state_opt3_{bmt.rank()}.opt"))
+    opt1 = optim.AdamOptimizer(model1.parameters(), weight_decay=1e-8, betas=(0.3, 0.333), eps=1e-3)
+    opt2 = optim.AdamOffloadOptimizer(model2.parameters(), weight_decay=1e-7, betas=(0.4, 0.456), eps=1e-1)
+    opt3 = torch.optim.Adam(model3.parameters(), weight_decay=1e-6, betas=(0.9, 0.777), eps=1e-2)
+    lrs1 = lr_scheduler.Noam(opt1, start_lr=200, warmup_iter=30, end_iter=500, num_iter=3)
+    lrs2 = lr_scheduler.Noam(opt2, start_lr=20, warmup_iter=40, end_iter=600, num_iter=1)
+    lrs3 = lr_scheduler.Noam(opt3, start_lr=10, warmup_iter=50, end_iter=700, num_iter=2)
+    optim_manager = optim.OptimManager(loss_scale=10485760)
+    optim_manager.add_optimizer(opt1, lrs1)
+    optim_manager.add_optimizer(opt2, lrs2)
+    optim_manager.add_optimizer(opt3, lrs3)
+    optim_manager.load_state_dict(torch.load(f"test_optim_manager_{bmt.rank()}.opt"))
 
     manual_seed()
     train(model1, model2, model3, optim_manager)
@@ -116,9 +128,7 @@ def main():
         os.remove(f"test_optim_state_model1.pt")
         os.remove(f"test_optim_state_model2.pt")
         os.remove(f"test_optim_state_model3.pt")
-    os.remove(f"test_optim_state_opt1_{bmt.rank()}.opt")
-    os.remove(f"test_optim_state_opt2_{bmt.rank()}.opt")
-    os.remove(f"test_optim_state_opt3_{bmt.rank()}.opt")
+    os.remove(f"test_optim_manager_{bmt.rank()}.opt")
 
 if __name__ == "__main__":
     bmt.init_distributed()
