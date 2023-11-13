@@ -1,6 +1,5 @@
 #include<pybind11/pybind11.h>
 #include "nccl.hpp"
-#include "adam_cpu.hpp"
 
 void has_nan_inf_launcher(int32_t n,std::uintptr_t g_fp16,std::uintptr_t mid,std::uintptr_t out,std::uintptr_t stream);
 

@@ -154,8 +154,8 @@ class Linear_Checkpoint(bmt.DistributedModule):
 def test_main():
     shape = [3, 5]
     # torch
-    m = [None] * 10
-    ret = [None] * 10
+    m = [None] * 9
+    ret = [None] * 9
     manual_seed(33)
     m[0] = Linear_NormalInitBefore(*shape)
     ret[0] = (m[0].weight.data, m[0].bias.data)
@@ -176,10 +176,6 @@ def test_main():
     bmt.synchronize()
     ret[3] = (m[3].weight.data, m[3].bias.data)
 
-    # manual_seed(33)
-    # mw = Linear_ManualInitAfter(*shape) # not supported
-    # print(mw.weight.data, mw.bias.data)
-
     manual_seed(33)
     m[4] = bmt.BMTrainModelWrapper(m[0])
     ret[4] = (m[4].weight.data, m[4].bias.data)
@@ -189,35 +185,30 @@ def test_main():
     ret[5] = (m[5].weight.data, m[5].bias.data)
 
     manual_seed(33)
-    m[6] = Linear_Pipeline(*shape)
+    m[6] = Linear_BlockList(*shape)
     bmt.init_parameters(m[6])
     ret[6] = (m[6].l[0].weight.data, m[6].l[0].bias.data)
 
     manual_seed(33)
-    m[7] = Linear_BlockList(*shape)
+    m[7] = Linear_CheckpointList(*shape)
     bmt.init_parameters(m[7])
     ret[7] = (m[7].l[0].weight.data, m[7].l[0].bias.data)
 
     manual_seed(33)
-    m[8] = Linear_CheckpointList(*shape)
+    m[8] = Linear_Checkpoint(*shape)
     bmt.init_parameters(m[8])
-    ret[8] = (m[8].l[0].weight.data, m[8].l[0].bias.data)
+    ret[8] = (m[8].l.weight.data, m[8].l.bias.data)
 
-    manual_seed(33)
-    m[9] = Linear_Checkpoint(*shape)
-    bmt.init_parameters(m[9])
-    ret[9] = (m[9].l.weight.data, m[9].l.bias.data)
-
-    for i in range(10):
+    for i in range(9):
         ret[i] = ( ret[i][0].view(-1), ret[i][1].view(-1) )
         print(ret[i])
-    for i in range(10):
-        for j in range(10):
+    for i in range(9):
+        for j in range(9):
             print(i, j)
             assert_all_eq(ret[i][0], ret[j][0])
             assert_all_eq(ret[i][1], ret[j][1])
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=1)
+    bmt.init_distributed()
 
     test_main()

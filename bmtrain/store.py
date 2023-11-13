@@ -2,7 +2,6 @@ from collections import OrderedDict
 from typing import Dict
 import torch
 
-from .pipe_layer import PipelineTransformerBlockList
 from .global_var import config
 from .block_layer import CheckpointBlock
 from . import nccl
@@ -26,17 +25,14 @@ def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
         destination = OrderedDict()
         destination._metadata = OrderedDict()
     destination._metadata[prefix[:-1]] = local_metadata = dict(version=model._version)
-    if not isinstance(model, PipelineTransformerBlockList):
-        _save_to_state_dict(model, destination, prefix)
-        for name, module in model._modules.items():
-            if module is not None:
-                _save_to_rank0(module, destination, prefix + name + '.')
-        for hook in model._state_dict_hooks.values():
-            hook_result = hook(model, destination, prefix, local_metadata)
-            if hook_result is not None:
-                destination = hook_result
-    else:
-        model._save_to_state_dict(destination, prefix, False)
+    _save_to_state_dict(model, destination, prefix)
+    for name, module in model._modules.items():
+        if module is not None:
+            _save_to_rank0(module, destination, prefix + name + '.')
+    for hook in model._state_dict_hooks.values():
+        hook_result = hook(model, destination, prefix, local_metadata)
+        if hook_result is not None:
+            destination = hook_result
     return destination
         
 

@@ -6,7 +6,6 @@ import torch
 from . import nccl
 from .synchronize import wait_loader
 from .parameter import DistributedParameter, OpAllGather
-from .checkpointing import ScopedTensorInspectorContext
 from . import debug
 import copy
 import inspect

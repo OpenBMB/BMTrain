@@ -14,8 +14,6 @@ class ConfigMap(TypedDict):
     barrier_stream : torch.cuda.Stream
     loss_scale_factor : float
     loss_scale_steps : int
-    topology : 'topology'
-    gradient_inspect : bool
     initialized : bool
 
     comm : 'NCCLCommunicator'

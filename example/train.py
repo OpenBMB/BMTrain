@@ -22,7 +22,6 @@ def main():
     )
 
     bmt.init_parameters(model)
-    # print_inspect(model, "*")
 
     bmt.print_rank("Model memory")
     bmt.print_rank(torch.cuda.memory_summary())
@@ -66,37 +65,23 @@ def main():
         # load data
         st = time.time()
 
-        with bmt.inspect.inspect_tensor() as inspector:
-            pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
-            logits = model(
-                enc_input,
-                pos,
-                pos < enc_length[:, None]
-            )
-            batch, seq_len, vocab_out_size = logits.size()
+        pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
+        logits = model(
+            enc_input,
+            pos,
+            pos < enc_length[:, None]
+        )
+        batch, seq_len, vocab_out_size = logits.size()
 
-            loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
+        loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
+    
+        global_loss = bmt.sum_loss(loss).item()
+
+        optim_manager.zero_grad()
+
+        optim_manager.backward(loss)
         
-            global_loss = bmt.sum_loss(loss).item()
-
-            optim_manager.zero_grad()
-
-            optim_manager.backward(loss)
-        
-        # print inspected tensors in the forward & backward pass
         # print parameters of the model
-        if iteration % 100 == 0:
-            bmt.print_rank(
-                bmt.inspect.format_summary(
-                    inspector.get_summary()
-                )
-            )
-            bmt.print_rank(
-                bmt.inspect.format_summary(
-                    bmt.inspect.inspect_model(model, "*")
-                )
-            )
-
         optim_manager.step()
 
         # record time and loss

@@ -43,6 +43,5 @@ class GPT(bmt.DistributedModule):
         out = self.layernorm(out)
 
         logits = self.word_emb(out, projection=True)
-        bmt.inspect.record_tensor(logits, "logits")
 
         return logits

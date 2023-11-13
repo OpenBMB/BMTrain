@@ -59,17 +59,6 @@ class Linear_NormalList(torch.nn.Module):
     def forward(self, input):
         return self.l(input)
 
-class Linear_Pipeline(bmt.DistributedModule):
-    def __init__(self, in_features : int, out_features: int, bias: bool = True, dtype = None) -> None:
-        super().__init__()
-
-        self.l = bmt.PipelineTransformerBlockList([
-            Linear_BMTInitializer(in_features, out_features, bias, dtype),
-            Linear_BMTInitializer(in_features, out_features, bias, dtype),
-        ])
-    
-    def forward(self, input):
-        return self.l(input)
 
 class Linear_BlockList(bmt.DistributedModule):
     def __init__(self, in_features : int, out_features: int, bias: bool = True, dtype = None) -> None:
@@ -109,31 +98,26 @@ def test_main():
     ckpt_path = "test_ckpt.pt"
     shape = [3, 5]
     # torch
-    m = [None] * 4
-    ret = [None] * 4
+    m = [None] * 3
+    ret = [None] * 3
 
     manual_seed(33)
     m[0] = Linear_NormalList(*shape)
     if bmt.rank() == 0:
         torch.save(m[0].state_dict(), ckpt_path_ref)
 
+
+    # bmtrain
     manual_seed(33)
-    m[1] = Linear_Pipeline(*shape)
+    m[1] = Linear_BlockList(*shape)
     bmt.init_parameters(m[1])
     bmt.save(m[1], ckpt_path)
     check(ckpt_path, ckpt_path_ref)
 
-    # bmtrain
     manual_seed(33)
-    m[2] = Linear_BlockList(*shape)
+    m[2] = Linear_CheckpointList(*shape)
     bmt.init_parameters(m[2])
     bmt.save(m[2], ckpt_path)
-    check(ckpt_path, ckpt_path_ref)
-
-    manual_seed(33)
-    m[3] = Linear_CheckpointList(*shape)
-    bmt.init_parameters(m[3])
-    bmt.save(m[3], ckpt_path)
     check(ckpt_path, ckpt_path_ref)
 
     if bmt.rank() == 0:
@@ -141,6 +125,6 @@ def test_main():
         os.remove(ckpt_path_ref)
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=2)
+    bmt.init_distributed()
 
     test_main()

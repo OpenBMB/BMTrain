@@ -5,7 +5,6 @@ import random
 import torch
 from bmtrain import config
 from bmtrain.block_layer import CheckpointBlock, TransformerBlockList
-from bmtrain.pipe_layer import PipelineTransformerBlockList
 import torch.nn.functional as F
 
 class Linear(bmt.DistributedModule):
@@ -57,25 +56,6 @@ class Model_ZERO(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = TransformerBlockList([
-            CheckpointBlock(m)
-            for m in ms
-        ])
-        self.post = post
-    
-    def forward(self, x, return_hidden_states=False):
-        x = self.pre(x)
-        if return_hidden_states:
-            x, o = self.ms(x, return_hidden_states=return_hidden_states)
-            return self.post(x), o
-        else:
-            x = self.ms(x, return_hidden_states=return_hidden_states)
-            return self.post(x)
-
-class Model_PIPE(torch.nn.Module):
-    def __init__(self, pre, ms, post) -> None:
-        super().__init__()
-        self.pre = pre
-        self.ms = PipelineTransformerBlockList([
             CheckpointBlock(m)
             for m in ms
         ])
@@ -213,7 +193,6 @@ def test_main():
     ret["normal"] = run("normal", Model_NORMAL)
     ret["block"] = run("block", Model_BLOCK)
     ret["zero"] = run("zero", Model_ZERO)
-    ret["pipe"] = run("pipe", Model_PIPE)
     for k, r in ret.items():
         bmt.print_rank(f"============={k}============")
         bmt.print_rank(r)

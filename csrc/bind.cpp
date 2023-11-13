@@ -3,7 +3,6 @@
 PYBIND11_MODULE(C, m) {
     m.def("has_nan_inf_launcher",&has_nan_inf_launcher,"has nan inf");
     m.def("adam_launcher", &adam_launcher, "adam function cpu");
-    m.def("adam_cpu_launcher", &adam_cpu_launcher, "adam function cpu");
     m.def("cross_entropy_forward_launcher", &cross_entropy_forward_launcher, "cross entropy forward");
     m.def("cross_entropy_backward_launcher", &cross_entropy_backward_launcher, "cross entropy backward");
     m.def("cross_entropy_forward_inplace_launcher", &cross_entropy_forward_inplace_launcher, "cross entropy forward inplace");

@@ -2,7 +2,6 @@ import bmtrain as bmt
 import torch
 from bmtrain import config
 from bmtrain.block_layer import CheckpointBlockContext,  CheckpointBlock, TransformerBlockList
-from bmtrain.pipe_layer import PipelineTransformerBlockList
 from typing import List
 import torch.nn.functional as F
 def print_rank0(s):

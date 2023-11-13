@@ -1,7 +1,7 @@
 from bmtrain.optim import optim_manager
 from utils import *
 
-from typing import Optional
+from typing import Optional, Iterable
 import torch
 import math
 import torch.nn.functional as F
@@ -250,8 +250,7 @@ def sub_train_torch(model, loss_func_cls, optimizer_cls):
         ))
         logs.append(global_loss)
 
-    summary = bmt.inspect.inspect_model(model, "*")
-    return logs, summary
+    return logs
 
 def sub_train(model, loss_func_cls, optimizer_cls):
     loss_func = loss_func_cls(ignore_index=-100)
@@ -311,8 +310,7 @@ def sub_train(model, loss_func_cls, optimizer_cls):
         ))
         logs.append(global_loss)
 
-    summary = bmt.inspect.inspect_model(model, "*")
-    return logs, summary
+    return logs
     
 def train(model, loss_func, optimizer):
     key = f"{model[0]}*{loss_func[0]}*{optimizer[0]}"
@@ -367,20 +365,10 @@ def test_main(test_fp16=True, test_fp32=True):
         bmt.load(list_model, ckpt_path)
         return model
 
-    def pipe_model():
-        model = GPT(**kwargs)
-        pipe_model = bmt.BMTrainModelWrapper(model)
-        for m in pipe_model.transformers:
-            assert isinstance(m, bmt.CheckpointBlock)
-        pipe_model.transformers = bmt.PipelineTransformerBlockList([m for m in pipe_model.transformers])
-        bmt.load(pipe_model, ckpt_path)
-        return model
-
     models = {
         "torch": torch_model,
         "wrapper": wrap_model,
         "blocklist": list_model,
-        "pipelist": pipe_model,
     }
     loss_funcs = {
         "bmt_entropy": bmt.loss.FusedCrossEntropy,
@@ -388,7 +376,6 @@ def test_main(test_fp16=True, test_fp32=True):
     }
     optimizers = {
         "bmt_adam": bmt.optim.AdamOptimizer,
-        "bmt_adam_offload": bmt.optim.AdamOffloadOptimizer,
         "torch_adam": torch.optim.Adam,
     }
 
@@ -403,9 +390,7 @@ def test_main(test_fp16=True, test_fp32=True):
         add_to_check_list("torch", "bmt_entropy", "bmt_adam")
         add_to_check_list("wrapper", "bmt_entropy", "bmt_adam")
         add_to_check_list("blocklist", "bmt_entropy", "bmt_adam")
-        add_to_check_list("pipelist", "bmt_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam")
-        add_to_check_list("blocklist", "bmt_entropy", "bmt_adam_offload")
         if bmt.rank() == 0:
             os.remove(ckpt_path)
         check(ret)
@@ -416,8 +401,6 @@ def test_main(test_fp16=True, test_fp32=True):
         add_to_check_list("torch", "torch_entropy", "bmt_adam")
         add_to_check_list("wrapper", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam")
-        add_to_check_list("pipelist", "torch_entropy", "bmt_adam")
-        add_to_check_list("blocklist", "torch_entropy", "bmt_adam_offload")
         add_to_check_list("blocklist", "torch_entropy", "torch_adam")
         if bmt.rank() == 0:
             os.remove(ckpt_path)
@@ -440,6 +423,6 @@ def check_param(info1, info2):
             assert_lt(abs(v1-v2), 1e-2)
 
 if __name__ == '__main__':
-    bmt.init_distributed(pipe_size=2)
+    bmt.init_distributed()
 
     test_main(test_fp16=True, test_fp32=True)

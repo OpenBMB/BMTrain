@@ -12,13 +12,10 @@ from .param_init import init_parameters, grouped_parameters
 from .synchronize import synchronize, sum_loss, wait_loader, gather_result
 from .block_layer import CheckpointBlock, TransformerBlockList
 from .wrapper import BMTrainModelWrapper
-from .pipe_layer import PipelineTransformerBlockList
 from . import debug
 from .store import save, load
 
-from . import benchmark
 from . import optim
-from . import inspect
 from . import lr_scheduler
 from . import loss
 from . import distributed
