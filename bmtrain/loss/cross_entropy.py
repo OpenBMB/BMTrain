@@ -36,6 +36,76 @@ class OpFusedCrossEntropy(torch.autograd.Function):
         )
         return (softmax, None, None)
 
+class VPFusedCrossEntropy(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, logits : torch.Tensor, target : torch.Tensor):
+        comm = config['tp_comm']
+        rank = config['tp_rank']
+        world_size = config['tp_size']
+
+        max_logits = torch.max(logits, dim=-1)[0].float()
+        max_logits = all_reduce(max_logits, op="max", comm=comm)
+
+        partition_vocab_size = logits.size()[-1]
+        vocab_start_index = rank * partition_vocab_size
+        vocab_end_index = (rank + 1) * partition_vocab_size
+
+        # Create a mask of valid vocab ids (1 means it needs to be masked).
+        target_mask = (target < vocab_start_index) | (target >= vocab_end_index)
+        masked_target = target.clone() - vocab_start_index
+        masked_target[target_mask] = 0
+
+        logits_2d = logits.view(-1, partition_vocab_size)
+        masked_target_1d = masked_target.view(-1)
+        arange_1d = torch.arange(start=0, end=logits_2d.size()[0], device=logits_2d.device)
+        predicted_logits_1d = logits_2d[arange_1d, masked_target_1d].contiguous() # (-1,)
+        predicted_logits = predicted_logits_1d.view_as(target)
+        predicted_logits[target_mask] = 0.0 # if target=-100, it will also be 0
+
+        # All reduce is needed to get the chunks from other GPUs.
+        predicted_logits = all_reduce(predicted_logits.float(), op="sum", comm=comm)
+        predicted_logits = predicted_logits - max_logits
+        # Sum of exponential of logits along vocab dimension across all GPUs.
+
+        sum_exp_logits = torch.empty(logits.size(0), device=logits.device, dtype=torch.float)
+        sum_exp_logits = F.fused_sumexp(logits, max_logits) # float
+        sum_exp_logits = all_reduce(sum_exp_logits, op="sum", comm=comm) + 1e-10 # avoid nan
+
+        softmax = logits.clone()
+        F.fused_softmax_inplace(softmax, max_logits, sum_exp_logits) # logits -> softmax
+        # logits = logits.float() - max_logits.unsqueeze(dim=-1).float()
+        # exp_logits = logits
+        # torch.exp(logits, out=exp_logits)
+        # sum_exp_logits = exp_logits.sum(dim=-1)
+        # exp_logits.div_(sum_exp_logits.unsqueeze(dim=-1))
+
+        loss = torch.log(sum_exp_logits.view(predicted_logits.shape)) - predicted_logits
+
+        # Normalize
+        ctx.save_for_backward(softmax, target_mask, masked_target_1d)
+
+        return loss
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Retreive tensors from the forward path.
+        softmax, target_mask, masked_target_1d = ctx.saved_tensors
+        # All the inputs have softmax as thier gradient.
+        grad_input = softmax
+        # For simplicity, work with the 2D gradient.
+        partition_vocab_size = softmax.size()[-1]
+        grad_2d = grad_input.view(-1, partition_vocab_size)
+
+        # Add the gradient from matching classes.
+        arange_1d = torch.arange(start=0, end=grad_2d.size()[0], device=grad_2d.device)
+
+        softmax_update = 1.0 - target_mask.view(-1).float()
+
+        grad_2d[arange_1d, masked_target_1d] -= softmax_update
+        grad_input.mul_(grad_output.view(*grad_input.shape[:-1]).unsqueeze(dim=-1))
+
+        return grad_input, None
+
 class FusedCrossEntropy(torch.nn.Module):
     r"""This criterion computes the cross entropy loss between input and target.
 
