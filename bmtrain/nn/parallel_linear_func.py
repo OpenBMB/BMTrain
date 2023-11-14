@@ -259,6 +259,12 @@ class OpParallelLinear(torch.autograd.Function):
                     grad_input.record_stream(config['tp_comm_stream'])
                     grad_all_input.record_stream(config['tp_comm_stream'])
                     nccl.reduceScatter(grad_all_input.storage(), grad_input.storage(), "sum", config['tp_comm'])
+            elif ctx.reduce_output_type is None:
+                with torch.cuda.stream(config['tp_comm_stream']):
+                    config['tp_comm_stream'].wait_stream(current_stream)
+                    grad_input.record_stream(config['tp_comm_stream'])
+                    nccl.allReduce(grad_all_input.storage(), grad_all_input.storage(), "sum", config['tp_comm'])
+                    grad_input = grad_all_input
             else:
                 grad_input = grad_all_input
 

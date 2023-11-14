@@ -3,8 +3,8 @@ import bmtrain as bmt
 from bmtrain.global_var import config
 import numpy as np
 
-def run_bmt(x, gather_output, ckp_path, tp_size=2):
-    linear = bmt.nn.ColumnParallelLinear(8,8, gather_output=gather_output)
+def run_bmt(x, gather_input, gather_output, ckp_path, tp_size=2):
+    linear = bmt.nn.ColumnParallelLinear(8,8, gather_input=gather_input, gather_output=gather_output)
     linear = bmt.Block(linear)
     bmt.init_parameters(linear)
     y = linear(x)
@@ -23,13 +23,19 @@ def run_torch(x, ckp_path):
     y.sum().backward()
     return y, linear.weight.grad, linear.bias.grad
 
-def run(gather_output, ckp_path):
+def run(gather_input, gather_output, ckp_path):
     torch.cuda.manual_seed(100)
     tp_size = config["tp_size"]
     tp_rank = config['topology'].tp_id
-    x = torch.randn(8, 8, 8, device='cuda').requires_grad_()
-    rank_x = x.chunk(tp_size, dim=0)[tp_rank]
-    y1, weight_grad1, bias_grad1 = run_bmt(rank_x, gather_output, ckp_path)
+    x = torch.randn(8, 8, 8, device='cuda')
+    bmt_x = x.clone()
+    if gather_input:
+        rank_x = bmt_x.chunk(tp_size, dim=0)[tp_rank]
+    else:
+        rank_x = bmt_x
+    rank_x.requires_grad_()
+    x.requires_grad_()
+    y1, weight_grad1, bias_grad1 = run_bmt(rank_x, gather_input, gather_output, ckp_path)
     y2, weight_grad2, bias_grad2 = run_torch(x, ckp_path)
     tp_rank = config['topology'].tp_id
     if gather_output:
@@ -44,14 +50,25 @@ def run(gather_output, ckp_path):
     bias_grad_list = bias_grad2.chunk(tp_size, dim=0)
     assert np.allclose(bias_grad1.reshape(bias_grad_list[tp_rank].shape).cpu().numpy(), bias_grad_list[tp_rank].cpu().numpy())
 
+    if gather_input:
+        x_grad_list = x.grad.chunk(tp_size, dim=0)
+        np.testing.assert_allclose(rank_x.grad.cpu().numpy(), x_grad_list[tp_rank].cpu().numpy(), atol=1e-4, rtol=1e-4)
+    else:
+        np.testing.assert_allclose(rank_x.grad.cpu().numpy(), x.grad.cpu().numpy(), atol=1e-4, rtol=1e-4)
+
 def test_gather_output():
-    run(True, 'linear.ckp')
+    run(True, True, 'linear.ckp')
 
 def test_no_gather_output():
-    run(False, 'linear_no_gather.ckp')
+    run(True, False, 'linear_no_gather.ckp')
+
+def test_no_gather_input():
+    run(False, True, 'linear.ckp')
+
 
 if __name__ == "__main__":
     bmt.init_distributed(tp_size=2)
     test_gather_output()
     test_no_gather_output()
+    test_no_gather_input()
 
