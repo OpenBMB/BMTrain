@@ -95,7 +95,7 @@ ext_modules = [
 ]
 
 # 移步version.py里去修改__version__
-import version
+# import version
 
 setup(
     name='bmtrain',

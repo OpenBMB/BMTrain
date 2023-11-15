@@ -12,6 +12,10 @@ PYBIND11_MODULE(C, m) {
     m.def("cross_entropy_forward_bf16_launcher", &cross_entropy_forward_bf16_launcher, "cross entropy forward");
     m.def("cross_entropy_backward_inplace_fp16_launcher", &cross_entropy_backward_inplace_fp16_launcher, "cross entropy backward inplace");
     m.def("cross_entropy_backward_inplace_bf16_launcher", &cross_entropy_backward_inplace_bf16_launcher, "cross entropy backward inplace");
+    m.def("fused_sumexp_fp16_launcher", &fused_sumexp_fp16_launcher, "sum exp");
+    m.def("fused_sumexp_bf16_launcher", &fused_sumexp_bf16_launcher, "sum exp");
+    m.def("fused_softmax_inplace_fp16_launcher", &fused_softmax_inplace_fp16_launcher, "softmax inplace");
+    m.def("fused_softmax_inplace_bf16_launcher", &fused_softmax_inplace_bf16_launcher, "softmax inplace");
     m.def("cuda_spin", &cuda_spin, "run a cuda kernel that spin milliseconds, most for testing.");
     m.def("ncclGetUniqueId", &pyNCCLGetUniqueID, "nccl get unique ID");
     m.def("ncclCommInitRank", &pyNCCLCommInitRank, "nccl init rank");
