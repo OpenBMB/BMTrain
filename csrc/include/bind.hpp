@@ -41,6 +41,34 @@ void cross_entropy_backward_inplace_bf16_launcher(
     int32_t ignore_index,
     std::uintptr_t stream
 );
+void fused_sumexp_fp16_launcher(
+    int32_t m, int32_t n,
+    std::uintptr_t logits,
+    std::uintptr_t max_logits,
+    std::uintptr_t sum_exp_logits,
+    std::uintptr_t stream
+);
+void fused_sumexp_bf16_launcher(
+    int32_t m, int32_t n,
+    std::uintptr_t logits,
+    std::uintptr_t max_logits,
+    std::uintptr_t sum_exp_logits,
+    std::uintptr_t stream
+);
+void fused_softmax_inplace_fp16_launcher(
+    int32_t m, int32_t n,
+    std::uintptr_t logits,
+    std::uintptr_t max_logits,
+    std::uintptr_t sum_exp_logits,
+    std::uintptr_t stream
+);
+void fused_softmax_inplace_bf16_launcher(
+    int32_t m, int32_t n,
+    std::uintptr_t logits,
+    std::uintptr_t max_logits,
+    std::uintptr_t sum_exp_logits,
+    std::uintptr_t stream
+);
 void adam_fp16_launcher(
     int n,
     std::uintptr_t param_fp32,

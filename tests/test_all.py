@@ -30,6 +30,7 @@ tq = tqdm([
     ("no_grad", 1),
     ("column_parallel_linear", 2),
     ("row_parallel_linear", 2),
+    ("parallel_projection", 4),
 
     ("training", 4),
 ])
