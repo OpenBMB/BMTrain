@@ -2,6 +2,7 @@
 from .. import C
 import torch
 CHECK_INPUT = lambda x: x.is_contiguous() and x.is_cuda
+
 def adam(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.Tensor, m_fp16: torch.Tensor,
              v_fp32: torch.Tensor, beta1: float, beta2: float, eps: float, lr: float, scale: float,
              weight_decay: float, step: int) -> None:
