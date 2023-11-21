@@ -6,19 +6,7 @@ from ..lr_scheduler.warmup import WarmupLRScheduler
 from .. import nccl
 from ..global_var import config
 
-def check_overflow(param_groups):
-    # check overflow
-    has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
-    for group in param_groups:
-        for p in group['params']:
-            if p.grad is not None and p.dtype == torch.half: # TODO support other types
-                has_inf_nan(p.grad, has_inf_or_nan)
 
-    if "comm" in config:
-        nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
-
-    if has_inf_or_nan > 0:
-        raise OverflowError("Gradient overflow")
 
 def grad_rescale(param_groups, scale):
     for group in param_groups:
@@ -53,12 +41,8 @@ class OptimManager:
         min_loss_scale = 1,
         max_loss_scale = float("inf"),
     ):
-        if loss_scale is not None:
-            self.loss_scale = loss_scale
-            self.loss_scale_enabled = True
-        else:
-            self.loss_scale = 1
-            self.loss_scale_enabled = False
+        self.loss_scale = 1
+        self.loss_scale_enabled = False
         self.steps_since_last_scale = 0
         self.loss_scale_factor = loss_scale_factor if loss_scale_factor > 1 else 1 / loss_scale_factor
         self.loss_scale_steps = loss_scale_steps
@@ -116,21 +100,6 @@ class OptimManager:
 
         This function can also handle gradient overflow by reducing the loss scale when it occurs.
         """
-        if self.loss_scale_enabled:
-            has_overflow = False
-            for optimizer in self.optimizers:
-                try:
-                    check_overflow(optimizer.param_groups)
-                except OverflowError:
-                    has_overflow = True
-                    break
-            if has_overflow:
-                print_rank("Gradient overflow, change scale from %lf to %lf" % (self.loss_scale, self.loss_scale / self.loss_scale_factor))
-                with torch.no_grad():
-                    if self.loss_scale > self.min_loss_scale:
-                        self._justify_scale(self.loss_scale / self.loss_scale_factor)
-                    self.zero_grad()
-                return
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
             if hasattr(optimizer, "_bmtrain_optimizer") and optimizer._bmtrain_optimizer:
                 optimizer.step(scale=self.loss_scale)
