@@ -1,6 +1,5 @@
 import torch
 from ..global_var import config
-from . import _function as F
 from .. import nccl
 import inspect
 from ..utils import check_torch_version
