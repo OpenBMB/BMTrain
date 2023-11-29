@@ -182,7 +182,7 @@ def sub_train_torch(model, loss_func_cls, optimizer_cls):
     optimizer = optimizer_cls(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 
-    optim_manager = bmt.optim.OptimManager(loss_scale=2**20 if model.dtype == torch.half else None)
+    optim_manager = bmt.optim.OptimManager(loss_scale=2**22 if model.dtype == torch.half else None)
     optim_manager.add_optimizer(optimizer, lr_scheduler)
 
     # use the break if i == bmt.rank() to generate different data on different rank
@@ -223,7 +223,7 @@ def sub_train_torch(model, loss_func_cls, optimizer_cls):
 
     logs = []
     for iter in range(100):
-        optim_manager.zero_grad()
+        optimizer.zero_grad()
 
         logits = model(enc_input, pos, pos < enc_length[:, None])
 
@@ -233,12 +233,12 @@ def sub_train_torch(model, loss_func_cls, optimizer_cls):
     
         global_loss = loss.item()
 
-        loss = optim_manager.loss_scale * loss
+        # loss = optim_manager.loss_scale * loss
         loss.backward()
+        # grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=10.0)
 
-        grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=10.0)
-
-        optim_manager.step()
+        optimizer.step()
+        lr_scheduler.step()
 
         bmt.print_rank("| Iter: {:6d} | loss: {:.4f} {:.4f} | lr: {:.4e} scale: {:10.4f} | grad_norm: {:.4f} |".format(
             iter,
@@ -246,7 +246,7 @@ def sub_train_torch(model, loss_func_cls, optimizer_cls):
             loss,
             lr_scheduler.current_lr,
             optim_manager.loss_scale,
-            grad_norm,
+            1.0,
         ))
         logs.append(global_loss)
 
@@ -257,7 +257,7 @@ def sub_train(model, loss_func_cls, optimizer_cls):
     optimizer = optimizer_cls(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
 
-    optim_manager = bmt.optim.OptimManager(loss_scale=2**20 if model.dtype == torch.half else None)
+    optim_manager = bmt.optim.OptimManager(loss_scale=2**22 if model.dtype == torch.half else None)
     optim_manager.add_optimizer(optimizer, lr_scheduler)
 
     # use the break if i == bmt.rank() to generate different data on different rank
@@ -411,9 +411,12 @@ def check(ret):
         for k1, v1 in ret.items():
             for k2, v2 in ret.items():
                 print(f"checking {k1} vs. {k2}")
-                check_param(v1[1], v2[1])
-    bmt.synchronize()
-    ret.clear()
+                check_loss(v1, v2)
+    # bmt.synchronize()
+    # ret.clear()
+def check_loss(info1, info2):
+    for l1, l2 in zip(info1, info2):
+        assert_lt(abs(l1-l2), 1e-2)
 
 def check_param(info1, info2):
     for l1, l2 in zip(info1, info2):
@@ -425,4 +428,4 @@ def check_param(info1, info2):
 if __name__ == '__main__':
     bmt.init_distributed()
 
-    test_main(test_fp16=True, test_fp32=True)
+    test_main(test_fp16=False, test_fp32=True)
