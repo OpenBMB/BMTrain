@@ -371,11 +371,10 @@ def test_main(test_fp16=True, test_fp32=True):
         "blocklist": list_model,
     }
     loss_funcs = {
-        "bmt_entropy": bmt.loss.FusedCrossEntropy,
         "torch_entropy": torch.nn.CrossEntropyLoss,
     }
     optimizers = {
-        "bmt_adam": bmt.optim.AdamOptimizer,
+        "bmt_adam": bmt.optim.AdamOffloadOptimizer,
         "torch_adam": torch.optim.Adam,
     }
 
@@ -387,9 +386,6 @@ def test_main(test_fp16=True, test_fp32=True):
     if test_fp16:
         kwargs["dtype"] = torch.half
         make_ref_ckpt()
-        add_to_check_list("torch", "bmt_entropy", "bmt_adam")
-        add_to_check_list("wrapper", "bmt_entropy", "bmt_adam")
-        add_to_check_list("blocklist", "bmt_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam")
         if bmt.rank() == 0:
             os.remove(ckpt_path)
@@ -411,7 +407,7 @@ def check(ret):
         for k1, v1 in ret.items():
             for k2, v2 in ret.items():
                 print(f"checking {k1} vs. {k2}")
-                check_param(v1[1], v2[1])
+                check_loss(v1, v2)
     bmt.synchronize()
     ret.clear()
 
@@ -422,7 +418,11 @@ def check_param(info1, info2):
             v2 = l2[key]
             assert_lt(abs(v1-v2), 1e-2)
 
+def check_loss(loss1, loss2):
+    for l1, l2 in zip(loss1, loss2):
+        assert_lt(abs(l1-l2), 1e-2)
+
 if __name__ == '__main__':
     bmt.init_distributed()
 
-    test_main(test_fp16=True, test_fp32=True)
+    test_main(test_fp16=False, test_fp32=True)

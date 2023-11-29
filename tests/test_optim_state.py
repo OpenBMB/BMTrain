@@ -65,7 +65,7 @@ def main():
     bmt.load(model1, f"test_optim_state_model1.pt")
     bmt.load(model2, f"test_optim_state_model1.pt")
 
-    opt1 = bmt.optim.AdamOptimizer(model1.parameters(), weight_decay=1e-3)
+    opt1 = bmt.optim.AdamOffloadOptimizer(model1.parameters(), weight_decay=1e-3)
     opt2 = torch.optim.Adam(model2.parameters(), weight_decay=1e-3)
     optim_manager = bmt.optim.OptimManager(loss_scale=256)
     optim_manager.add_optimizer(opt1)

@@ -9,11 +9,9 @@ tq = tqdm([
     # ("init_parameters_multi_gpu", 4),
     # ("optim_state", 4),
 
-    # ("has_inf_nan", 1),
-    # ("dropout", 1),
-    # ("loss_func", 1),
+    ("dropout", 1),
 
-    # ("model_wrapper", 4),
+    ("model_wrapper", 4),
 
     ("nccl_backward", 4),
 
