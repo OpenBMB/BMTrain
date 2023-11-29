@@ -1,7 +1,5 @@
 from typing import Optional, Union, List, Dict, Tuple
 import torch
-from ..loss._function import has_inf_nan
-from ..utils import print_rank
 from ..lr_scheduler.warmup import WarmupLRScheduler
 from .. import nccl
 from ..global_var import config
