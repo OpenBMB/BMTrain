@@ -37,7 +37,7 @@ inline void parallel_for(int64_t begin, int64_t end, int64_t grain_size, const F
     int64_t num_threads = 1;  // Default to serial execution
 
     if (grain_size > 0) {
-        num_threads = std::max((numiter+num_threads-1) / grain_size, static_cast<int64_t>(1));
+        num_threads = std::max((numiter+grain_size-1) / grain_size, static_cast<int64_t>(1));
     }
     else{
         cpu_set_t cpu_set;
