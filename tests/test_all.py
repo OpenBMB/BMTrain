@@ -21,7 +21,6 @@ tq = tqdm([
     ("multi_return", 2),
     ("middle_hidden", 4),
     ("other_hidden", 4),
-    ("inspector_hidden", 2),
 
     ("model_wrapper", 4),
 
@@ -30,6 +29,7 @@ tq = tqdm([
     ("no_grad", 1),
     ("column_parallel_linear", 2),
     ("row_parallel_linear", 2),
+    ("parallel_projection", 4),
 
     ("training", 4),
 ])

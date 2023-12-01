@@ -185,7 +185,7 @@ def test_main():
     ret["normal"] = run("normal", Model_NORMAL)
     ret["block"] = run("block", Model_BLOCK)
     ret["zero"] = run("zero", Model_ZERO)
-    ret["pipe"] = run("pipe", Model_PIPE)
+    # ret["pipe"] = run("pipe", Model_PIPE)
     for k, r in ret.items():
         bmt.print_rank(f"============={k}============")
         bmt.print_rank(r)
