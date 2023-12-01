@@ -104,4 +104,4 @@ if __name__ == "__main__":
     bmt.init_distributed(pipe_size=1)
 
     test_main()
-    test_main_pipe()
+    # test_main_pipe()

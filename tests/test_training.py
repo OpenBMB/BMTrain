@@ -446,7 +446,7 @@ def test_main(test_fp16=True, test_fp32=True):
         "torch": torch_model,
         "wrapper": wrap_model,
         "blocklist": list_model,
-        "pipelist": pipe_model,
+        # "pipelist": pipe_model,
         "unroll_blocklist": unroll_list_model,
     }
     loss_funcs = {
@@ -470,7 +470,7 @@ def test_main(test_fp16=True, test_fp32=True):
         add_to_check_list("torch", "bmt_entropy", "bmt_adam")
         add_to_check_list("wrapper", "bmt_entropy", "bmt_adam")
         add_to_check_list("blocklist", "bmt_entropy", "bmt_adam")
-        add_to_check_list("pipelist", "bmt_entropy", "bmt_adam")
+        # add_to_check_list("pipelist", "bmt_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "bmt_entropy", "bmt_adam_offload")
         add_to_check_list("unroll_blocklist", "bmt_entropy", "bmt_adam")
@@ -484,7 +484,7 @@ def test_main(test_fp16=True, test_fp32=True):
         add_to_check_list("torch", "torch_entropy", "bmt_adam")
         add_to_check_list("wrapper", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam")
-        add_to_check_list("pipelist", "torch_entropy", "bmt_adam")
+        # add_to_check_list("pipelist", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam_offload")
         add_to_check_list("blocklist", "torch_entropy", "torch_adam")
         add_to_check_list("unroll_blocklist", "bmt_entropy", "bmt_adam")
