@@ -804,7 +804,7 @@ class OpTransformerBlockList(torch.autograd.Function):
                 grads.append(inp.grad)
             else:
                 grads.append(None)
-        return (None, None, None, None) + tuple(grad_hidden_states) + tuple(grads)
+        return (None, None, None) + tuple(grad_hidden_states) + tuple(grads)
     
 class TransformerBlockList(torch.nn.Module):
     r"""
