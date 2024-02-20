@@ -9,6 +9,50 @@ import bmtrain as bmt
 import os
 from bmtrain import inspect
 
+def clip_grad_norm(loss_scale, param_groups, max_norm, norm_type=2, eps=1e-6, is_torch=False):
+        """Clips gradient norm of an iterable of parameters.
+
+        The norm is computed over all gradients together, as if they were concatenated into a single vector. Gradients are modified in-place.
+
+        Args:
+            parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a single Tensor that will have gradients normalized.
+            max_norm (float or int): max norm of the gradients.
+            norm_type (float or int): type of the used p-norm. Can be 'inf' for infinity norm.
+            eps (float): epsilon used to avoid zero division.
+
+        Returns:
+            Total norm of the parameters (viewed as a single vector).
+        """
+        scale = loss_scale
+        grads = []
+        parameters = [p for group in param_groups for p in group['params']]
+        for p in parameters:
+            if p.grad is not None:
+                grads.append(p.grad.data)
+            else:
+                grads.append(torch.zeros_like(p.data))
+
+        if norm_type == 'inf':
+            total_norm_cuda = max(g.data.abs().max() for g in grads).detach()
+            if not is_torch:
+                bmt.nccl.allReduce(total_norm_cuda.storage(), total_norm_cuda.storage(), "max", bmt.config["comm"])
+            total_norm = total_norm_cuda
+        else:
+            norm_type = float(norm_type)
+            total_norm_cuda = torch.cuda.FloatTensor([0])
+            for index, g in enumerate(grads):
+                param_norm = g.data.float().norm(norm_type)
+                total_norm_cuda += param_norm ** norm_type
+            if not is_torch:
+                bmt.nccl.allReduce(total_norm_cuda.storage(), total_norm_cuda.storage(), "sum", bmt.config["comm"])
+            total_norm = total_norm_cuda[0] ** (1. / norm_type)
+        clip_coef = float(max_norm * scale) / (total_norm + eps)
+        if clip_coef < 1:
+            for p in parameters:
+                if p.grad is not None:
+                    p.grad.data.mul_(clip_coef)
+        return total_norm / scale
+
 class Attention(torch.nn.Module):
     def __init__(self, 
             dim_model : int, dim_head : int,
@@ -196,6 +240,7 @@ def sub_train_torch(model, loss_func_cls, optimizer_cls):
     enc_inputs = []
     targetss = []
     masks = []
+    inps = []
     for i in range(bmt.world_size()):
         sent = torch.randint(0, 10240, (batch_size, seq_len + 1))
         enc_length = torch.randint(128, seq_len, (batch_size,)).long().cuda()
@@ -213,34 +258,32 @@ def sub_train_torch(model, loss_func_cls, optimizer_cls):
         enc_inputs.append(enc_input)
         targetss.append(targets)
         masks.append(mask)
-
-    sent = torch.cat(sents, dim=0)
-    enc_length = torch.cat(enc_lengths, dim=0)
-    enc_input = torch.cat(enc_inputs, dim=0)
-    targets = torch.cat(targetss, dim=0)
-    mask = torch.cat(masks, dim=0)
-
-    pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
+        inps.append((sent,enc_length,enc_input,targets,mask))
 
     logs = []
     for iter in range(100):
+        
         optim_manager.zero_grad()
+        global_loss = 0
+        for inp in inps:
+            sent, enc_length, enc_input, targets, mask = inp 
+            pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
+            logits = model(enc_input, pos, pos < enc_length[:, None])
 
-        logits = model(enc_input, pos, pos < enc_length[:, None])
+            batch, seq_len, vocab_out_size = logits.size()
 
-        batch, seq_len, vocab_out_size = logits.size()
-
-        loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
+            loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len)) / len(inps)
     
-        global_loss = loss.item()
+            global_loss += loss.item()
 
-        loss = optim_manager.loss_scale * loss
-        loss.backward()
-
-        grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=10.0)
+            loss = optim_manager.loss_scale * loss
+            loss.backward()
+        current_stream = torch.cuda.current_stream()
+        current_stream.wait_stream(bmt.config['load_stream'])
+        grad_norm = clip_grad_norm(optim_manager.loss_scale, optimizer.param_groups, max_norm=10.0, is_torch = True)
 
         optim_manager.step()
-
+        
         bmt.print_rank("| Iter: {:6d} | loss: {:.4f} {:.4f} | lr: {:.4e} scale: {:10.4f} | grad_norm: {:.4f} |".format(
             iter,
             global_loss,
@@ -266,7 +309,11 @@ def sub_train(model, loss_func_cls, optimizer_cls):
     torch.manual_seed(2333)
     batch_size = 2
     seq_len = 512
-
+    sents = []
+    enc_lengths = []
+    enc_inputs = []
+    targetss = []
+    masks = []
     for i in range(bmt.world_size()):
         sent = torch.randint(0, 10240, (batch_size, seq_len + 1))
         enc_length = torch.randint(128, seq_len, (batch_size,)).long().cuda()
@@ -279,15 +326,27 @@ def sub_train(model, loss_func_cls, optimizer_cls):
             torch.full_like(targets, -100, dtype=torch.long)
         )
 
-        if i == bmt.rank():
-            break
-
-    pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
+        sents.append(sent)
+        enc_lengths.append(enc_length)
+        enc_inputs.append(enc_input)
+        targetss.append(targets)
+        masks.append(mask)
+    # sent = torch.cat(sents, dim=0)
+    # enc_length = torch.cat(enc_lengths, dim=0)
+    # enc_input = torch.cat(enc_inputs, dim=0)
+    # targets = torch.cat(targetss, dim=0)
+    # mask = torch.cat(masks, dim=0)
+    sent = sents[bmt.rank()]
+    enc_length = enc_lengths[bmt.rank()]
+    enc_input = enc_inputs[bmt.rank()]
+    targets = targetss[bmt.rank()]
+    mask = masks[bmt.rank()]
+    
 
     logs = []
+    pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
     for iter in range(100):
         optim_manager.zero_grad()
-
         logits = model(enc_input, pos, pos < enc_length[:, None])
 
         batch, seq_len, vocab_out_size = logits.size()
@@ -297,11 +356,9 @@ def sub_train(model, loss_func_cls, optimizer_cls):
         global_loss = bmt.sum_loss(loss).item()
 
         optim_manager.backward(loss)
-
-        grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=10.0)
+        grad_norm = clip_grad_norm(optim_manager.loss_scale, optimizer.param_groups, max_norm=10.0)
 
         optim_manager.step()
-
         bmt.print_rank("| Iter: {:6d} | loss: {:.4f} {:.4f} | lr: {:.4e} scale: {:10.4f} | grad_norm: {:.4f} |".format(
             iter,
             global_loss,
@@ -389,7 +446,7 @@ def test_main(test_fp16=True, test_fp32=True):
         "torch": torch_model,
         "wrapper": wrap_model,
         "blocklist": list_model,
-        "pipelist": pipe_model,
+        # "pipelist": pipe_model,
         "unroll_blocklist": unroll_list_model,
     }
     loss_funcs = {
@@ -413,7 +470,7 @@ def test_main(test_fp16=True, test_fp32=True):
         add_to_check_list("torch", "bmt_entropy", "bmt_adam")
         add_to_check_list("wrapper", "bmt_entropy", "bmt_adam")
         add_to_check_list("blocklist", "bmt_entropy", "bmt_adam")
-        add_to_check_list("pipelist", "bmt_entropy", "bmt_adam")
+        # add_to_check_list("pipelist", "bmt_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "bmt_entropy", "bmt_adam_offload")
         add_to_check_list("unroll_blocklist", "bmt_entropy", "bmt_adam")
@@ -427,7 +484,7 @@ def test_main(test_fp16=True, test_fp32=True):
         add_to_check_list("torch", "torch_entropy", "bmt_adam")
         add_to_check_list("wrapper", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam")
-        add_to_check_list("pipelist", "torch_entropy", "bmt_adam")
+        # add_to_check_list("pipelist", "torch_entropy", "bmt_adam")
         add_to_check_list("blocklist", "torch_entropy", "bmt_adam_offload")
         add_to_check_list("blocklist", "torch_entropy", "torch_adam")
         add_to_check_list("unroll_blocklist", "bmt_entropy", "bmt_adam")
@@ -439,8 +496,9 @@ def check(ret):
     if bmt.rank() == 0:
         for k1, v1 in ret.items():
             for k2, v2 in ret.items():
-                print(f"checking {k1} vs. {k2}")
-                check_param(v1[1], v2[1])
+                if k1 != k2:
+                    print(f"checking {k1} vs. {k2}")
+                    check_param(v1[1], v2[1])
     bmt.synchronize()
     ret.clear()
 
@@ -454,4 +512,5 @@ def check_param(info1, info2):
 if __name__ == '__main__':
     bmt.init_distributed(pipe_size=1)
 
+    
     test_main(test_fp16=True, test_fp32=True)

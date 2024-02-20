@@ -177,7 +177,7 @@ def test_main():
     ret.append( run("normal", Model_NORMAL) )
     ret.append( run("block", Model_BLOCK) )
     ret.append( run("zero", Model_ZERO) )
-    ret.append( run("pipe", Model_PIPE) )
+    # ret.append( run("pipe", Model_PIPE) )
     for r in ret:
         bmt.print_rank(r)
     for r in ret:

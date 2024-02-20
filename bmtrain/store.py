@@ -10,6 +10,7 @@ from . import nccl
 import io, pickle
 from typing import Mapping
 import threading
+import bmtrain as bmt
 
 def _save_to_state_dict(model : torch.nn.Module, rank, destination, prefix):
     if isinstance(model, Block):
@@ -121,6 +122,7 @@ def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False):
             config['finish_save'] = False
             config['save_thread'] = threading.Thread(target=async_save_to_file, args=(state_dict, file_name))
             config['save_thread'].start()
+    bmt.synchronize()
 
 DTYPE_LIST = [
     torch.float64,
@@ -136,26 +138,31 @@ DTYPE_LIST = [
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
-def allgather_object(obj, comm):
-    f = io.BytesIO()
-    _pickler(f).dump(obj)
-    byte_storage = torch.ByteStorage.from_buffer(f.getvalue())
-    # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
-    # Otherwise, it will casue 100X slowdown.
-    # See:
-    byte_tensor = torch.ByteTensor(byte_storage).cuda()
-    all_bytes_tensors = torch.empty(byte_tensor.numel() * nccl.commCount(comm), dtype=torch.uint8, device="cuda")
-    nccl.allGather(
-        byte_tensor.storage(),
-        all_bytes_tensors.storage(),
-        comm
-    )
-    obj_list = []
-    for i in range(nccl.commCount(comm)):
-        buf = all_bytes_tensors[i*byte_tensor.numel():(i+1)*byte_tensor.numel()].cpu().numpy().tobytes()
-        obj = _unpickler(io.BytesIO(buf)).load()
-        obj_list.append(obj)
-    return obj_list
+
+def allgather_objects(obj):
+    if bmt.world_size() == 1:
+        return [obj]
+
+    with torch.no_grad():
+        data_bytes: bytes = pickle.dumps(obj)
+        data_length: int = len(data_bytes)
+
+        gpu_data_length = torch.tensor([data_length], device="cuda", dtype=torch.long)
+        gathered_length = bmt.distributed.all_gather(gpu_data_length).view(-1).cpu()
+        max_data_length = gathered_length.max().item()
+
+        gpu_data_bytes = torch.zeros(max_data_length, dtype=torch.uint8, device="cuda")
+        byte_storage = torch.ByteStorage.from_buffer(data_bytes)
+        gpu_data_bytes[:data_length] = torch.ByteTensor(byte_storage)
+
+        gathered_data = bmt.distributed.all_gather(gpu_data_bytes).cpu()
+
+        ret = []
+        for i in range(gathered_data.size(0)):
+            data_bytes = gathered_data[i, : gathered_length[i].item()].numpy().tobytes()
+            ret.append(pickle.loads(data_bytes))
+        return ret
+
 def broadcast_object(obj, comm, src = 0):
     if nccl.commRank(comm) == src:
         f = io.BytesIO()

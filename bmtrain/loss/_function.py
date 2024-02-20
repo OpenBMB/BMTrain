@@ -62,3 +62,48 @@ def cross_entropy_backward_inplace(m: int, n: int, grad_output: torch.Tensor, ta
         C.cross_entropy_backward_inplace_bf16_launcher(m, n, grad_output_ptr, target_ptr, x_ptr, ignore_index, cuda_stream)
     else:
         raise ValueError(f"cross_entropy_backward not supported for dtype {input.dtype}")
+
+def fused_sumexp(logits: torch.Tensor, max_logits: torch.Tensor) -> torch.Tensor:
+    CHECK_INPUT(logits)
+    CHECK_INPUT(max_logits)
+    assert max_logits.dtype == torch.float32, "max_logits must be float tensor"
+    assert max_logits.size(0) == logits.size(0), "max_logits must have same size(0) as logits"
+    sum_exp_logits = torch.empty(logits.size(0), dtype=torch.float32, device=logits.device)
+    m = logits.size(0)
+    n = logits.size(1)
+    cuda_stream = torch.cuda.current_stream().cuda_stream
+    logits_ptr = logits.data_ptr()
+    max_logits_ptr = max_logits.data_ptr()
+    sum_exp_logits_ptr = sum_exp_logits.data_ptr()
+    if logits.dtype == torch.float16:
+        C.fused_sumexp_fp16_launcher(m, n, logits_ptr, max_logits_ptr, sum_exp_logits_ptr, cuda_stream)
+    elif logits.dtype == torch.bfloat16:
+        if not C.is_bf16_supported():
+            raise NotImplementedError(f"bfloat16 is not supported on current GPU")
+        C.fused_sumexp_bf16_launcher(m, n, logits_ptr, max_logits_ptr, sum_exp_logits_ptr, cuda_stream)
+    else:
+        raise ValueError(f"fused_sumexp not supported for dtype {logits.dtype}")
+    return sum_exp_logits
+
+def fused_softmax_inplace(logits: torch.Tensor, max_logits: torch.Tensor, sum_exp_logits: torch.Tensor) -> None:
+    CHECK_INPUT(logits)
+    CHECK_INPUT(max_logits)
+    CHECK_INPUT(sum_exp_logits)
+    assert max_logits.dtype == torch.float32, "max_logits must be float tensor"
+    assert sum_exp_logits.dtype == torch.float32, "sum_exp_logits must be float tensor"
+    assert max_logits.size(0) == logits.size(0), "max_logits must have same size(0) as logits"
+    assert sum_exp_logits.size(0) == logits.size(0), "sum_exp_logits must have same size(0) as logits"
+    m = logits.size(0)
+    n = logits.size(1)
+    cuda_stream = torch.cuda.current_stream().cuda_stream
+    logits_ptr = logits.data_ptr()
+    max_logits_ptr = max_logits.data_ptr()
+    sum_exp_logits_ptr = sum_exp_logits.data_ptr()
+    if logits.dtype == torch.float16:
+        C.fused_softmax_inplace_fp16_launcher(m, n, logits_ptr, max_logits_ptr, sum_exp_logits_ptr, cuda_stream)
+    elif logits.dtype == torch.bfloat16:
+        if not C.is_bf16_supported():
+            raise NotImplementedError(f"bfloat16 is not supported on current GPU")
+        C.fused_softmax_inplace_bf16_launcher(m, n, logits_ptr, max_logits_ptr, sum_exp_logits_ptr, cuda_stream)
+    else:
+        raise ValueError(f"fused_softmax_inplace not supported for dtype {logits.dtype}")

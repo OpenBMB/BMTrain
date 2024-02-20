@@ -85,7 +85,7 @@ class OptimManager:
 
     def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
 
-        return loss * (self.loss_scale / config['world_size'] * config['pipe_size'] * config['tp_size']) # loss scale
+        return loss * (self.loss_scale / (config['world_size'] // (config['tp_size']*config['pipe_size']))) # loss scale
 
     def backward(self, loss : torch.Tensor):
         """
@@ -203,3 +203,20 @@ class OptimManager:
         self.loss_scale = scale
         self.steps_since_last_scale = 0
 
+    def state_dict(self) -> dict:
+        return {
+            "optimizers": [opt.state_dict() for opt in self.optimizers],
+            "lr_schedulers": [lrs.state_dict() if lrs else None for lrs in self.lr_schedulers],
+            "loss_scale": self.loss_scale,
+            "loss_scale_enabled": self.loss_scale_enabled,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        assert len(self.optimizers) == len(state_dict["optimizers"])
+        assert len(self.lr_schedulers) == len(state_dict["lr_schedulers"])
+        for opt, opt_st in zip(self.optimizers, state_dict["optimizers"]):
+            opt.load_state_dict(opt_st)
+        for lrs, lrs_st in zip(self.lr_schedulers, state_dict["lr_schedulers"]):
+            lrs.load_state_dict(lrs_st)
+        self.loss_scale = state_dict["loss_scale"]
+        self.loss_scale_enabled = state_dict["loss_scale_enabled"]

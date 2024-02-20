@@ -46,19 +46,21 @@ class Attention(bmt.DistributedModule):
 
         assert hidden_q.data_ptr() == hidden_kv.data_ptr()
 
-        hidden_q = bmt.nn.OpParallelLinear.apply(
-			hidden_q,
-			torch.cat([self.project_q.weight, self.project_k.weight, self.project_v.weight], dim=0),
-			torch.cat([self.project_q.bias, self.project_k.bias, self.project_v.bias], dim=0),
-			True, False,
-			False, None
-		)
-
-        h_q, h_k, h_v = hidden_q.chunk(3, dim=-1)
-
         if config['tp_size'] > 1:
+            hidden_q = bmt.nn.OpParallelLinear.apply(
+                hidden_q,
+                torch.cat([self.project_q.weight, self.project_k.weight, self.project_v.weight], dim=0),
+                torch.cat([self.project_q.bias, self.project_k.bias, self.project_v.bias], dim=0),
+                True, False,
+                False, None
+            )
+            h_q, h_k, h_v = hidden_q.chunk(3, dim=-1)
             #batch_size  will changed in TensorParallel
             batch_size = h_v.shape[0]
+        else:
+            h_q : torch.Tensor = self.project_q(hidden_q)
+            h_k : torch.Tensor = self.project_k(hidden_kv)
+            h_v : torch.Tensor = self.project_v(hidden_kv)
 
         h_q = h_q.view(batch_size, seq_q, -1, self.dim_head)
         h_k = h_k.view(batch_size, seq_kv, -1, self.dim_head)
