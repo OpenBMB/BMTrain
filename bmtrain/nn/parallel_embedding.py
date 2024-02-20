@@ -25,7 +25,7 @@ class Projection(bmt.DistributedModule):
             init_method=bmt.ParameterInitializer(torch.nn.init.normal_, mean=init_mean, std=init_std),
         )
 
-    def projection(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor):
         """
         Projection based on embedding's weight. For example, embedding map vocab_size to embed_size, than projection map embed_size back to vocab_size.
         Args:
@@ -59,7 +59,7 @@ class VPProjection(bmt.DistributedModule):
             tp_mode=True,
         )
 
-    def projection(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor):
         """
         Projection based on embedding's weight. For example, embedding map vocab_size to embed_size, than projection map embed_size back to vocab_size.
         Args:
