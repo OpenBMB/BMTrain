@@ -1,9 +1,11 @@
 #include "include/bind.hpp"
 
 PYBIND11_MODULE(C, m) {
-    m.def("is_bf16_supported",&is_bf16_supported,"whether bf16 supported");
-    m.def("has_nan_inf_fp16_launcher",&has_nan_inf_fp16_launcher,"has nan inf");
-    m.def("has_nan_inf_bf16_launcher",&has_nan_inf_bf16_launcher,"has nan inf bf16");
+    m.def("to_fp16_from_fp32", &fp16_from_fp32_value_launcher, "convert");
+    m.def("to_bf16_from_fp32", &bf16_from_fp32_value_launcher, "convert");
+    m.def("is_bf16_supported", &is_bf16_supported, "whether bf16 supported");
+    m.def("has_nan_inf_fp16_launcher", &has_nan_inf_fp16_launcher, "has nan inf");
+    m.def("has_nan_inf_bf16_launcher", &has_nan_inf_bf16_launcher, "has nan inf bf16");
     m.def("adam_fp16_launcher", &adam_fp16_launcher, "adam function cpu");
     m.def("adam_bf16_launcher", &adam_bf16_launcher, "adam function cpu");
     m.def("adam_cpu_fp16_launcher", &adam_cpu_fp16_launcher, "adam function cpu");
@@ -26,8 +28,17 @@ PYBIND11_MODULE(C, m) {
     m.def("ncclReduceScatter", &pyNCCLReduceScatter, "nccl reduce scatter");
     m.def("ncclGroupStart", &pyNCCLGroupStart, "nccl group start");
     m.def("ncclGroupEnd", &pyNCCLGroupEnd, "nccl group end");
-    m.def("ncclSend",&pyNCCLSend,"nccl send");
-    m.def("ncclRecv",&pyNCCLRecv,"nccl recv");
-    m.def("ncclCommCount",&pyNCCLCommCount,"nccl comm count");
-    m.def("ncclCommUserRank",&pyNCCLCommUserRank,"nccl comm user rank");
+    m.def("ncclSend", &pyNCCLSend, "nccl send");
+    m.def("ncclRecv", &pyNCCLRecv, "nccl recv");
+    m.def("ncclCommCount", &pyNCCLCommCount, "nccl comm count");
+    m.def("ncclCommUserRank", &pyNCCLCommUserRank, "nccl comm user rank");
+
+    py::class_<CUDAEventScope>(m, "CUDAEventScope")
+        .def(py::init(&CUDAEventScope::create))
+        .def("recordStart", &CUDAEventScope::recordStart)
+        .def("recordEnd", &CUDAEventScope::recordEnd);
+
+    py::class_<PyWatchDog>(m, "WatchDog")
+        .def(py::init(&PyWatchDog::create))
+        .def("watch", &PyWatchDog::watch);
 }
