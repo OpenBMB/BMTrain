@@ -1,13 +1,14 @@
-name: Build wheel
+name: Build
 
 on:
   pull_request:
     types: [opened, reopened]
-  branches:
-    - 'dev'
+    branches:
+      - 'dev'
+      - 'main'
 
 jobs:
-  build-upload-wheel:
+  build-archive-wheel:
     
     uses: OpenBMB/BMTrain/.github/workflows/build_whl.yml@workflow
     secrets:
@@ -15,7 +16,7 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
   publish:
-    needs: build
+    needs: build-archive-wheel
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
