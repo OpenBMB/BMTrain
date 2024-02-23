@@ -4,9 +4,19 @@
 
 int is_bf16_supported();
 
-void has_nan_inf_fp16_launcher(int32_t n,std::uintptr_t g_fp16,std::uintptr_t mid,std::uintptr_t out,std::uintptr_t stream);
-void has_nan_inf_bf16_launcher(int32_t n,std::uintptr_t g_bf16,std::uintptr_t mid,std::uintptr_t out,std::uintptr_t stream);
+void has_nan_inf_fp16_launcher(int32_t n, std::uintptr_t g_fp16, std::uintptr_t mid, std::uintptr_t out, std::uintptr_t stream);
+void has_nan_inf_bf16_launcher(int32_t n, std::uintptr_t g_bf16, std::uintptr_t mid, std::uintptr_t out, std::uintptr_t stream);
 
+void fp16_from_fp32_value_launcher(
+    int64_t n,
+    std::uintptr_t param_fp32,
+    std::uintptr_t param_fp16
+);
+void bf16_from_fp32_value_launcher(
+    int64_t n,
+    std::uintptr_t param_fp32,
+    std::uintptr_t param_bf16
+);
 void cross_entropy_forward_fp16_launcher(
     int32_t m, int32_t n,
     std::uintptr_t input,

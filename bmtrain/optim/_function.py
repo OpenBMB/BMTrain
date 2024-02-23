@@ -1,7 +1,18 @@
 from .. import C
 import torch
 CHECK_INPUT = lambda x: x.is_contiguous() and x.is_cuda
-def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.Tensor, m_fp32: torch.Tensor,
+
+def bf16_from_fp32(param_fp32):
+    param_bf16 = torch.empty_like(param_fp32, dtype=torch.bfloat16)
+    C.to_bf16_from_fp32(param_fp32.numel(), param_fp32.data_ptr(), param_bf16.data_ptr())
+    return param_bf16
+
+def fp16_from_fp32(param_fp32):
+    param_fp16 = torch.empty_like(param_fp32, dtype=torch.float16)
+    C.to_fp16_from_fp32(param_fp32.numel(), param_fp32.data_ptr(), param_fp16.data_ptr())
+    return param_fp16
+    
+def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, delta_info: torch.Tensor, g_fp16: torch.Tensor, m_fp32: torch.Tensor,
              v_fp32: torch.Tensor, beta1: float, beta2: float, eps: float, lr: float, scale: float,
              weight_decay: float, step: int) -> None:
     assert param_fp32.is_contiguous(), "param_fp32 must be contiguous"
@@ -23,6 +34,11 @@ def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.T
     assert param_fp32.numel() == g_fp16.numel(), "param_fp32 and g_fp16 must have the same number of elements"
     assert param_fp32.numel() == m_fp32.numel(), "param_fp32 and m_fp32 must have the same number of elements"
     assert param_fp32.numel() == v_fp32.numel(), "param_fp32 and v_fp32 must have the same number of elements"
+    if delta_info is not None:
+        assert delta_info.is_contiguous(), "delta_info must be contiguous"
+        assert delta_info.dtype == torch.float32, "delta_info must be float32 tensor"
+        assert delta_info.device == torch.device("cpu"), "delta_info must be a cpu tensor"
+        assert delta_info.numel() == 4, "delta_info have a length of 4"
     bias_correction1 = 1 - beta1 ** step
     bias_correction2 = 1 - beta2 ** step
     if g_fp16.dtype == torch.float16:
@@ -35,6 +51,7 @@ def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, g_fp16: torch.T
         param_fp32.numel(),
         param_fp32.data_ptr(),
         param_fp16.data_ptr(),
+        delta_info.data_ptr() if delta_info is not None else 0,
         g_fp16.data_ptr(),
         m_fp32.data_ptr(),
         v_fp32.data_ptr(),
