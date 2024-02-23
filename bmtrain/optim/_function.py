@@ -30,11 +30,15 @@ def adam_cpu(param_fp32: torch.Tensor, param_fp16: torch.Tensor, delta_info: tor
     assert g_fp16.device == torch.device("cpu"), "g_fp16 must be a cpu tensor"
     assert m_fp32.device == torch.device("cpu"), "m_fp32 must be a cpu tensor"
     assert v_fp32.device == torch.device("cpu"), "v_fp32 must be a cpu tensor"
-    #TODO check avg_delta and var_delta 
     assert param_fp32.numel() == param_fp16.numel(), "param_fp32 and param_fp16 must have the same number of elements"
     assert param_fp32.numel() == g_fp16.numel(), "param_fp32 and g_fp16 must have the same number of elements"
     assert param_fp32.numel() == m_fp32.numel(), "param_fp32 and m_fp32 must have the same number of elements"
     assert param_fp32.numel() == v_fp32.numel(), "param_fp32 and v_fp32 must have the same number of elements"
+    if delta_info is not None:
+        assert delta_info.is_contiguous(), "delta_info must be contiguous"
+        assert delta_info.dtype == torch.float32, "delta_info must be float32 tensor"
+        assert delta_info.device == torch.device("cpu"), "delta_info must be a cpu tensor"
+        assert delta_info.numel() == 4, "delta_info have a length of 4"
     bias_correction1 = 1 - beta1 ** step
     bias_correction2 = 1 - beta2 ** step
     if g_fp16.dtype == torch.float16:

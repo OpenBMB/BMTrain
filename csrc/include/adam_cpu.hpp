@@ -229,10 +229,12 @@ void adam_cpu_0(
             delta_mutex.unlock();
         }
     });
-    delta_info_ptr[0] = sum_delta / n;
-    delta_info_ptr[1] = sum_sq_delta / n - sum_delta * sum_delta / (n * n);// var = E(x^2) - E(x)^2
-    delta_info_ptr[2] = sum_delta;
-    delta_info_ptr[3] = sum_sq_delta;
+    if (delta_info_ptr != NULL){
+        delta_info_ptr[0] = sum_delta / n;
+        delta_info_ptr[1] = sum_sq_delta / n - sum_delta * sum_delta / (n * n);// var = E(x^2) - E(x)^2
+        delta_info_ptr[2] = sum_delta;
+        delta_info_ptr[3] = sum_sq_delta;
+    }
 }
 
 void adam_cpu_bf16_0(

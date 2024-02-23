@@ -32,13 +32,4 @@ PYBIND11_MODULE(C, m) {
     m.def("ncclRecv", &pyNCCLRecv, "nccl recv");
     m.def("ncclCommCount", &pyNCCLCommCount, "nccl comm count");
     m.def("ncclCommUserRank", &pyNCCLCommUserRank, "nccl comm user rank");
-
-    py::class_<CUDAEventScope>(m, "CUDAEventScope")
-        .def(py::init(&CUDAEventScope::create))
-        .def("recordStart", &CUDAEventScope::recordStart)
-        .def("recordEnd", &CUDAEventScope::recordEnd);
-
-    py::class_<PyWatchDog>(m, "WatchDog")
-        .def(py::init(&PyWatchDog::create))
-        .def("watch", &PyWatchDog::watch);
 }

@@ -223,10 +223,6 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     with torch.no_grad():
                         v["_param_fp32"] = torch.empty(param.size(), dtype=torch.float32, device="cpu")
                         v["_param_fp32"].copy_(param)
-
-                if "_param_fp32" not in v:
-                    v["_param_fp32"] = torch.empty(param.size(), dtype=torch.float32, device="cpu")
-                    v["_param_fp32"].copy_(param)
                     
                 for name, dtype in [("exp_avg", torch.float32), ("exp_avg_sq", torch.float32), ("_param_fp32", torch.float32)]:
                     if name in v:
