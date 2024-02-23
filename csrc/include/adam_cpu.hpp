@@ -5,6 +5,7 @@
 #include <sched.h>
 #include <pybind11/pybind11.h>
 #include <iostream>
+#include <mutex>
 #include <vector>
 #include <thread>
 #include <algorithm>
