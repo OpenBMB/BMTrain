@@ -4,9 +4,10 @@ import bmtrain as bmt
 import random
 import torch
 from bmtrain import config
-from bmtrain.block_layer import CheckpointBlock, TransformerBlockList
+from bmtrain.block_layer import Block, TransformerBlockList
 from bmtrain.pipe_layer import PipelineTransformerBlockList
 import torch.nn.functional as F
+from bmtrain import inspect
 
 class Linear(bmt.DistributedModule):
     def __init__(self, in_features : int, out_features: int, init_weight = None, init_bias = None) -> None:
@@ -48,7 +49,7 @@ class L2_record(bmt.DistributedModule):
 
     def forward(self, x):
         x = self.m1(x)
-        bmt.inspect.record_tensor(x, "hidden")
+        inspect.record_tensor(x, "hidden")
         x = self.m2(x)
         return x
 
@@ -57,7 +58,7 @@ class Model_ZERO(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = TransformerBlockList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
         self.post = post
@@ -76,7 +77,7 @@ class Model_PIPE(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = PipelineTransformerBlockList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
         self.post = post
@@ -95,7 +96,7 @@ class Model_BLOCK(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = torch.nn.ModuleList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
         self.post = post
@@ -160,10 +161,10 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len):
         bmt.init_parameters(m)
     m = cls(pre, [m for m in ms], post)
     ret = ""
-    with bmt.inspect.inspect_tensor() as inspector:
+    with inspect.inspect_tensor() as inspector:
         logits = m(inp)
 
-    ret += bmt.inspect.format_summary(
+    ret += inspect.format_summary(
         inspector.get_summary()
     ) + "\n"
 
@@ -171,32 +172,32 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len):
     for i in range(len(ms)//2):
         loss = loss + (inspector.summary[i]['tensor'] * middle_weight[i]).sum()
 
-    with bmt.inspect.inspect_tensor():
+    with inspect.inspect_tensor():
         loss.backward()
 
-    ret += bmt.inspect.format_summary(
-        bmt.inspect.inspect_model(m, '*')
+    ret += inspect.format_summary(
+        inspect.inspect_model(m, '*')
     ) + "\n"
-    ret += bmt.inspect.format_summary(
+    ret += inspect.format_summary(
         inspector.get_summary()
     ) + "\n"
 
-    with bmt.inspect.inspect_tensor() as inspector:
+    with inspect.inspect_tensor() as inspector:
         logits = m(inp)
 
-    ret += bmt.inspect.format_summary(
+    ret += inspect.format_summary(
         inspector.get_summary()
     ) + "\n"
 
     loss = (logits * last_weight).sum()
 
-    with bmt.inspect.inspect_tensor():
+    with inspect.inspect_tensor():
         loss.backward()
 
-    ret += bmt.inspect.format_summary(
-        bmt.inspect.inspect_model(m, '*')
+    ret += inspect.format_summary(
+        inspect.inspect_model(m, '*')
     ) + "\n"
-    ret += bmt.inspect.format_summary(
+    ret += inspect.format_summary(
         inspector.get_summary()
     ) + "\n"
 

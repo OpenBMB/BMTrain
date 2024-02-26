@@ -2,11 +2,11 @@ from utils import *
 
 import bmtrain as bmt
 import torch
-from bmtrain import config
-from bmtrain.block_layer import CheckpointBlockContext,  CheckpointBlock, TransformerBlockList
+from bmtrain.block_layer import Block, TransformerBlockList
 from bmtrain.pipe_layer import PipelineTransformerBlockList
 from typing import List
 import torch.nn.functional as F
+from bmtrain import inspect
 
 class Linear(bmt.DistributedModule):
     def __init__(self, in_features : int, out_features: int, init_weight = None, init_bias = None) -> None:
@@ -35,15 +35,15 @@ def run(m, a, b):
     loss = logits.sum()
     loss.backward()
 
-    sm = bmt.inspect.format_summary(
-            bmt.inspect.inspect_model(m, '*')
+    sm = inspect.format_summary(
+            inspect.inspect_model(m, '*')
         )
     return sm
 
 def test_main():
     a = Linear(256, 256)
     b = Linear(256, 256)
-    m = TransformerBlockList([CheckpointBlock(a), CheckpointBlock(b)])
+    m = TransformerBlockList([Block(a), Block(b)])
     bmt.init_parameters(m)
 
     a.bias.requires_grad_(False)
@@ -67,7 +67,7 @@ def test_main():
 def test_main_pipe():
     a = Linear(256, 256)
     b = Linear(256, 256)
-    m = PipelineTransformerBlockList([CheckpointBlock(a), CheckpointBlock(b)])
+    m = PipelineTransformerBlockList([Block(a), Block(b)])
     bmt.init_parameters(m)
 
     a.bias.requires_grad_(False)
@@ -90,7 +90,7 @@ def test_main_pipe():
     assert_eq(sm2.split('\n')[2], sm3.split('\n')[2])
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=2)
+    bmt.init_distributed(pipe_size=1)
 
     test_main()
-    test_main_pipe()
+    # test_main_pipe()

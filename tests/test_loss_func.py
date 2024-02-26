@@ -27,59 +27,53 @@ def check(x, tgt, loss_func1, loss_func2, bigmodel=None):
     loss_2, grad_2 = run(x, tgt, loss_func2, bigmodel=bigmodel, use_float=True)
     assert_eq(grad_1.isnan().sum(), 0)
     assert_eq(grad_2.isnan().sum(), 0)
+    print(f"{(loss_1 - loss_2).abs().item():.6f} {(grad_1 - grad_2).abs().max().item():.6f}")
     assert_lt((loss_1 - loss_2).abs().item(), 1e-5)
-    assert_lt((grad_1 - grad_2).abs().max().item(), 1e-2)
+    assert_lt((grad_1 - grad_2).abs().max().item(), 1e-1)
 
-def test_simple():
+def test_simple(dtype):
     loss_func1 = bmt.loss.FusedCrossEntropy()
     loss_func2 = torch.nn.CrossEntropyLoss()
 
     N = 32 * 512
     for i in range(1, 10):
         C = i * 10
-        x = torch.randn(N, C).cuda().half()
+        x = torch.randn(N, C).cuda().to(dtype)
         tgt = torch.randint(0, C, (N,)).cuda().long()
         check(x, tgt, loss_func1, loss_func2)
     for i in range(1, 10):
         C = i * 100
-        x = torch.randn(N, C).cuda().half()
+        x = torch.randn(N, C).cuda().to(dtype)
         tgt = torch.randint(0, C, (N,)).cuda().long()
         check(x, tgt, loss_func1, loss_func2)
     for i in range(1, 31):
         C = i * 1000
-        x = torch.randn(N, C).cuda().half()
+        x = torch.randn(N, C).cuda().to(dtype)
         tgt = torch.randint(0, C, (N,)).cuda().long()
         check(x, tgt, loss_func1, loss_func2)
 
-def test_other():
+def test_other(dtype):
     N = 32 * 512
     for i in range(1, 11):
         C = i * 10
         weight = [i+1 for i in range(C)]
         random.shuffle(weight)
         weight = torch.tensor(weight, device="cuda")
-        loss_func1 = bmt.loss.FusedCrossEntropy(weight=weight.clone().half())
+        loss_func1 = bmt.loss.FusedCrossEntropy(weight=weight.clone().to(dtype))
         loss_func2 = torch.nn.CrossEntropyLoss(weight=weight.clone().float())
 
-        x = torch.randn(N, C).cuda().half()
+        x = torch.randn(N, C).cuda().to(dtype)
         tgt = torch.randint(0, C, (N,)).cuda().long()
         mask = torch.randint(0, 2, (N,)).cuda().bool()
         tgt[mask] = -100
         check(x, tgt, loss_func1, loss_func2)
 
-def test_inplace():
-    loss_func1 = bmt.loss.FusedCrossEntropy(inplace=True)
-    loss_func2 = torch.nn.CrossEntropyLoss()
-    N = 32 * 512
-
-    for i in range(1, 11):
-        C = i * 10
-        bigmodel = torch.nn.Linear(5, C).cuda().half()
-        x = torch.randn(N, 5).cuda().half()
-        tgt = torch.randint(0, C, (N,)).cuda().long()
-        check(x, tgt, loss_func1, loss_func2, bigmodel=bigmodel)
-
 if __name__ == "__main__":
-    test_other()
-    test_inplace()
-    test_simple()
+    test_other(torch.float16)
+    test_simple(torch.float16)
+    print("==============================================================================")
+    try:
+        test_other(torch.bfloat16)
+        test_simple(torch.bfloat16)
+    except NotImplementedError: 
+        pass

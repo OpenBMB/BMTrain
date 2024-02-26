@@ -1,5 +1,3 @@
-#include <cuda_fp16.h>
-
 namespace {
 const int WARP_SZ = 32;
 

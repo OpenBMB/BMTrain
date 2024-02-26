@@ -3,23 +3,42 @@ from typing import Dict
 import torch
 
 from .pipe_layer import PipelineTransformerBlockList
+from .block_layer import TransformerBlockList
 from .global_var import config
-from .block_layer import CheckpointBlock
+from .block_layer import Block
 from . import nccl
 import io, pickle
 from typing import Mapping
+import threading
+import bmtrain as bmt
 
-def _save_to_state_dict(model : torch.nn.Module, destination, prefix):
-    if isinstance(model, CheckpointBlock):
-        if config['rank'] != 0:
+def _save_to_state_dict(model : torch.nn.Module, rank, destination, prefix):
+    if isinstance(model, Block):
+        if rank != 0:
             destination = OrderedDict() # creates an temporary ordered dict
             destination._metadata = OrderedDict()
         model.state_dict(destination=destination, prefix=prefix, keep_vars=False)
     else:
-        if config['rank'] != 0:
+        if rank != 0:
             destination = OrderedDict() # creates an temporary ordered dict
             destination._metadata = OrderedDict()
         model._save_to_state_dict(destination, prefix, False)
+
+def _save_to_local_rank0(model : torch.nn.Module, destination=None, prefix=''):
+    if destination is None:
+        destination = OrderedDict()
+        destination._metadata = OrderedDict()
+    destination._metadata[prefix[:-1]] = local_metadata = dict(version=model._version)
+    _save_to_state_dict(model, config['local_rank'], destination, prefix)
+    for name, module in model._modules.items():
+        if module is not None:
+            _save_to_local_rank0(module, destination, prefix + name + '.')
+    for hook in model._state_dict_hooks.values():
+        hook_result = hook(model, destination, prefix, local_metadata)
+        if hook_result is not None:
+            destination = hook_result
+    return destination
+
 
 def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
     if destination is None:
@@ -27,7 +46,7 @@ def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
         destination._metadata = OrderedDict()
     destination._metadata[prefix[:-1]] = local_metadata = dict(version=model._version)
     if not isinstance(model, PipelineTransformerBlockList):
-        _save_to_state_dict(model, destination, prefix)
+        _save_to_state_dict(model, config['rank'], destination, prefix)
         for name, module in model._modules.items():
             if module is not None:
                 _save_to_rank0(module, destination, prefix + name + '.')
@@ -38,10 +57,38 @@ def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
     else:
         model._save_to_state_dict(destination, prefix, False)
     return destination
+
+def _save_to_infer_model(model : torch.nn.Module, infer_model, destination=None, prefix=''):
+    config['save_param_to_cpu'] = False
+    if destination is None:
+        destination = OrderedDict()
+        destination._metadata = OrderedDict()
+    destination._metadata[prefix[:-1]] = local_metadata = dict(version=model._version)
+    _save_to_state_dict(model, config['local_rank'], destination, prefix)
+    for name, module in model._modules.items():
+        if module is not None:
+            if isinstance(module, TransformerBlockList):
+                for local_name, local_module in module._modules.items():
+                    local_state_dict = _save_to_local_rank0(local_module, None, prefix + name + "." + local_name + '.')
+                    if config['local_rank'] == 0:
+                        infer_model.load_layer_state_dict(local_state_dict)
+            else:
+                _save_to_infer_model(module, infer_model, destination, prefix + name + '.')
+    for hook in model._state_dict_hooks.values():
+        hook_result = hook(model, destination, prefix, local_metadata)
+        if hook_result is not None:
+            destination = hook_result
+
+    if config['local_rank'] == 0:
+        infer_model.load_layer_state_dict(destination)
         
 
+def async_save_to_file(state_dict, file_path):
+    torch.save(state_dict, file_path)
+    config['finish_save'] = True
+    print("finish save state_dict to ", file_path) 
 
-def save(model : torch.nn.Module, file_name : str):
+def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False):
     """Saves the model to the file.
 
     Similar to torch.save, but it used for distributed modules.
@@ -49,6 +96,8 @@ def save(model : torch.nn.Module, file_name : str):
     Args:
         model (torch.nn.Module): The model to be saved.
         file_name (str): The file name of the checkpoint.
+        non_blocking (bool): Whether to asynchronously save state_dict to file
+
 
     Examples:
         >>> bmtrain.save(model, "model.pt")
@@ -56,7 +105,19 @@ def save(model : torch.nn.Module, file_name : str):
     torch.cuda.synchronize()
     state_dict = _save_to_rank0(model)
     if config["rank"] == 0:
-        torch.save(state_dict, file_name)
+        if non_blocking is False:
+            torch.save(state_dict, file_name)
+        else:
+            if 'finish_save' not in config:
+                config['finish_save'] = True
+
+            if config['finish_save'] is False:
+                config['save_thread'].join()
+
+            config['finish_save'] = False
+            config['save_thread'] = threading.Thread(target=async_save_to_file, args=(state_dict, file_name))
+            config['save_thread'].start()
+    bmt.synchronize()
 
 DTYPE_LIST = [
     torch.float64,
@@ -72,26 +133,31 @@ DTYPE_LIST = [
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
-def allgather_object(obj, comm):
-    f = io.BytesIO()
-    _pickler(f).dump(obj)
-    byte_storage = torch.ByteStorage.from_buffer(f.getvalue())
-    # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
-    # Otherwise, it will casue 100X slowdown.
-    # See:
-    byte_tensor = torch.ByteTensor(byte_storage).cuda()
-    all_bytes_tensors = torch.empty(byte_tensor.numel() * nccl.commCount(comm), dtype=torch.uint8, device="cuda")
-    nccl.allGather(
-        byte_tensor.storage(),
-        all_bytes_tensors.storage(),
-        comm
-    )
-    obj_list = []
-    for i in range(nccl.commCount(comm)):
-        buf = all_bytes_tensors[i*byte_tensor.numel():(i+1)*byte_tensor.numel()].cpu().numpy().tobytes()
-        obj = _unpickler(io.BytesIO(buf)).load()
-        obj_list.append(obj)
-    return obj_list
+
+def allgather_objects(obj):
+    if bmt.world_size() == 1:
+        return [obj]
+
+    with torch.no_grad():
+        data_bytes: bytes = pickle.dumps(obj)
+        data_length: int = len(data_bytes)
+
+        gpu_data_length = torch.tensor([data_length], device="cuda", dtype=torch.long)
+        gathered_length = bmt.distributed.all_gather(gpu_data_length).view(-1).cpu()
+        max_data_length = gathered_length.max().item()
+
+        gpu_data_bytes = torch.zeros(max_data_length, dtype=torch.uint8, device="cuda")
+        byte_storage = torch.ByteStorage.from_buffer(data_bytes)
+        gpu_data_bytes[:data_length] = torch.ByteTensor(byte_storage)
+
+        gathered_data = bmt.distributed.all_gather(gpu_data_bytes).cpu()
+
+        ret = []
+        for i in range(gathered_data.size(0)):
+            data_bytes = gathered_data[i, : gathered_length[i].item()].numpy().tobytes()
+            ret.append(pickle.loads(data_bytes))
+        return ret
+
 def broadcast_object(obj, comm, src = 0):
     if nccl.commRank(comm) == src:
         f = io.BytesIO()

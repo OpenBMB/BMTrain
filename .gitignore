@@ -151,3 +151,5 @@ log
 
 !bmtrain/dist
 tests/test_log.txt
+tests/*.opt
+tests/*.ckp

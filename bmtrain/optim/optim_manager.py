@@ -11,9 +11,9 @@ def check_overflow(param_groups):
     has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
     for group in param_groups:
         for p in group['params']:
-            if p.grad is not None and p.dtype == torch.half: # TODO support other types
-                has_inf_nan(p.grad, has_inf_or_nan)
-
+            if p.grad is not None:
+                if p.dtype != torch.float:
+                    has_inf_nan(p.grad, has_inf_or_nan)
     if "comm" in config:
         nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
 
@@ -85,7 +85,7 @@ class OptimManager:
 
     def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
 
-        return loss * (self.loss_scale / config['world_size']) # loss scale
+        return loss * (self.loss_scale / (config['world_size']//(config['tp_size']*config['pipe_size']))) # loss scale
 
     def backward(self, loss : torch.Tensor):
         """
@@ -203,3 +203,20 @@ class OptimManager:
         self.loss_scale = scale
         self.steps_since_last_scale = 0
 
+    def state_dict(self, gather_opt=False) -> dict:
+        return {
+            "optimizers": [opt.state_dict(gather_opt) for opt in self.optimizers],
+            "lr_schedulers": [lrs.state_dict() if lrs else None for lrs in self.lr_schedulers],
+            "loss_scale": self.loss_scale,
+            "loss_scale_enabled": self.loss_scale_enabled,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        assert len(self.optimizers) == len(state_dict["optimizers"])
+        assert len(self.lr_schedulers) == len(state_dict["lr_schedulers"])
+        for opt, opt_st in zip(self.optimizers, state_dict["optimizers"]):
+            opt.load_state_dict(opt_st)
+        for lrs, lrs_st in zip(self.lr_schedulers, state_dict["lr_schedulers"]):
+            lrs.load_state_dict(lrs_st)
+        self.loss_scale = state_dict["loss_scale"]
+        self.loss_scale_enabled = state_dict["loss_scale_enabled"]

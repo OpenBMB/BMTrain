@@ -4,7 +4,7 @@ import bmtrain as bmt
 import torch
 import random
 from bmtrain import config
-from bmtrain.block_layer import CheckpointBlock, TransformerBlockList
+from bmtrain.block_layer import Block, TransformerBlockList
 from bmtrain.pipe_layer import PipelineTransformerBlockList
 import torch.nn.functional as F
 
@@ -19,7 +19,7 @@ class Model_ZERO(torch.nn.Module):
     def __init__(self, ms) -> None:
         super().__init__()
         self.ms = TransformerBlockList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ], num_hidden=3)
     
@@ -31,7 +31,7 @@ class Model_PIPE(torch.nn.Module):
     def __init__(self, ms) -> None:
         super().__init__()
         self.ms = PipelineTransformerBlockList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ], num_hidden=3)
     
@@ -43,7 +43,7 @@ class Model_BLOCK(torch.nn.Module):
     def __init__(self, ms) -> None:
         super().__init__()
         self.ms = torch.nn.ModuleList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
     
@@ -121,6 +121,6 @@ def test_main():
                 assert_lt((r[i]-r2[i]).abs().max(), 1e-5)
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=2)
+    bmt.init_distributed(pipe_size=1)
 
     test_main()

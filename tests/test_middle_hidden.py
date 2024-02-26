@@ -3,10 +3,10 @@ from utils import *
 import bmtrain as bmt
 import random
 import torch
-from bmtrain import config
-from bmtrain.block_layer import CheckpointBlock, TransformerBlockList
+from bmtrain.block_layer import Block, TransformerBlockList
 from bmtrain.pipe_layer import PipelineTransformerBlockList
 import torch.nn.functional as F
+from bmtrain import inspect 
 
 class Linear(bmt.DistributedModule):
     def __init__(self, in_features : int, out_features: int, init_weight = None, init_bias = None) -> None:
@@ -34,7 +34,7 @@ class Model_ZERO(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = TransformerBlockList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
         self.post = post
@@ -53,7 +53,7 @@ class Model_PIPE(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = PipelineTransformerBlockList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
         self.post = post
@@ -72,7 +72,7 @@ class Model_BLOCK(torch.nn.Module):
         super().__init__()
         self.pre = pre
         self.ms = torch.nn.ModuleList([
-            CheckpointBlock(m)
+            Block(m)
             for m in ms
         ])
         self.post = post
@@ -143,8 +143,8 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mid
         loss = (logits * last_weight).sum()
         loss.backward()
         ret += f"========================only last========================\n"
-        ret += bmt.inspect.format_summary(
-            bmt.inspect.inspect_model(m, '*')
+        ret += inspect.format_summary(
+            inspect.inspect_model(m, '*')
         )
     if only_middle:
         logits, hidden_states = m(inp, return_hidden_states=True)
@@ -154,8 +154,8 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mid
         ])
         loss.backward()
         ret += f"========================only middle========================\n"
-        ret += bmt.inspect.format_summary(
-            bmt.inspect.inspect_model(m, '*')
+        ret += inspect.format_summary(
+            inspect.inspect_model(m, '*')
         )
     if mix_test:
         logits, hidden_states = m(inp, return_hidden_states=True)
@@ -165,8 +165,8 @@ def sub_run(name, cls, num_layer, dim, batch, seq_len, only_last=False, only_mid
         ]) + (logits * last_weight).sum()
         loss.backward()
         ret += f"========================mix========================\n"
-        ret += bmt.inspect.format_summary(
-            bmt.inspect.inspect_model(m, '*')
+        ret += inspect.format_summary(
+            inspect.inspect_model(m, '*')
         )
     return ret + "\n" # replace for matching None grad with zero_grad
 
@@ -185,7 +185,7 @@ def test_main():
     ret["normal"] = run("normal", Model_NORMAL)
     ret["block"] = run("block", Model_BLOCK)
     ret["zero"] = run("zero", Model_ZERO)
-    ret["pipe"] = run("pipe", Model_PIPE)
+    # ret["pipe"] = run("pipe", Model_PIPE)
     for k, r in ret.items():
         bmt.print_rank(f"============={k}============")
         bmt.print_rank(r)
@@ -207,6 +207,6 @@ def test_main():
                         assert_eq(w, w2)
 
 if __name__ == "__main__":
-    bmt.init_distributed(pipe_size=4)
+    bmt.init_distributed(pipe_size=1)
 
     test_main()

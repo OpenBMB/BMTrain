@@ -1,0 +1,34 @@
+name: Build
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - 'dev'
+      - 'main'
+
+jobs:
+  build-archive-wheel:
+    
+    uses: OpenBMB/BMTrain/.github/workflows/build_whl.yml@workflow
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+
+  publish:
+    needs: build-archive-wheel
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set Up the Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+
+    - name: Download distribution files
+      uses: actions/download-artifact@v2
+      with:
+        name: dist
+        path: dist
