@@ -28,7 +28,7 @@ class TransformerEncoder(bmt.DistributedModule):
 
         x = self.ln_ff(hidden)
         x = self.ff(x)
-        hidden = hidden + x
+        hidden = hidden + x.view_as(hidden)
 
         return hidden
     

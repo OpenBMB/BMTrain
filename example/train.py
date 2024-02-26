@@ -36,8 +36,10 @@ def main():
 
     batch_size = 2
     seq_len = 512
+    world_size = bmt.config["world_size"] if bmt.config["tp_size"] == 1 else bmt.config["tp_zero_size"]
+    r = bmt.config["rank"] if bmt.config["tp_size"] == 1 else bmt.config["tp_zero_rank"] 
 
-    for i in range(bmt.world_size()):
+    for i in range(world_size):
         sent = torch.randint(0, 10240, (batch_size, seq_len + 1))
         enc_length = torch.randint(128, seq_len, (batch_size,)).long().cuda()
         enc_input = sent[:, :-1].long().cuda()
@@ -49,7 +51,7 @@ def main():
             torch.full_like(targets, -100, dtype=torch.long)
         )
 
-        if i == bmt.rank():
+        if i == r:
             break
     
     if config['tp_size'] > 1:
@@ -82,7 +84,7 @@ def main():
             batch, seq_len, vocab_out_size = logits.size()
 
             if config['tp_size'] > 1:
-                loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets)
+                loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
             else:
                 loss = loss_func(logits.float().view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
         

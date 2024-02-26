@@ -41,8 +41,7 @@ class Attention(bmt.DistributedModule):
             mask : torch.BoolTensor,        # (batch_size, seq_q, seq_kv)
             position_bias : Optional[torch.Tensor] = None,   # (batch, num_heads, seq_q, seq_kv)
         ) -> torch.Tensor:
-        batch_size, seq_q, dim_model = hidden_q.size()
-        seq_kv = hidden_kv.size(1)
+        batch_size = hidden_q.size()[0]
 
         assert hidden_q.data_ptr() == hidden_kv.data_ptr()
 
@@ -54,13 +53,15 @@ class Attention(bmt.DistributedModule):
                 True, False,
                 False, None
             )
+            hidden_q = hidden_q.view(batch_size, -1, hidden_q.shape[-1])
             h_q, h_k, h_v = hidden_q.chunk(3, dim=-1)
-            #batch_size  will changed in TensorParallel
-            batch_size = h_v.shape[0]
         else:
             h_q : torch.Tensor = self.project_q(hidden_q)
             h_k : torch.Tensor = self.project_k(hidden_kv)
             h_v : torch.Tensor = self.project_v(hidden_kv)
+
+        seq_q = h_q.size()[1]
+        seq_kv = h_k.size(1)
 
         h_q = h_q.view(batch_size, seq_q, -1, self.dim_head)
         h_k = h_k.view(batch_size, seq_kv, -1, self.dim_head)
@@ -84,10 +85,6 @@ class Attention(bmt.DistributedModule):
         if position_bias is not None:
             score = score + position_bias.view(batch_size, -1, seq_q, seq_kv)
          
-        if config['tp_size'] > 1:
-            with torch.no_grad():
-                mask = all_gather(mask, config['tp_comm']).flatten(0,1)
-
         score = torch.where(
             mask.view(batch_size, 1, seq_q, seq_kv),
             score,
@@ -108,8 +105,11 @@ class Attention(bmt.DistributedModule):
         h_out = h_out.view(batch_size, -1, seq_q, self.dim_head)
         h_out = h_out.permute(0, 2, 1, 3).contiguous()
         h_out = h_out.view(batch_size, seq_q, -1)
+        if config['tp_size'] > 1:
+            h_out = h_out.view(h_out.shape[0] * bmt.config["tp_size"], -1, h_out.shape[-1]) 
 
         attn_out = self.project_out(h_out)
+
         return attn_out
         
 

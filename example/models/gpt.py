@@ -14,8 +14,8 @@ class GPT(bmt.DistributedModule):
 
         self.max_distance = max_distance
 
-        if config['tp_size'] > 1:
-            self.word_emb = bmt.nn.ParallelEmbedding(vocab_size, dim_model, dtype=dtype)
+        if config["tp_size"] > 1:
+            self.word_emb = bmt.nn.VPEmbedding(vocab_size, dim_model, dtype=dtype)
         else:
             self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         self.pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
@@ -50,17 +50,15 @@ class GPT(bmt.DistributedModule):
 
         mask_2d = mask[:, None, :] & mask[:, :, None]   # (batch, seq_len, seq_len)
         mask_2d = mask_2d & (pos[:, None, :] >= pos[:, :, None])
-
+        if config["tp_size"] > 1:
+            input = input.chunk(config["tp_size"], dim=1)[config["tp_rank"]]
+            pos = pos.chunk(config["tp_size"], dim=1)[config["tp_rank"]]    
         out = self.pos_emb(pos) + self.word_emb(input)
 
         # for layer in self.transformers:
         out = self.transformers(out, mask_2d, None)
         out = self.layernorm(out)
-
-        if config['tp_size'] > 1:
-            logits = self.word_emb.projection(out)
-        else:
-            logits = self.word_emb(out, projection=True)
+        logits = self.word_emb(out, projection=True)
         bmt.inspect.record_tensor(logits, "logits")
 
         return logits
