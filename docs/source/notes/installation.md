@@ -8,12 +8,12 @@
 $ pip install bmtrain
 ```
 
-### 2. 从源代码安装
+### 2. 从源代码安装(建议在root环境下)
 
 ```shell
 $ git clone https://github.com/OpenBMB/BMTrain.git
 $ cd BMTrain
-$ python3 setup.py install
+$ python3 setup.py install 
 ```
 
 ## 编译选项
@@ -35,6 +35,16 @@ $ python3 setup.py install
 * GPU：NVIDIA Tesla V100 / NVIDIA Tesla A100 / RTX 3090
 * CPU：支持AVX512指令集的CPU，32核心以上
 * RAM：256GB以上
+
+## 基本环境
+
+以下是一个我们能够稳定运行的基本环境，你可以参考它来配置你的软硬件环境 ：
+
+* GCC Version：9.3.0
+* Torch Version：1.13.1
+* Linux System：Ubuntu 20.04
+* CUDA Version：11.4
+* Torch's CUDA version (as per `torch.cuda.version()`): 11.3
 
 ## 常见问题
 
