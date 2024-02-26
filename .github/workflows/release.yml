@@ -15,7 +15,7 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
   publish:
-    needs: build
+    needs: build-archive-wheel
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code

@@ -1,10 +1,9 @@
 ## What's Changed
-* Get rid of torch cpp extension when compiling @MayDomine @Achazwl  in #115 #132 
-* Github action CICD @MayDomine in #115 
-* Now Loss scale can be managed more dynamic by min and max loss scale by @Achazwl #129 
-* Fix `bmt.load(model)` OOM when meets torch >= 1.12 @MayDomine #115 
-* `AdamOffloadOptimizer` can choose avx flag automatically in runtime @MayDomine #115 
-* Now BMTrain is fully compatible with torch 2.0 @MayDomine #115 
-
-**Full Changelog**: https://github.com/OpenBMB/BMTrain/compare/0.2.2...0.2.3
+* Using pytorch's hook mechanism to refactor ZeRO, checkpoint, pipeline, communication implementation by @zkh2016 in #128 #159
+* Add Bf16 support by @Achazwl in #136 
+* Tensor parallel implementation by @Achazwl @zkh2016 @MayDomine in #153 
+* Async save state_dict by @zkh2016 in #171
+* `AdamOffloadOptimizer` can save whole gathered state by @MayDomine in #184
+* New test for new version's bmtrain by @Achazwl @JerryYin777 @MayDomine
+**Full Changelog**: https://github.com/OpenBMB/BMTrain/compare/0.2.3...1.0.0
 
