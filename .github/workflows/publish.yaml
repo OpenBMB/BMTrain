@@ -9,7 +9,7 @@ on:
 jobs:
 
   build-archive-wheel:
-    uses: OpenBMB/BMTrain/.github/workflows/build_whl.yml@workflow
+    uses: OpenBMB/BMTrain/.github/workflows/build_whl.yml@main
     secrets:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
