@@ -209,6 +209,8 @@ class Block(torch.nn.Module):
                 d_device = self._storage_params[kw_name].device
                 self._param_info[-1]["begin"] = to_offset_st
                 self._param_info[-1]["end"] = (to_offset_end - to_offset_st,)
+                setattr(param, "_start_partition", offset_st)
+                setattr(param, "_end_partition", offset_end)
                 if nccl.commCount(comm) != 1:
                     param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
                     param.data[:] = \
@@ -220,6 +222,8 @@ class Block(torch.nn.Module):
                 del contiguous_param
             else:
                 param.data = torch.tensor([], dtype=param.dtype, device=param.device)
+                setattr(param, "_start_partition", None)
+                setattr(param, "_end_partition", 0)
             # clear parameter data, but keep the dtype and device
             setattr(param, "_in_block", True)
         for kw in offsets.keys():

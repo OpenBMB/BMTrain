@@ -106,7 +106,7 @@ def main():
             batch, seq_len, vocab_out_size = logits.size()
 
             if config['tp_size'] > 1:
-                loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets)
+                loss = loss_func(logits.view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
             else:
                 loss = loss_func(logits.float().view(batch * seq_len, vocab_out_size), targets.view(batch * seq_len))
             global_loss = loss.item()

@@ -131,6 +131,14 @@ class AdamOptimizer(torch.optim.Optimizer):
 
         return loss
 
+    def get_avg_delta():
+
+        raise NotImplementedError("get delta info is not supported in Adam optimizer , try bmt.optim.AdamOffloadOptimizer")
+
+    def get_var_delta():
+
+        raise NotImplementedError("get delta info is not supported in Adam optimizer , try bmt.optim.AdamOffloadOptimizer")
+
     def load_state_dict(self, state_dict: dict) -> None:
         r"""Loads the optimizer state.
 

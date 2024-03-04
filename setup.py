@@ -93,7 +93,7 @@ ext_modules = [
 ]
 setup(
     name='bmtrain',
-    version='0.2.3.post2',
+    version='1.0.0',
     author="Guoyang Zeng",
     author_email="qbjooo@qq.com",
     description="A toolkit for training big models",

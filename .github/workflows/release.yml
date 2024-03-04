@@ -6,50 +6,16 @@ on:
       - "v*.*.*"
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['37', '38', '39', '310', '311']
 
-    steps:
+  build-archive-wheel:
 
-    - name: Check the disk space and clear unnecessary library
-      run: |
-        rm -rf /home/runner/work/BMTrain/BMTrain/dist
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf "/usr/local/share/boost"
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-        df -hl   
-
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Login to DockerHub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Pull Docker image
-      run: docker pull pytorch/manylinux-cuda113:latest
-
-    - name: Run Docker image and execute script
-      run: |
-        version=${{ matrix.python-version }}
-        docker run -e BUILD_DOCKER_ENV=1 -e CUDACXX=/usr/local/cuda-11.3/bin/nvcc -e PATH="/opt/rh/devtoolset-9/root/usr/bin:$PATH" -e LD_LIBRARY_PATH="/opt/rh/devtoolset-9/root/usr/lib64:/opt/rh/devtoolset-9/root/usr/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH" -v ${{ github.workspace }}:/workspace/BMTrain -i pytorch/manylinux-cuda113:latest /bin/bash -c "cd /workspace/BMTrain;/opt/python/cp${version}*/bin/pip install build;/opt/python/cp${version}*/bin/python -m build .;for file in dist/*-linux_x86_64.whl; do mv \"\$file\" \"\${file//-linux_x86_64/-manylinux2014_x86_64}\"; done"
-      
-    - name: Archive distribution files
-      uses: actions/upload-artifact@v2
-      with:
-        name: dist
-        path: |
-          dist/*.tar.gz
-          dist/*.whl
+    uses: OpenBMB/BMTrain/.github/workflows/build_whl.yml@main
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
   publish:
-    needs: build
+    needs: build-archive-wheel
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code

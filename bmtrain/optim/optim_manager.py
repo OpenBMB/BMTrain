@@ -203,9 +203,9 @@ class OptimManager:
         self.loss_scale = scale
         self.steps_since_last_scale = 0
 
-    def state_dict(self) -> dict:
+    def state_dict(self, gather_opt=False) -> dict:
         return {
-            "optimizers": [opt.state_dict() for opt in self.optimizers],
+            "optimizers": [opt.state_dict(gather_opt) for opt in self.optimizers],
             "lr_schedulers": [lrs.state_dict() if lrs else None for lrs in self.lr_schedulers],
             "loss_scale": self.loss_scale,
             "loss_scale_enabled": self.loss_scale_enabled,
