@@ -1,5 +1,6 @@
 import torch
-from bmtrain.distributed.ops import send_activations_list, recv_activations_list, send_activations, recv_activations, groupcall,all_reduce
+from bmtrain.distributed.ops import groupcall,all_reduce
+from bmtrain.distributed.p2p_ops import send_tensors, recv_tensors
 from bmtrain.global_var import config
 from collections.abc import Iterable
 from bmtrain.synchronize import synchronize
@@ -13,8 +14,6 @@ class PipeCommander:
         self.forward_only = forward_only
         self.interleaving_size = interleaving_size
         self.model = model
-        self.send_handle = {"next":[], "prev":[]}
-        self.recv_handle = {"next":[], "prev":[]}
 
     def is_first_stage(self):
         if self.interleaving_size == 1:
@@ -50,14 +49,12 @@ class PipeCommander:
         return list(micro_batch)
 
     def send_next(self, tensors):
-        handle = []
         if not self.is_last_stage():
             if not isinstance(tensors, Iterable):
                 tensors = [tensors]
             elif not isinstance(tensors, list):
                 tensors = list(tensors)
-            handle.append(send_activations_list(tensors, self.topo.pipe_rank + 1, self.comm, async_op=True))
-        self.send_handle["next"] = handle
+            send_tensors(tensors, self.topo.pipe_rank + 1, self.comm)
 
     def send_prev(self, tensors):
         if not self.is_first_stage():
@@ -65,16 +62,14 @@ class PipeCommander:
                 tensors = [tensors]
             elif not isinstance(tensors, list):
                 tensors = list(tensors)
-            self.send_handle["prev"].append(send_activations_list(tensors, self.topo.pipe_rank - 1, self.comm, async_op=True))
+            send_tensors(tensors, self.topo.pipe_rank - 1, self.comm)
 
     def wait(self):
         torch.cuda.current_stream().wait_stream(config["pp_comm_stream"])
         
     def recv_prev(self, need_data=False):
         if not self.is_first_stage():
-            res, handle = recv_activations_list(self.topo.pipe_rank - 1, self.comm)
-            self.recv_handle["prev"].append(handle)
-            synchronize(config["pp_zero_comm"])
+            res = recv_tensors(self.topo.pipe_rank - 1, self.comm)
             for idx,tensor in enumerate(res):
                 if idx == 0:
                     tensor.requires_grad_()
@@ -88,8 +83,7 @@ class PipeCommander:
     
     def recv_next(self):
         if not self.is_last_stage():
-            res, handle = recv_activations_list(self.topo.pipe_rank + 1, self.comm)
-            self.recv_handle["next"].append(handle)
+            res = recv_tensors(self.topo.pipe_rank + 1, self.comm)
             return res
         else:
             return [None]
