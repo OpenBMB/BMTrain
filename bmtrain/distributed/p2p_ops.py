@@ -45,7 +45,7 @@ def record_stream_helper(tensor_list, stream):
     for t in tensor_list:
         t.record_stream(stream)
 
-def send_tensor(tensor_list, peer_rank, comm):
+def send_tensors(tensor_list, peer_rank, comm):
     handler = _send_tensors(tensor_list, peer_rank, comm)
     handler.wait()
 

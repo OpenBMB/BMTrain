@@ -9,7 +9,7 @@ from .zero_context import ZeroContext
 from . import hook_func
 import inspect
 from torch.utils.checkpoint import checkpoint
-from .distributed.ops import send_activations_inplace, recv_activations_inplace
+from .distributed.ops import send_tensor_inplace, recv_tensor_inplace
 
 def storage_type_cuda(storage_type):
     STORAGE_MAP = {
@@ -739,14 +739,14 @@ class PipeDreamBlockList(TransformerBlockList):
                     if config['topology'].pipe_rank == 0 and param.grad is not None:
                         with torch.no_grad():
                             grad = torch.empty_like(param)
-                            param.grad += recv_activations_inplace(grad, 1, config["pipe_tied_comm"])
-                            send_activations_inplace(param.grad, 1, config["pipe_tied_comm"])
+                            param.grad += recv_tensor_inplace(grad, 1, config["pipe_tied_comm"])
+                            send_tensor_inplace(param.grad, 1, config["pipe_tied_comm"])
                     elif config['topology'].pipe_rank == 0 and param.grad is None:
                         grad = torch.empty_like(param)
-                        param.grad = recv_activations_inplace(grad, 1, config["pipe_tied_comm"])
+                        param.grad = recv_tensor_inplace(grad, 1, config["pipe_tied_comm"])
                     elif config['topology'].is_last_rank() and param.grad is not None:
-                        send_activations_inplace(param.grad, 0, config["pipe_tied_comm"])
-                        param.grad = recv_activations_inplace(param.grad, 0, config["pipe_tied_comm"])
+                        send_tensor_inplace(param.grad, 0, config["pipe_tied_comm"])
+                        param.grad = recv_tensor_inplace(param.grad, 0, config["pipe_tied_comm"])
 
     def _add_tail(self, module):
         self.last_module[0]._is_last_layer = False

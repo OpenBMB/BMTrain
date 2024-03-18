@@ -24,7 +24,6 @@ def main():
         dtype=torch.half
     )
     inspect_iter = -1
-    bmt.load(model, "./ckpt-0.pt")
     bmt.print_rank("Model memory")
     bmt.print_rank(torch.cuda.memory_summary())
     bmt.synchronize()

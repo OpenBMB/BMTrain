@@ -5,7 +5,7 @@ import copy
 from typing import Dict, Iterable, Iterator, Tuple, Union, List
 import torch
 
-from .distributed import all_gather, broadcast, all_reduce, send_activations, recv_activations 
+from .distributed import all_gather, broadcast, all_reduce, send_tensor, recv_tensor 
 from .global_var import config
 from . import nccl
 from .zero_context import (
@@ -130,7 +130,7 @@ class StagePreFunction(torch.autograd.Function):
         ctx.is_first_stage = pipe_rank == 0 
         ctx.is_last_stage = pipe_rank == config['pipe_size'] - 1
         if not ctx.is_first_stage:
-            input = recv_activations(pipe_rank - 1, config['pipe_comm'])
+            input = recv_tensor(pipe_rank - 1, config['pipe_comm'])
             input.requires_grad_()
             return input 
         return input
@@ -143,7 +143,7 @@ class StagePreFunction(torch.autograd.Function):
             with torch.cuda.stream(config['pp_comm_stream']):
                 config['pp_comm_stream'].wait_stream(current_stream) 
                 send_data.record_stream(config['pp_comm_stream'])
-                send_activations(send_data, ctx.pipe_rank - 1, config['pipe_comm'])
+                send_tensor(send_data, ctx.pipe_rank - 1, config['pipe_comm'])
         return grad_outputs, None
 
 class StagePostFunction(torch.autograd.Function):
@@ -158,13 +158,13 @@ class StagePostFunction(torch.autograd.Function):
             with torch.cuda.stream(config['pp_comm_stream']):
                 config['pp_comm_stream'].wait_stream(current_stream) 
                 send_data.record_stream(config['pp_comm_stream'])
-                send_activations(send_data.detach(), pipe_rank + 1, config['pipe_comm'])
+                send_tensor(send_data.detach(), pipe_rank + 1, config['pipe_comm'])
         return outputs
         
     @staticmethod
     def backward(ctx, grad_outputs):
         if not ctx.is_last_stage:
-            pre_grad_inputs = recv_activations(ctx.pipe_rank + 1, config['pipe_comm'])
+            pre_grad_inputs = recv_tensor(ctx.pipe_rank + 1, config['pipe_comm'])
             return pre_grad_inputs, None
         return grad_outputs, None
 
@@ -307,8 +307,8 @@ class PipelineTransformerBlockList(torch.nn.Module):
                     else:
                         assert list(dst.keys()) == [name+n for n, parameter in module._module.named_parameters()]
                         for key, tensor in dst.items():
-                            send_activations(tensor.cuda(), 0, config['pipe_comm'])
+                            send_tensor(tensor.cuda(), 0, config['pipe_comm'])
             if config['rank'] == 0 and idx not in self.layer_ids:
                 for n, parameter in module._module.named_parameters():
-                    destination[name+n] = recv_activations(self.get_stage_by_layer_id(idx), config['pipe_comm']).cpu()
+                    destination[name+n] = recv_tensor(self.get_stage_by_layer_id(idx), config['pipe_comm']).cpu()
 
