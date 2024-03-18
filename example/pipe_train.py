@@ -6,14 +6,12 @@ from bmtrain import optim
 from bmtrain.global_var import config
 from bmtrain import inspect
 from bmtrain.pipe import pipeline_forward_backward
-from inspect_tools import custom_redirection, lookup_output
 
 def main():
     bmt.init_distributed(
         seed=0,
         pipe_size=4,
         tp_size=1,
-        debug=True
     )
 
     model = GPTPipe(
@@ -27,7 +25,7 @@ def main():
         bias=True,
         dtype=torch.float16
     )
-    inspect_iter = -1
+    bmt.init_parameters(model)
     bmt.print_rank("Model memory")
     bmt.print_rank(torch.cuda.memory_summary())
     bmt.synchronize()
@@ -71,17 +69,11 @@ def main():
     avg_time_recorder = bmt.utils.AverageRecorder()
     avg_loss_recorder = bmt.utils.AverageRecorder()
 
-    # lookup_output(model)
     for iteration in range(10):
         # load data
         st = time.time()
         rank = bmt.config["topology"].pipe_rank
-        if iteration == inspect_iter:
-            lookup_output(model)
-            with custom_redirection(f"outputs/pp_output_{pipe_rank}"):
-                global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
-        else:
-            global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
+        global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
         # record time and loss
         iteration_time = time.time() - st
    

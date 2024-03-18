@@ -3,7 +3,6 @@ import torch
 import random
 import torch.distributed as dist
 import os
-import logging
 from .utils import print_dict
 import ctypes
 from .global_var import config
@@ -16,7 +15,6 @@ def init_distributed(
         pipe_size: int = 1,
         num_micro_batches: int = None,
         tp_size : int = 1,
-        debug=False,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -80,14 +78,10 @@ def init_distributed(
     config["load_event"] = torch.cuda.Event()
     config["tp_size"] = tp_size if tp_size > 0 else 1
     config["topology"] = topology(config)
+    config["pipe_rank"] = config['topology'].get_group_rank("pipe")
     config["zero_rank"] = config['topology'].get_group_rank("zero")
     config["tp_rank"] = config['topology'].get_group_rank("tp")
     config["tp_zero_rank"] = config['topology'].get_group_rank("tp_zero")
-    config["pipe_rank"] = config['topology'].get_group_rank("pipe")
-    if debug:
-        config["logger"] = get_logger(rank, "DEBUG")
-    else:
-        config["logger"] = get_logger(rank, "WARNING")
     config["save_param_to_cpu"] = True
     cpus_this_worker = None
     
@@ -208,10 +202,6 @@ class topology:
         self.zero_idx = 0
         self.zero_id = self.rank
 
-    def get_comm(self, group_name):
-        if group_name == "pipe":
-            return config["pipe_comm"]
-
     def get_group_id(self,group_name):
         if group_name == "pipe":
             return self.pipe_idx
@@ -251,18 +241,3 @@ class topology:
 def is_initialized() -> bool:
     return config["initialized"]
 
-def get_logger(rank, level, print_to_screen=False):
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger('pipeline')
-    logger.setLevel(level)
-    if print_to_screen:
-        if rank == 0:
-            ch = logging.StreamHandler()
-            ch.setLevel(level)
-            ch.setFormatter(formatter)
-            logger.addHandler(ch)
-    fh = logging.FileHandler(f'pipe_{rank}.log',mode="w")
-    fh.setLevel(level)
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-    return logger

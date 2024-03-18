@@ -58,11 +58,12 @@ def _send_tensors(tensor_list, peer_rank, comm):
         _p2p_stream[p2p_key] = torch.cuda.Stream()
     if p2p_key not in _p2p_events: 
         _p2p_events[p2p_key] = torch.cuda.Event()
-    stream = _p2p_stream[peer_rank]
-    end_event = _p2p_events[p2p_key]
+    stream = _p2p_stream[p2p_key]
+    event = _p2p_events[p2p_key]
+    event.record(torch.cuda.current_stream()) 
+    stream.wait_event(event)
     with torch.cuda.stream(stream):
         length = torch.tensor(data=[len([h for h in tensor_list ])], device="cuda", dtype=torch.int)
-        ncclSend(length.storage(), peer_rank, comm)
         flags = torch.tensor(data=[0 for _ in range(len(tensor_list))], device="cuda",dtype=torch.int)
         for i in range(len(tensor_list)):
             if tensor_list[i] is None:
@@ -72,6 +73,7 @@ def _send_tensors(tensor_list, peer_rank, comm):
             else:
                 flag = 1
             flags[i] = flag
+        ncclSend(length.storage(), peer_rank, comm)
         ncclSend(flags.contiguous().storage(), peer_rank, comm)
         for i in range(len(tensor_list)):
             if flags[i] == 0:
@@ -79,11 +81,11 @@ def _send_tensors(tensor_list, peer_rank, comm):
                 send_tensor(tensor_list[i], peer_rank, comm)
             elif flags[i] == 1:
                 send_object(tensor_list[i], peer_rank, comm)
-        end_event.record(stream)
-    return handler(end_event)
+        event.record(stream)
+    return handler(event)
 
 def recv_tensors(peer_rank, comm):
-    tensors,handle = _recv_tensors(peer_rank, comm)
+    tensors, handle = _recv_tensors(peer_rank, comm)
     handle.wait()
     return tensors
 
@@ -94,11 +96,11 @@ def irecv_tensors(peer_rank, comm):
 def _recv_tensors(peer_rank, comm):
     p2p_key = f"recv {peer_rank}"
     if p2p_key not in _p2p_stream:
-        _p2p_stream[peer_rank] = torch.cuda.Stream()
+        _p2p_stream[p2p_key] = torch.cuda.Stream()
     if p2p_key not in _p2p_events:
         _p2p_events[p2p_key] = torch.cuda.Event()
-    stream = _p2p_stream[peer_rank]
-    end_event = _p2p_events[p2p_key]
+    stream = _p2p_stream[p2p_key]
+    event = _p2p_events[p2p_key]
     with torch.cuda.stream(stream):
         length = torch.tensor(data=[0], device="cuda", dtype=torch.int)
         tensor_list = []
@@ -115,9 +117,9 @@ def _recv_tensors(peer_rank, comm):
             elif flag == 1:
                 recv = recv_object(peer_rank, comm)
                 tensor_list.append(recv)
-        end_event.record(stream)
-    record_stream_helper([tensor_list[i] for i in range(length[0]).item() if flags[i].item() == 0], torch.cuda.current_stream())
-    return tensor_list, handler(end_event)
+    event.record(stream)
+    record_stream_helper([tensor_list[i] for i in range(length[0].item()) if flags[i].item() != -1], torch.cuda.current_stream())
+    return tensor_list, handler(event)
 
 def send_tensor(hidden_state, peer_rank, comm):
     hidden_state = hidden_state.contiguous()

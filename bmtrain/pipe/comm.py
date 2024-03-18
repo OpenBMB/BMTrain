@@ -7,7 +7,7 @@ from bmtrain.synchronize import synchronize
 class PipeCommander:
     def __init__(self, topo, model, data_iter, num_micros, num_warmup, forward_only, interleaving_size) -> None:
         self.topo = topo
-        self.comm = self.topo.get_comm("pipe")
+        self.comm = config['pipe_comm']
         self.input_generator = self.generator(data_iter)
         self.num_micros = num_micros
         self.num_warmup = num_warmup

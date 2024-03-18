@@ -5,7 +5,7 @@ from ..nccl import allGather as ncclAllGather
 from ..nccl import allReduce as ncclAllReduce
 from ..nccl import broadcast as ncclBroadcast
 from ..nccl import reduceScatter as ncclReduceScatter
-from ..nccl import commCount,commRank,NCCLCommunicator,groupStart,groupEnd
+from ..nccl import commCount, commRank, NCCLCommunicator, groupStart, groupEnd
 from .p2p_ops import *
     
 

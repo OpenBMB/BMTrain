@@ -20,13 +20,14 @@ class GPT(bmt.DistributedModule):
         else:
             self.word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         self.pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
+        
         if config['pipe_size'] > 1:
             self.transformers = bmt.PipelineTransformerBlockList([
                 bmt.Block(
                     TransformerEncoder(
                         dim_model, dim_head, num_heads, dim_ff, bias, dtype
                     )
-                    , mode="PIPE",use_checkpoint=False
+                    , mode="PIPE"
                 )
                 for _ in range(num_layers)
             ])
@@ -35,7 +36,7 @@ class GPT(bmt.DistributedModule):
                 bmt.Block(
                     TransformerEncoder(
                         dim_model, dim_head, num_heads, dim_ff, bias, dtype
-                    ),use_checkpoint=False
+                    )
                 )
                 for _ in range(num_layers)
             ])

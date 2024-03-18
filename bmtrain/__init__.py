@@ -10,7 +10,7 @@ from .parameter import DistributedParameter, ParameterInitializer
 from .layer import DistributedModule
 from .param_init import init_parameters, grouped_parameters
 from .synchronize import synchronize, sum_loss, wait_loader, gather_result
-from .block_layer import Block, TransformerBlockList,PipeDreamBlockList
+from .block_layer import Block, TransformerBlockList, PipeDreamBlockList
 from .wrapper import BMTrainModelWrapper
 from .pipe_layer import PipelineTransformerBlockList
 from . import debug

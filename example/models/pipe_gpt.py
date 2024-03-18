@@ -14,10 +14,10 @@ class GPTPipe(bmt.DistributedModule):
 
         self.max_distance = max_distance
 
-        # if config['tp_size'] > 1:
-        #     word_emb = bmt.nn.ParallelEmbedding(vocab_size, dim_model, dtype=dtype)
-        # else:
-        word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
+        if config['tp_size'] > 1:
+            word_emb = bmt.nn.VPEmbedding(vocab_size, dim_model, dtype=dtype)
+        else:
+            word_emb = Embedding(vocab_size, dim_model, dtype=dtype)
         pos_emb = Embedding(max_distance, dim_model, dtype=dtype)
         blocklist = []
         blocklist += [

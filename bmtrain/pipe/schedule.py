@@ -3,6 +3,7 @@ from bmtrain.global_var import  config
 import bmtrain as bmt
 from .comm import PipeCommander
 import torch
+import logging
 from typing import Iterable
 
         
@@ -62,7 +63,23 @@ def forward_func(model, inp, micro_idx, is_last_micro=False):
             hidden_state = [hidden_state]
         return hidden_state
 
-def pipeline_forward_backward(model, data_iterator, micro_batch_size, num_micros, optim_manager, clip_grad=1.0):
+def get_logger(rank, level, print_to_screen=False):
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger('pipeline')
+    logger.setLevel(level)
+    if print_to_screen:
+        if rank == 0:
+            ch = logging.StreamHandler()
+            ch.setLevel(level)
+            ch.setFormatter(formatter)
+            logger.addHandler(ch)
+    fh = logging.FileHandler(f'pipe_{rank}.log',mode="w")
+    fh.setLevel(level)
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+    return logger
+
+def pipeline_forward_backward(model, data_iterator, micro_batch_size, num_micros, optim_manager, clip_grad=1.0, debug_log=False):
     """Forward and backward the pipeline model.
 
     Args:
@@ -76,6 +93,13 @@ def pipeline_forward_backward(model, data_iterator, micro_batch_size, num_micros
 
     # forwrad unpack
     loss = None
+    if 'logger' not in config:
+        if debug_log:
+            config['logger'] = get_logger(bmt.config['pipe_rank'], level="INFO", print_to_screen=True)
+        else:
+            config['logger'] = logging.getLogger("dummy")
+            config['logger'].addHandler(logging.NullHandler())
+        
     optim_manager.zero_grad()
     micro_batch_size = micro_batch_size
     num_micro_batches = num_micros

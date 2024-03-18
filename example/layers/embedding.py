@@ -79,7 +79,7 @@ class Embedding(bmt.DistributedModule):
         if not projection:
             return F.embedding(
                 input, self.weight, self.padding_idx, self.max_norm,
-                self.norm_type, self.scale_grad_by_freq, self.sparse)
+                self.norm_type, self.scale_grad_by_freq, self.sparse) 
         else:
             return F.linear(input, self.weight) / math.sqrt(self.embedding_dim)
 
