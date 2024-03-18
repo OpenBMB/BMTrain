@@ -16,7 +16,7 @@ class WarmupLRScheduler:
         self.warmup_iter = warmup_iter
         self.end_iter = end_iter
         self.optimizer = optimizer
-        self.num_iter = num_iter
+        self.num_iter = num_iter 
         self._current_lr = None
         
         self.step(self.num_iter)

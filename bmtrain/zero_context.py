@@ -4,7 +4,7 @@ from .global_var import config
 from .synchronize import wait_loader
 
 class ZeroContext:
-    def __init__(self, block : 'Block', ctx_dict : dict = None, pipe = False) -> None:
+    def __init__(self, block : 'Block', ctx_dict : dict = None) -> None:
         self.block = block
         self.ctx_dict = ctx_dict
         self._param_buffer = {}
@@ -16,6 +16,10 @@ class ZeroContext:
     def enter(self, flag=0, requires_grad=False):
         """
         gather parameters
+        flags = 0: normal mode
+        flags = 1: gather param and not release , then save in ctx_dict
+        flags = 2: not gather param and use the param in ctx_dict
+
         """
         if self.block._ready:
             return
@@ -26,6 +30,8 @@ class ZeroContext:
         with torch.cuda.stream(config["load_stream"]):
             for kw, val in self.block._storage_info.items():
                 assert self.block._storage_params[kw].is_cuda
+                if val["world_size"] == 1:
+                    continue
                 assert kw not in self._grad_buffer
                 assert kw not in self._param_buffer
                 local_param = self.block._storage_params[kw]    
@@ -41,6 +47,8 @@ class ZeroContext:
             if flag != 2:
                 nccl.groupStart()
                 for kw, val in self.block._storage_info.items():
+                    if val["world_size"] == 1:
+                        continue
                     nccl.allGather(
                         self.block._storage_params[kw].storage(),
                         self._param_buffer[kw],
@@ -53,6 +61,8 @@ class ZeroContext:
         
         # set wait stream for each storage
         for kw in self.block._storage_info.keys():
+            if self.block._storage_info[kw]['world_size'] == 1:
+                continue
             if flag != 2:
                 self._param_tensor[kw].record_stream(current_stream)
             if requires_grad and kw in self._grad_tensor:
@@ -63,6 +73,9 @@ class ZeroContext:
             kw_name = param["kw_name"]
             offset = param["offset"]
             shape = param["shape"]
+
+            if self.block._storage_info[kw_name]["world_size"] == 1:
+                continue
 
             if flag != 2:
                 dtype = self._param_buffer[kw_name].dtype
@@ -90,8 +103,11 @@ class ZeroContext:
         self.block._ready = False
         if backward:
             for kw, val in self.block._storage_info.items():
-                local_param = self.block._storage_params[kw]
 
+                if val['world_size'] == 1:
+                    continue
+
+                local_param = self.block._storage_params[kw]
                 # accumulate previous gradient
                 if local_param.requires_grad:
                     if local_param.grad is None:
@@ -106,8 +122,11 @@ class ZeroContext:
             with torch.cuda.stream(config["load_stream"]):
                 nccl.groupStart()
                 for kw, val in self.block._storage_info.items():
-                    local_param = self.block._storage_params[kw]
 
+                    if val["world_size"] == 1:
+                        continue
+
+                    local_param = self.block._storage_params[kw]
                     # scatter gradient
                     if local_param.requires_grad:
                         nccl.reduceScatter(
@@ -127,6 +146,8 @@ class ZeroContext:
         # Release all parameters from buffer to block_storge
         for param in self.block._param_info:
             kw_name = param["kw_name"]
+            if self.block._storage_info[kw_name]["world_size"] == 1:
+                continue
             dtype = self.block._storage_params[kw_name].dtype
             device = self.block._storage_params[kw_name].device
             if "begin" not in param:

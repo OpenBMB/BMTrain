@@ -1,4 +1,4 @@
-from typing import Generator, Iterable, List, Tuple
+from typing import Generator, Iterable, List, Tuple, Union
 import torch
 from .block_layer import Block
 from .parameter import DistributedParameter
@@ -42,20 +42,22 @@ def iterate_parameters(model : torch.nn.Module):
             return []
         yield val
 
-def init_parameters(model : torch.nn.Module):
+def init_parameters(models : Union[List[torch.nn.Module], torch.nn.Module]):
     """
     Initialize the parameters of the model by calling the init_method of the distributed parameters.
     """
-
-    modules = model.named_modules()
-    for module_prefix, module in modules:
-        if isinstance(module, Block):
-            module.init_parameters()
-        else:
-            init_distributed_parameter( iterate_parameters(module) )
-    
-    current_stream = torch.cuda.current_stream()
-    config['load_stream'].wait_stream(current_stream)
+    if not isinstance(models, list):
+        models = [models]
+    for model in models:
+        modules = model.named_modules()
+        for module_prefix, module in modules:
+            if isinstance(module, Block):
+                module.init_parameters()
+            else:
+                init_distributed_parameter( iterate_parameters(module) )
+        
+        current_stream = torch.cuda.current_stream()
+        config['load_stream'].wait_stream(current_stream)
 
 def grouped_parameters(model : torch.nn.Module) -> Generator[Tuple[str, List[torch.nn.Parameter]], None, None]:
     """

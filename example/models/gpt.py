@@ -3,6 +3,7 @@ import bmtrain as bmt
 from layers import TransformerEncoder, Layernorm, Embedding, TransformerEncoder
 from bmtrain.global_var import config
 
+    
 class GPT(bmt.DistributedModule):
     def __init__(self,
             num_layers : int, vocab_size : int,
