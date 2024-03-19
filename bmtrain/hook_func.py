@@ -2,6 +2,7 @@ import torch
 from .global_var import config
 from .zero_context import ZeroContext
 
+
 def zero_pre_forward(module, inputs):
     enter = True
     pipe = False
@@ -9,14 +10,15 @@ def zero_pre_forward(module, inputs):
         enter = module._micro_idx == 0
         pipe = True
     if enter:
-        zero_level = module._zero_level 
+        zero_level = module._zero_level
         forward_flag = 1 if zero_level == 2 else 0
         if zero_level == 2 and not module._need_release:
-            forward_flag = 2 # repeating forward in same layer
-        if module.all_param_no_grad: #only forward
+            forward_flag = 2  # repeating forward in same layer
+        if module.all_param_no_grad:  # only forward
             forward_flag = 0
         module._forward_block_ctx = ZeroContext(module, module._layer_dict, pipe=pipe)
         module._forward_block_ctx.enter(forward_flag)
+
 
 def zero_post_forward(module, inputs, outputs):
     forward_flag = 1 if module._zero_level == 2 else 0
@@ -24,10 +26,11 @@ def zero_post_forward(module, inputs, outputs):
         forward_flag = 0
     exit = True
     if module._mode == "PIPE":
-        exit = module._micro_idx == config['micros'] - 1
+        exit = module._micro_idx == config["micros"] - 1
 
     if exit:
         module._forward_block_ctx.exit(forward_flag)
+
 
 def zero_pre_backward(module, grad_outputs):
     backward_flag = 2 if module._zero_level == 2 else 0
@@ -36,24 +39,29 @@ def zero_pre_backward(module, grad_outputs):
         module._backward_block_ctx.enter(backward_flag, True)
         module.release_next_module(backward_flag)
     else:
-        if module._micro_idx == config['micros'] - 1:
-            module._backward_block_ctx = ZeroContext(module, module._layer_dict, pipe=True)
+        if module._micro_idx == config["micros"] - 1:
+            module._backward_block_ctx = ZeroContext(
+                module, module._layer_dict, pipe=True
+            )
             module._backward_block_ctx.enter(backward_flag, True)
+
 
 def zero_post_backward(module, grad_inputs, grad_outputs):
     backward_flag = 2 if module._zero_level == 2 else 0
     if module._mode != "PIPE":
-        if module._is_first_layer: 
+        if module._is_first_layer:
             module.release(backward_flag)
     else:
         if module._micro_idx == 0:
             module.release(backward_flag)
         module._micro_idx -= 1
 
+
 class OneStepNoGradFunc(torch.autograd.Function):
     """
-        requires_grad = False for all inputs
+    requires_grad = False for all inputs
     """
+
     @staticmethod
     def forward(ctx, module, placeholder, *x):
         ctx.x = x
@@ -80,9 +88,14 @@ class OneStepNoGradFunc(torch.autograd.Function):
         grads = []
         for _ in x:
             grads.append(None)
-        return None, None, *grads 
+        return None, None, *grads
+
 
 class PreHookFunc(torch.autograd.Function):
+    """Pre hook for ZeRO.
+    For Pre Moudle, we should pre foward and post backward.
+    """
+
     @staticmethod
     def forward(ctx, module, *x):
         ctx.module = module
@@ -94,7 +107,12 @@ class PreHookFunc(torch.autograd.Function):
         zero_post_backward(ctx.module, grads, None)
         return None, *grads
 
+
 class PostHookFunc(torch.autograd.Function):
+    """Post hook for ZeRO.
+    For Post Moudle, we should post foward and pre backward.
+    """
+
     @staticmethod
     def forward(ctx, module, *out):
         ctx.module = module
