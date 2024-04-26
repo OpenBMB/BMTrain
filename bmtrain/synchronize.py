@@ -2,6 +2,7 @@ import torch
 from . import distributed, nccl
 from .global_var import config
 import warnings
+from typing import Optional
 
 def synchronize():
     """
@@ -24,14 +25,17 @@ def wait_loader():
     config['calc_stream'].record_event(config['load_event'])
 
 
-def sum_loss(loss : torch.Tensor):
+def sum_loss(loss : torch.Tensor, comm: Optional[nccl.NCCLCommunicator] = None):
     """
     Sum the loss across all workers.
 
     This is a helper function to reduce the loss across all workers.
     """
+    if comm is None:
+        comm = config['comm']
     warnings.warn("bmtrain.sum_loss is deprecated and will be removed in later version. Use bmtrain.distributed.all_reduce instead.", DeprecationWarning)
-    return distributed.all_reduce(loss, "sum") / config['world_size']
+
+    return distributed.all_reduce(loss, "avg", comm) 
 
 def gather_result(result: torch.Tensor):
     warnings.warn("bmtrain.gather_result is deprecated and will be removed in later version. Use bmtrain.distributed.all_gather instead.", DeprecationWarning)
