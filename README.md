@@ -27,7 +27,7 @@
 
 </div>
 
-## What's New
+## What's Diff
 - 2024/02/26 **BMTrain** [1.0.0](https://github.com/OpenBMB/BMTrain/releases/tag/v1.0.0) released. Code refactoring and Tensor parallel support. See the detail in [update log](docs/UPDATE_1.0.0.md)
 - 2023/08/17 **BMTrain** [0.2.3](https://github.com/OpenBMB/BMTrain/releases/tag/v0.2.3) released. See the [update log](docs/UPDATE_0.2.3.md).
 - 2022/12/15 **BMTrain** [0.2.0](https://github.com/OpenBMB/BMTrain/releases/tag/0.2.0) released. See the [update log](docs/UPDATE_0.2.0.md).
