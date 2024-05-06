@@ -85,8 +85,9 @@ def main():
             return logits
     
     def backward_step(output, grad_output):
-        output = optim_manager.scale_loss(output)
-        output = output 
+        if bmt.config['topology'].is_last_rank():
+            output = optim_manager.scale_loss(output)
+            output = output / bmt.config['micros'] 
         torch.autograd.backward(output, grad_tensors=grad_output)
         current_stream = torch.cuda.current_stream()
         current_stream.wait_stream(bmt.config['load_stream'])
@@ -99,6 +100,7 @@ def main():
         rank = bmt.config["topology"].pipe_rank
         # global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
         pipeline_forward_backward(model, data_loader(), forward_step, backward_step, micro , num_micros)
+        grad_norm = optim_manager.clip_grad_norm(optim_manager.optimizers[0].param_groups, 1.0, norm_type=2)
         optim_manager.step()
         optim_manager.zero_grad()
         # record time and loss
