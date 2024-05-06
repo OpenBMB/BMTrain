@@ -56,7 +56,7 @@ def main():
     if config['tp_size'] > 1:
         loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=True)
     else:
-        loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
+        loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100)
 
     optimizer = optim.AdamOffloadOptimizer(model.parameters(), weight_decay=1e-2)
     lr_scheduler = bmt.lr_scheduler.Noam(optimizer, start_lr=1e-3, warmup_iter=40, end_iter=1000, num_iter=0)
@@ -64,33 +64,30 @@ def main():
     optim_manager = optim.OptimManager(loss_scale=2**20)
     optim_manager.add_optimizer(optimizer, lr_scheduler)
     pipe_rank = bmt.config["topology"].pipe_rank
-    model.load_state_dict(torch.load(f"pipe_{pipe_rank}.ckpt"))
     bmt.synchronize()
     avg_time_recorder = bmt.utils.AverageRecorder()
     avg_loss_recorder = bmt.utils.AverageRecorder()
-    global_loss = None
+    global_loss_items = []
 
     def forward_step(model, input, data):
         enc_input, pos, mask, targets = data
-        input = model.preprocess_func((enc_input, pos)) if bmt.config["topology"].is_first_rank() else input
+        input = model.preprocess_func((enc_input, pos)) if bmt.config["topology"].is_first_rank() else input[0]
         logits = model(input, pos, mask)
         if bmt.config["topology"].is_last_rank():
             logits = logits.view(-1, logits.shape[-1])
             targets = targets.view(-1)
             loss = loss_func(logits, targets)
-            global global_loss
+            nonlocal global_loss_items
             global_loss = bmt.distributed.all_reduce(loss, comm=bmt.config["pp_tp_zero_comm"]).item()
+            global_loss_items.append(global_loss)
             return loss, logits
         else:
             return logits
     
     def backward_step(output, grad_output):
-        if not torch.is_tensor(output[0]) and isinstance(output[0], Iterable):
-            output = optim_manager.scale_loss(output[0][0])
-        elif torch.is_tensor(output[0]):
-            output = optim_manager.scale_loss(output[0])
+        output = optim_manager.scale_loss(output)
         output = output / bmt.config['micros']
-        torch.autograd.backward(output, grad_tensors=grad_output[0])
+        torch.autograd.backward(output, grad_tensors=grad_output)
         current_stream = torch.cuda.current_stream()
         current_stream.wait_stream(bmt.config['load_stream'])
 
@@ -102,11 +99,13 @@ def main():
         rank = bmt.config["topology"].pipe_rank
         # global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
         pipeline_forward_backward(model, data_loader(), forward_step, backward_step, micro , num_micros)
+        optim_manager.step()
+        optim_manager.zero_grad()
         # record time and loss
         iteration_time = time.time() - st
    
         if bmt.config["topology"].is_last_rank():
-            global_loss = sum(list(global_loss))/len(global_loss)
+            global_loss = sum(list(global_loss_items))/len(global_loss_items)
             avg_time_recorder.record(iteration_time)
             avg_loss_recorder.record(global_loss)
             print(

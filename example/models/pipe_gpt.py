@@ -44,7 +44,6 @@ class GPTPipe(bmt.DistributedModule):
             input : torch.LongTensor,   # (batch, seq_len)
             pos : torch.LongTensor,     # (batch, seq_len)
             mask : torch.BoolTensor,    # (batch, seq_len)
-            target: torch.LongTensor,
         ) -> torch.Tensor:
         mask_2d = mask[:, None, :] & mask[:, :, None]   # (batch, seq_len, seq_len)
         mask_2d = mask_2d & (pos[:, None, :] >= pos[:, :, None])
@@ -53,19 +52,13 @@ class GPTPipe(bmt.DistributedModule):
         # for layer in self.transformers:
         out = self.transformers(input, mask_2d, None)
         out = self.layernorm(out)
-        if config['topology'].pipe_rank == config['topology'].pipe_size - 1:
-            logits = self.word_emb(out, True)
-            logits = logits.float().view(-1, logits.shape[-1])
-            target = target.view(-1)
-            return self.loss_func(logits, target)
-        else:
-            return out
+        return out
 
     def preprocess_func(self, inp):
         if config['topology'].pipe_rank == 0:
             inp_id = inp[0]
             pos = inp[1]
-            return self.pos_emb(pos) + self.word_emb(inp_id) , *inp[1:]
+            return self.pos_emb(pos) + self.word_emb(inp_id) 
         else:
             return None
         

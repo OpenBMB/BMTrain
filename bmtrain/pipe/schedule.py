@@ -25,7 +25,7 @@ def backward_func(inp, backward_step, output, grad_output, optim_manager=None):
         output = [output]
     if not isinstance(grad_output, Iterable):
         grad_output = [grad_output]
-    backward_step(output, grad_output)
+    backward_step(output[0], grad_output[0])
     input_grad = [None]
     if inp is not None:
         input_grad = []
