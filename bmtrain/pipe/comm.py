@@ -8,7 +8,7 @@ class PipeCommander:
     def __init__(self, topo, model, data_iter, num_micros, num_warmup, forward_only, interleaving_size) -> None:
         self.topo = topo
         self.comm = config['pipe_comm']
-        self.input_generator = self.generator(data_iter)
+        self.input_generator = data_iter
         self.num_micros = num_micros
         self.num_warmup = num_warmup
         self.forward_only = forward_only
@@ -27,16 +27,6 @@ class PipeCommander:
         else:
             raise ValueError("Now only supoort interleaving_size == 1")
 
-    def generator(self, data_iterator):
-        while True:
-            try:
-                inp = next(data_iterator)
-                if self.is_first_stage():
-                    yield self.model.preprocess_func(inp)
-                else:
-                    yield inp
-            except StopIteration:
-                break
 
     def param_reduce(self, module):
         for name, param in module.named_parameters():
@@ -46,7 +36,7 @@ class PipeCommander:
     def get_data(self):
         micro_batch = next(self.input_generator) 
         assert isinstance(micro_batch, Iterable)
-        return list(micro_batch)
+        return micro_batch
 
     def send_next(self, tensors):
         if not self.is_last_stage():
@@ -74,12 +64,15 @@ class PipeCommander:
                 if idx == 0:
                     tensor.requires_grad_()
             data = self.get_data()
-            return res + data[1:]
+            # return hidden state and data
+            return res, data
         else:
             if need_data:
-                return self.get_data()
+                # for first stage , only data
+                return [None], self.get_data()
             else:
-                return [None]
+                # empty load for first stage
+                return [None], [None]
     
     def recv_next(self):
         if not self.is_last_stage():
@@ -105,15 +98,17 @@ class PipeCommander:
     
     def send_backward_recv_forward(self, backward_grad, need_data=False):
         if not self.is_first_stage():
-            forward_state = self.recv_prev()
+            forward_state, data = self.recv_prev()
             if backward_grad[0] is not None:
                 self.send_prev(backward_grad)
         else:
             if need_data:
-                forward_state = self.get_data()
+                data = self.get_data()
+                forward_state = None
             else:
                 forward_state = [None]
-        return forward_state
+                data = None
+        return forward_state, data
 
 
          
