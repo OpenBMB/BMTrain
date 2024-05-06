@@ -38,7 +38,7 @@ def backward_func(inp, backward_step, output, grad_output, optim_manager=None):
     return input_grad 
 
 def forward_func(model, forward_step, inp, data, micro_idx, is_last_micro=False):
-    output = forward_step(model, inp, data)
+    output = forward_step(model, inp[0], data)
     if not isinstance(output, list) and not isinstance(output, tuple):
         output = [output]
     return output 

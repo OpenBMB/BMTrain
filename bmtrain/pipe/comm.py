@@ -103,8 +103,8 @@ class PipeCommander:
                 self.send_prev(backward_grad)
         else:
             if need_data:
+                forward_state = [None]
                 data = self.get_data()
-                forward_state = None
             else:
                 forward_state = [None]
                 data = None

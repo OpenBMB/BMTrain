@@ -32,10 +32,6 @@ class GPTPipe(bmt.DistributedModule):
         self.pos_emb = self.transformers.add_head(pos_emb)
         self.layernorm = self.transformers.add_tail(layernorm)
         self.word_emb = self.transformers.add_head_tail(word_emb)
-        if config['tp_size'] > 1:
-            self.loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=False)
-        else:
-            self.loss_func = torch.nn.CrossEntropyLoss(ignore_index=-100)
 
     def get_blocklist(self):
         return self.transformers
@@ -51,14 +47,17 @@ class GPTPipe(bmt.DistributedModule):
 
         # for layer in self.transformers:
         out = self.transformers(input, mask_2d, None)
-        out = self.layernorm(out)
+        if bmt.config['topology'].is_last_rank():
+            out = self.layernorm(out)
+            out = self.word_emb(out, True)
         return out
 
     def preprocess_func(self, inp):
         if config['topology'].pipe_rank == 0:
             inp_id = inp[0]
             pos = inp[1]
-            return self.pos_emb(pos) + self.word_emb(inp_id) 
+            out = self.pos_emb(pos) + self.word_emb(inp_id) 
+            return out
         else:
             return None
         

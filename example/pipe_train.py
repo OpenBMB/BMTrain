@@ -71,7 +71,7 @@ def main():
 
     def forward_step(model, input, data):
         enc_input, pos, mask, targets = data
-        input = model.preprocess_func((enc_input, pos)) if bmt.config["topology"].is_first_rank() else input[0]
+        input = model.preprocess_func((enc_input, pos)) if bmt.config["topology"].is_first_rank() else input
         logits = model(input, pos, mask)
         if bmt.config["topology"].is_last_rank():
             logits = logits.view(-1, logits.shape[-1])
@@ -86,7 +86,7 @@ def main():
     
     def backward_step(output, grad_output):
         output = optim_manager.scale_loss(output)
-        output = output / bmt.config['micros']
+        output = output 
         torch.autograd.backward(output, grad_tensors=grad_output)
         current_stream = torch.cuda.current_stream()
         current_stream.wait_stream(bmt.config['load_stream'])
