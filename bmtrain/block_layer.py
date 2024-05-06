@@ -592,8 +592,12 @@ class TransformerBlockList(torch.nn.Module):
             module._is_last_layer = False
             self._modules[str(i)] = module
             self.add_module(str(i), module)
-        self._modules[str(0)]._is_first_layer = True
-        self._modules[str(len(modules)-1)]._is_last_layer = True
+        if config["pipe_enabled"]:
+            self._modules[str(0)]._is_first_layer = True if config["pipe_rank"] == 0 else False
+            self._modules[str(len(modules)-1)]._is_last_layer = True if config["pipe_rank"] == config["pipe_size"] - 1 else False
+        else:
+            self._modules[str(0)]._is_first_layer = True
+            self._modules[str(len(modules)-1)]._is_last_layer = True
         self.module_dict = module_dict 
         self.num_hidden = num_hidden
             
@@ -637,25 +641,16 @@ def DummyForward(*args, **kwargs):
 
 class PipeDreamBlockList(TransformerBlockList):
     
-    def __init__(self, modules: Iterable[Block], num_hidden=1, use_checkpoint=False) -> None:
+    def __init__(self, partition_modules: Iterable[Block], num_hidden=1, use_checkpoint=False) -> None:
         module_dict = {}
         mode = "1F1B"
         if isinstance(use_checkpoint, bool):
-            use_checkpoint = [use_checkpoint for _ in range(len(modules))]
-        assert isinstance(use_checkpoint,Iterable) and len(use_checkpoint) == len(modules), "use_checkpoint should be a list of bool variable or a bool variable"
-        for idx in range(len(modules)):
-           modules[idx] = _block_wrapper(modules[idx], module_dict, mode=mode, zero_level=2, use_checkpoint=use_checkpoint[idx]) 
-        s,e = self.partition(modules)
-        self.head_idx = s
-        self.tail_idx = e
-        partition_modules = []
-        for idx,m in enumerate(modules):
-            if idx>=s and idx<e:
-                m.init_param_storage()
-                partition_modules.append(m)
-            else:
-                m.init_param_storage()
-                del m
+            use_checkpoint = [use_checkpoint for _ in range(len(partition_modules))]
+        assert isinstance(use_checkpoint,Iterable) and len(use_checkpoint) == len(partition_modules), "use_checkpoint should be a list of bool variable or a bool variable"
+        for idx in range(len(partition_modules)):
+            partition_modules[idx] = _block_wrapper(partition_modules[idx], module_dict, mode=mode, zero_level=2, use_checkpoint=use_checkpoint[idx]) 
+        for idx,m in enumerate(partition_modules):
+            m.init_param_storage()
         super().__init__(partition_modules, num_hidden, mode=mode)
         self.fisrt_module = (self._modules['0'],)
         self.last_module = (self._modules[str(len(self._modules) - 1)],)
@@ -685,11 +680,11 @@ class PipeDreamBlockList(TransformerBlockList):
         else:
             return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
 
-
-    def partition(self, modules):
+    @staticmethod
+    def partition(num_layers):
         pipe_size = config["topology"].pipe_size
         pipe_rank = config["topology"].pipe_rank
-        part_lens = [0]+[len(modules) // pipe_size + (i < (len(modules) % pipe_size)) for i in range(pipe_rank+1)]
+        part_lens = [0]+[num_layers // pipe_size + (i < (num_layers % pipe_size)) for i in range(pipe_rank+1)]
         start = sum(part_lens[:pipe_rank+1])
         end = start + part_lens[pipe_rank+1]
         return start,end

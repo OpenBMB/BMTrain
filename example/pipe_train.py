@@ -64,7 +64,7 @@ def main():
     optim_manager = optim.OptimManager(loss_scale=2**20)
     optim_manager.add_optimizer(optimizer, lr_scheduler)
     pipe_rank = bmt.config["topology"].pipe_rank
-    model.load_state_dict(torch.load(f"pipe_{pipe_rank}.ckpt"))
+    # model.load_state_dict(torch.load(f"pipe_{pipe_rank}.ckpt"))
     bmt.synchronize()
     avg_time_recorder = bmt.utils.AverageRecorder()
     avg_loss_recorder = bmt.utils.AverageRecorder()
