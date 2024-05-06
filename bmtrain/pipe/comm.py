@@ -107,7 +107,7 @@ class PipeCommander:
                 data = self.get_data()
             else:
                 forward_state = [None]
-                data = None
+                data = [None]
         return forward_state, data
 
 

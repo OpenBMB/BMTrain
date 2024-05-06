@@ -6,6 +6,7 @@ from bmtrain import optim
 from bmtrain.global_var import config
 from bmtrain import inspect
 from bmtrain.pipe import pipeline_forward_backward
+from typing import Iterable
 
 def main():
     bmt.init_distributed(
@@ -51,7 +52,7 @@ def main():
                 torch.full_like(targets, -100, dtype=torch.long)
             )
             pos = torch.arange(enc_input.size(1)).long().cuda().repeat(enc_input.size(0), 1)
-            yield enc_input, pos, pos<enc_length[:, None], targets
+            yield enc_input, pos, mask, targets
     
     if config['tp_size'] > 1:
         loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=True)
@@ -67,7 +68,6 @@ def main():
     bmt.synchronize()
     avg_time_recorder = bmt.utils.AverageRecorder()
     avg_loss_recorder = bmt.utils.AverageRecorder()
-    global_loss_items = []
 
     def forward_step(model, input, data):
         enc_input, pos, mask, targets = data
@@ -89,20 +89,20 @@ def main():
             output = optim_manager.scale_loss(output)
             output = output / bmt.config['micros'] 
         torch.autograd.backward(output, grad_tensors=grad_output)
-        current_stream = torch.cuda.current_stream()
-        current_stream.wait_stream(bmt.config['load_stream'])
 
         
         
     for iteration in range(10):
         # load data
+        global_loss_items = []
         st = time.time()
         rank = bmt.config["topology"].pipe_rank
         # global_loss, grad_norm = pipeline_forward_backward(model, data_loader(), micro , num_micros, optim_manager)
+        optim_manager.zero_grad()
         pipeline_forward_backward(model, data_loader(), forward_step, backward_step, micro , num_micros)
         grad_norm = optim_manager.clip_grad_norm(optim_manager.optimizers[0].param_groups, 1.0, norm_type=2)
         optim_manager.step()
-        optim_manager.zero_grad()
+        bmt.synchronize()
         # record time and loss
         iteration_time = time.time() - st
    

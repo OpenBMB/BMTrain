@@ -26,6 +26,8 @@ def backward_func(inp, backward_step, output, grad_output, optim_manager=None):
     if not isinstance(grad_output, Iterable):
         grad_output = [grad_output]
     backward_step(output[0], grad_output[0])
+    current_stream = torch.cuda.current_stream()
+    current_stream.wait_stream(bmt.config['load_stream'])
     input_grad = [None]
     if inp is not None:
         input_grad = []
@@ -164,7 +166,5 @@ def pipeline_forward_backward(model, data_iterator, forward_step, backward_step,
             commander.send_prev(input_grad)
     blocklist = model.get_blocklist()
     # blocklist.reduce_tied_module()
-    
-    bmt.synchronize()
 
     
