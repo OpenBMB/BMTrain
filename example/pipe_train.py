@@ -6,6 +6,7 @@ from bmtrain import optim
 from bmtrain.global_var import config
 from bmtrain import inspect
 from bmtrain.pipe import pipeline_forward_backward
+from bmtrain.pipe import load_model_pipe, save_model_pipe
 from typing import Iterable
 
 def main():
@@ -30,6 +31,9 @@ def main():
     bmt.print_rank("Model memory")
     bmt.print_rank(torch.cuda.memory_summary())
     bmt.synchronize()
+    # test save/load
+    save_model_pipe(model, "pipe.pt")
+    load_model_pipe(model, "pipe.pt")
 
     # data
     # generate dummy data for each rank

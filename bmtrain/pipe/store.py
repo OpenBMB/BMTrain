@@ -53,7 +53,7 @@ def get_state_dict_pipe(path):
             del param
     return state_dict
             
-def load_model_pipe(model, path, load_whole=True):
+def load_model_pipe(model, path, load_whole=False):
     """
     load_whole: Boolean, if True, load from the whole model file, else load model from the pipeline/tensor parallel model file
     """

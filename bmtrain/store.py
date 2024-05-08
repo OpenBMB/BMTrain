@@ -119,7 +119,6 @@ def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False, sa
     """
     torch.cuda.synchronize()
         
-    if config["rank"] == 0:
     if save_gather:
         save_method = _save_to_rank0 
     else:
