@@ -314,8 +314,12 @@ class Block(torch.nn.Module):
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         # gather here
         with torch.no_grad():
-            with ZeroContext(self):
+            if config['save_param_gather']:
+                with ZeroContext(self):
+                    return self._module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+            else:
                 return self._module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+
     
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -330,8 +334,10 @@ class Block(torch.nn.Module):
                 tp_mode = param._tp_mode
                 if input_param.__class__.__name__ == "DistributedTensorWrapper":
                     input_param = input_param.broadcast()
-
-                verify_shape = torch.Size(it["shape"] if not tp_mode else param._tp_original_shape)
+                if config['load_param_gather']:
+                    verify_shape = torch.Size(it["shape"] if not tp_mode else param._tp_original_shape)
+                else:
+                    verify_shape = param.shape
                 if input_param.shape != verify_shape:
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
@@ -353,6 +359,8 @@ class Block(torch.nn.Module):
                 # copy to buffer
                 verify_size = verify_shape.numel()
                 assert input_param.numel() == verify_size
+                if not config['load_param_gather']:
+                    continue
 
                 contiguous_param = input_param.to(it["parameter"].dtype).cuda().contiguous()
 

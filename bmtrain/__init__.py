@@ -14,7 +14,7 @@ from .block_layer import Block, TransformerBlockList
 from .wrapper import BMTrainModelWrapper
 from .pipe_layer import PipelineTransformerBlockList
 from . import debug
-from .store import save, load
+from .store import save, load, clean
 
 from . import loss
 from . import distributed
