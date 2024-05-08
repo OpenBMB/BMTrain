@@ -33,10 +33,13 @@ class DistributedModule(torch.nn.Module):
         for name, param in self._parameters.items():
             if param is not None:
                 if isinstance(param, DistributedParameter):#and not param._in_block:
-                    if param._in_block:
-                        destination[prefix + name] = param.tp_gather().detach() # sync operation
+                    if config["save_param_gather"]:
+                        if param._in_block:
+                            destination[prefix + name] = param.tp_gather().detach() # sync operation
+                        else:
+                            destination[prefix + name] = param.gather_all().detach() # sync operation
                     else:
-                        destination[prefix + name] = param.gather_all().detach() # sync operation
+                        destination[prefix + name] = param.clone().detach() # sync operation
                     if config['save_param_to_cpu']:
                         destination[prefix + name] = destination[prefix + name].cpu()
                 else:
@@ -110,14 +113,17 @@ class DistributedModule(torch.nn.Module):
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
-                verify_shape = torch.Size(param._original_shape if not tp_mode else param._tp_original_shape)
+                if config['load_param_gather']:
+                    verify_shape = torch.Size(param._original_shape if not tp_mode else param._tp_original_shape)
+                else:
+                    verify_shape = param.shape
                 if not is_param_lazy and isinstance(param, DistributedParameter) and input_param.shape != verify_shape:
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, verify_shape))
                 try:
                     with torch.no_grad():
-                        if isinstance(param, DistributedParameter):
+                        if isinstance(param, DistributedParameter) and config['load_param_gather']:
                             tp_split_dim = param._tp_split_dim
                             if tp_mode and tp_split_dim >= 0:
                                 input_param = tp_split_tensor(input_param, tp_split_dim)

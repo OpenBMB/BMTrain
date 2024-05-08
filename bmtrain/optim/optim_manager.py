@@ -52,6 +52,7 @@ class OptimManager:
         loss_scale_steps : int = 1024,
         min_loss_scale = 1,
         max_loss_scale = float("inf"),
+        grad_scale : Optional[int] = None,
     ):
         if loss_scale is not None:
             self.loss_scale = loss_scale
@@ -64,6 +65,9 @@ class OptimManager:
         self.loss_scale_steps = loss_scale_steps
         self.min_loss_scale = min_loss_scale
         self.max_loss_scale = max_loss_scale
+        if grad_scale is None:
+            grad_scale = config['zero_size']
+        self.grad_scale = grad_scale
 
         self.optimizers = []
         self.lr_schedulers = []
@@ -85,7 +89,7 @@ class OptimManager:
 
     def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
 
-        return loss * (self.loss_scale / (config['world_size'] // ( config['tp_size']*config['pipe_size'] ))) # loss scale
+        return loss * ( self.loss_scale / self.grad_scale ) # loss scale
 
     def backward(self, loss : torch.Tensor):
         """

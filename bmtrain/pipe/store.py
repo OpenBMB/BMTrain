@@ -61,14 +61,7 @@ def load_model_pipe(model, path, load_whole=True):
         state_dict = get_state_dict_pipe(path)
         model.load_state_dict(state_dict, strict=False)
     else:
-        pipe_rank = bmt.config["pipe_rank"]
-        tp_rank = bmt.config["tp_rank"]
-        ckpt_path = f"{path}_pp_{pipe_rank}_tp_{tp_rank}.pt"
-        state_dict = torch.load(ckpt_path)
-        model.load_state_dict(state_dict)
+        bmt.load(model, path, load_gather=False)
 
 def save_model_pipe(model, path):
-    pipe_rank = bmt.config["pipe_rank"]
-    tp_rank = bmt.config["tp_rank"]
-    state_dict = model.state_dict()
-    torch.save(state_dict, f"{path}_pp_{pipe_rank}_tp_{tp_rank}.pt")
+    bmt.save(model, path, save_gather=False)
