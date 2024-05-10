@@ -363,26 +363,28 @@ class Block(torch.nn.Module):
                 # copy to buffer
                 verify_size = verify_shape.numel()
                 assert input_param.numel() == verify_size
-                if not config['load_param_gather']:
-                    continue
-
                 contiguous_param = input_param.to(it["parameter"].dtype).cuda().contiguous()
+                d_dtype = self._storage_params[kw_name].dtype
+                d_device = self._storage_params[kw_name].device
+                offset_st = max(storage_st - param_st, 0)
+                to_offset_st = offset_st + param_st - storage_st
+                if not config['load_param_gather']:
+                    partition_numel= len(contiguous_param)
+                    torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (partition_numel,))[:] = \
+                    contiguous_param[:]
+                    continue
 
                 tp_split_dim = param._tp_split_dim
                 if tp_mode and tp_split_dim >= 0:
                     contiguous_param = tp_split_tensor(contiguous_param, tp_split_dim)
                 
-                offset_st = max(storage_st - param_st, 0)
                 offset_end = min(storage_end - param_st, contiguous_param.numel())
+                to_offset_end = offset_end + param_st - storage_st
                 assert offset_st < offset_end
 
-                to_offset_st = offset_st + param_st - storage_st
-                to_offset_end = offset_end + param_st - storage_st
 
                 # copy to buffer
                 # PyTorch 1.11 changed the API of storage.__getitem__
-                d_dtype = self._storage_params[kw_name].dtype
-                d_device = self._storage_params[kw_name].device
                 torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))[:] = \
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
                 del contiguous_param
