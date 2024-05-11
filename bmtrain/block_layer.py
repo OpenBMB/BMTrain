@@ -369,9 +369,9 @@ class Block(torch.nn.Module):
                 offset_st = max(storage_st - param_st, 0)
                 to_offset_st = offset_st + param_st - storage_st
                 if not config['load_param_gather']:
-                    partition_numel= len(contiguous_param)
+                    partition_numel= contiguous_param.numel()
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (partition_numel,))[:] = \
-                    contiguous_param[:]
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), 0, (partition_numel,))[:]
                     continue
 
                 tp_split_dim = param._tp_split_dim
