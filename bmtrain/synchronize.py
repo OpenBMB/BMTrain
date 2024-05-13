@@ -4,16 +4,16 @@ from .global_var import config
 import warnings
 from typing import Optional
 
-def synchronize():
+def synchronize(comm=None):
     """
     Synchronize all the workers across all nodes. (both CPU and GPU are synchronized)
     """
     if not config["initialized"]:
         raise RuntimeError("BMTrain is not initialized")
-
+    comm = config['comm'] if comm is None else comm
     with torch.cuda.stream(config['barrier_stream']):
         barrier = torch.cuda.FloatTensor([1])
-        nccl.allReduce(barrier.storage(), barrier.storage(), 'sum', config['comm'])
+        nccl.allReduce(barrier.storage(), barrier.storage(), 'sum', comm)
     config['barrier_stream'].synchronize()
 
 def wait_loader():

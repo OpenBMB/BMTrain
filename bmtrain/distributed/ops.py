@@ -1,48 +1,13 @@
 import torch
-from ..global_var import config
-from ..nccl import allGather as ncclAllGather, recv
+import bmtrain as bmt
+from ..global_var import config, rank
+from ..nccl import allGather as ncclAllGather
 from ..nccl import allReduce as ncclAllReduce
 from ..nccl import broadcast as ncclBroadcast
 from ..nccl import reduceScatter as ncclReduceScatter
-from ..nccl import send as ncclSend
-from ..nccl import recv as ncclRecv
-from ..nccl import commCount,commRank,NCCLCommunicator
-DTYPE_LIST = [
-    torch.float64,
-    torch.float32,
-    torch.float16,
-    torch.int64,
-    torch.int32,
-    torch.int16,
-    torch.int8,
-    torch.bfloat16,
-    torch.bool
-]
-def send_activations(hidden_state, next_rank, comm):
-    send_meta(hidden_state, next_rank, comm)
-    ncclSend(hidden_state.storage(), next_rank, comm)
-
-def recv_activations(prev_rank, comm):
-    dtype, shape = recv_meta(prev_rank, comm)
-    hidden_state = torch.empty(shape, dtype=dtype, device="cuda")
-    ncclRecv(hidden_state.storage(), prev_rank, comm)
-    return hidden_state
-
-def send_meta(x, next_rank, comm):
-    meta_data = torch.tensor(data=[0]*50, device="cuda", dtype=torch.int)
-    meta_data[0] = len(x.size())
-    meta_data[1] = DTYPE_LIST.index(x.dtype)
-    meta_data[2:len(x.size())+2] = torch.tensor(x.size(), device="cuda", dtype=torch.int)
-    meta_data = meta_data.contiguous()
-    ncclSend(meta_data.storage(), next_rank, comm)
-
-def recv_meta(prev_rank, comm):
-    meta_data = torch.tensor(data=[0]*50, device="cuda", dtype=torch.int)
-    ncclRecv(meta_data.storage(), prev_rank, comm)
-    n_dims = meta_data[0].item()
-    dtype = DTYPE_LIST[meta_data[1].item()]
-    shape = meta_data[2:n_dims+2].tolist()
-    return dtype,shape
+from ..nccl import commCount, commRank, NCCLCommunicator, groupStart, groupEnd
+from .p2p_ops import *
+    
 
 class OpBroadcast(torch.autograd.Function):
 

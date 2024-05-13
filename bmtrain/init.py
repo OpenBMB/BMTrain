@@ -9,11 +9,10 @@ from .global_var import config
 
 from . import nccl
 from .synchronize import synchronize
-
 def init_distributed(
         init_method : str = "env://",
         seed : int = 0,
-        pipe_size: int = -1,
+        pipe_size: int = 1,
         num_micro_batches: int = None,
         tp_size : int = 1,
     ):
@@ -66,7 +65,7 @@ def init_distributed(
     torch.cuda.set_device(local_rank)
     config["initialized"] = True
     config["pipe_size"] = pipe_size if pipe_size > 0 else 1
-    config["pipe_enabled"] = pipe_size > 0
+    config["pipe_enabled"] = pipe_size > 1
     config["local_rank"] = local_rank
     config["local_size"] = local_size
     config["rank"] = rank
@@ -79,10 +78,13 @@ def init_distributed(
     config["load_event"] = torch.cuda.Event()
     config["tp_size"] = tp_size if tp_size > 0 else 1
     config["topology"] = topology(config)
+    config["pipe_rank"] = config['topology'].get_group_rank("pipe")
     config["zero_rank"] = config['topology'].get_group_rank("zero")
     config["tp_rank"] = config['topology'].get_group_rank("tp")
     config["tp_zero_rank"] = config['topology'].get_group_rank("tp_zero")
     config["save_param_to_cpu"] = True
+    config["save_param_gather"] = True
+    config["load_param_gather"] = True
     cpus_this_worker = None
     
     all_available_cpus = sorted(list(os.sched_getaffinity(0)))
@@ -113,40 +115,45 @@ def init_distributed(
     config['comm'] = nccl.commInitRank(unique_id, world_size, rank)
     topo = config['topology']
 
+    config["micros"] = num_micro_batches if num_micro_batches else config["pipe_size"]
+    if topo.pipe_rank == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"PIPE_UNIQUE_ID{topo.pipe_idx}", unique_id.hex())
+    unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
+    config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.pipe_rank)
     if config['pipe_enabled']:
-        config["micros"] = num_micro_batches if num_micro_batches else config["pipe_size"]
-        if topo.stage_id == 0:
-            unique_id = nccl.getUniqueId()
-            store.set(f"PIPE_UNIQUE_ID{topo.pipe_idx}", unique_id.hex())
-        unique_id = bytes.fromhex(store.get(f"PIPE_UNIQUE_ID{topo.pipe_idx}").decode())
-        config ['pipe_comm'] = nccl.commInitRank(unique_id, pipe_size, topo.stage_id)
+        if topo.pipe_rank == topo.pipe_size - 1 or topo.pipe_rank == 0:
+            if topo.pipe_rank == 0:
+                unique_tied_id = nccl.getUniqueId()
+                store.set(f"PIPE_TIED_UNIQUE_ID{topo.pipe_idx}", unique_tied_id.hex())
+            unique_tied_id = bytes.fromhex(store.get(f"PIPE_TIED_UNIQUE_ID{topo.pipe_idx}").decode())
+            rank = 0 if topo.pipe_rank == 0 else 1
+            config['pipe_tied_comm'] = nccl.commInitRank(unique_tied_id, 2, rank) 
 
-        if topo.pp_zero_id == 0:
-            unique_id = nccl.getUniqueId()
-            store.set(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}", unique_id.hex() )
-        unique_id = bytes.fromhex(store.get(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}").decode())
-        config['pp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['pipe_size'], topo.pp_zero_id)
+    if topo.pp_zero_id == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}", unique_id.hex() )
+    unique_id = bytes.fromhex(store.get(f"PP_ZERO_UNIQUE_ID{topo.pp_zero_idx}").decode())
+    config['pp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['pipe_size'], topo.pp_zero_id)
 
-    if config['tp_size'] > 1:
-        if topo.tp_id == 0:
-            unique_id = nccl.getUniqueId()
-            store.set(f"TP_UNIQUE_ID{topo.tp_idx}", unique_id.hex())
-        unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
-        config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
+    if topo.tp_id == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"TP_UNIQUE_ID{topo.tp_idx}", unique_id.hex())
+    unique_id = bytes.fromhex(store.get(f"TP_UNIQUE_ID{topo.tp_idx}").decode())
+    config['tp_comm'] = nccl.commInitRank(unique_id, tp_size, topo.tp_id)
 
-        if topo.tp_zero_id == 0:
-            unique_id = nccl.getUniqueId()
-            store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
-        unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
-        config['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['tp_size'], topo.tp_zero_id)
+    if topo.tp_zero_id == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}", unique_id.hex() )
+    unique_id = bytes.fromhex(store.get(f"TP_ZERO_UNIQUE_ID{topo.tp_zero_idx}").decode())
+    config['tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//config['tp_size'], topo.tp_zero_id)
 
 
-    if config['pipe_size'] > 1 and config['tp_size'] > 1:
-        if topo.pp_tp_zero_id == 0:
-            unique_id = nccl.getUniqueId()
-            store.set(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}", unique_id.hex() )
-        unique_id = bytes.fromhex(store.get(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}").decode())
-        config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id)
+    if topo.pp_tp_zero_id == 0:
+        unique_id = nccl.getUniqueId()
+        store.set(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}", unique_id.hex() )
+    unique_id = bytes.fromhex(store.get(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}").decode())
+    config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id)
 
     config ['zero_comm'] = config['comm']
 
@@ -175,27 +182,27 @@ class topology:
         dp_size = world_size // (pp_size * tp_size)
         config['tp_zero_size'] = dp_size
         config['zero_size'] = world_size // pp_size 
-        self.stages = config['pipe_size']
-        
+        self.pipe_size = config['pipe_size']
+        self.dp_size = dp_size 
+        self.tp_size = tp_size
         stage_size = world_size // pp_size
         for i in range(world_size):
             self.pipe_idx = self.rank % stage_size 
-            self.stage_id = self.rank // stage_size 
+            self.pipe_rank = self.rank // stage_size 
             self.tp_id = self.rank % tp_size
             self.tp_idx = self.rank // tp_size 
             #pp->zero
-            self.pp_zero_idx = self.stage_id 
+            self.pp_zero_idx = self.pipe_rank 
             self.pp_zero_id = self.pipe_idx 
             #tp->zero
             self.tp_zero_idx = self.tp_id 
             self.tp_zero_id = self.tp_idx
             #pp->tp->zero
-            self.pp_tp_zero_idx = self.stage_id * tp_size + self.tp_id 
+            self.pp_tp_zero_idx = self.pipe_rank * tp_size + self.tp_id 
             self.pp_tp_zero_id = self.pipe_idx // tp_size
         #only zero
         self.zero_idx = 0
         self.zero_id = self.rank
-
 
     def get_group_id(self,group_name):
         if group_name == "pipe":
@@ -209,13 +216,29 @@ class topology:
         
     def get_group_rank(self,group_name):
         if group_name == "pipe":
-            return self.stage_id
+            return self.pipe_rank
         elif group_name == "zero":
             return self.zero_id
         elif group_name == "tp_zero":
             return self.tp_zero_id
         elif group_name == "tp":
             return self.tp_id
+
+    def is_first_rank(self, group_name="pipe"):
+        if group_name == "pipe":
+            return self.pipe_rank == 0
+        elif group_name == "zero":
+            return self.zero_id == 0
+        elif group_name == "tp":
+            return self.tp_id == 0
+
+    def is_last_rank(self, group_name="pipe"):
+        if group_name == "pipe":
+            return self.pipe_rank == self.pipe_size - 1
+        elif group_name == "zero":
+            return self.zero_id == self.dp_size - 1
+        elif group_name == "tp":
+            return self.tp_id == self.tp_size - 1
 
 def is_initialized() -> bool:
     return config["initialized"]

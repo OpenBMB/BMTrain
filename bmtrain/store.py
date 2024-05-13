@@ -1,7 +1,6 @@
 from collections import OrderedDict
 from typing import Dict
 import torch
-
 from .pipe_layer import PipelineTransformerBlockList
 from .block_layer import TransformerBlockList
 from .global_var import config
@@ -11,6 +10,7 @@ import io, pickle
 from typing import Mapping
 import threading
 import bmtrain as bmt
+import os
 
 def _save_to_state_dict(model : torch.nn.Module, rank, destination, prefix):
     if isinstance(model, Block):
@@ -24,6 +24,21 @@ def _save_to_state_dict(model : torch.nn.Module, rank, destination, prefix):
             destination._metadata = OrderedDict()
         model._save_to_state_dict(destination, prefix, False)
 
+def _save_to_each_rank(model : torch.nn.Module, destination=None, prefix=''):
+    if destination is None:
+        destination = OrderedDict()
+        destination._metadata = OrderedDict()
+    destination._metadata[prefix[:-1]] = local_metadata = dict(version=model._version)
+    _save_to_state_dict(model, 0, destination, prefix)
+    for name, module in model._modules.items():
+        if module is not None:
+            _save_to_each_rank(module, destination, prefix + name + '.')
+    for hook in model._state_dict_hooks.values():
+        hook_result = hook(model, destination, prefix, local_metadata)
+        if hook_result is not None:
+            destination = hook_result
+    return destination
+    
 def _save_to_local_rank0(model : torch.nn.Module, destination=None, prefix=''):
     if destination is None:
         destination = OrderedDict()
@@ -88,7 +103,7 @@ def async_save_to_file(state_dict, file_path):
     config['finish_save'] = True
     print("finish save state_dict to ", file_path) 
 
-def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False):
+def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False, save_gather : bool=True):
     """Saves the model to the file.
 
     Similar to torch.save, but it used for distributed modules.
@@ -103,8 +118,16 @@ def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False):
         >>> bmtrain.save(model, "model.pt")
     """
     torch.cuda.synchronize()
-    state_dict = _save_to_rank0(model)
-    if config["rank"] == 0:
+        
+    if save_gather:
+        save_method = _save_to_rank0 
+    else:
+        save_method = _save_to_each_rank
+        file_name = f"{file_name}_rank_{bmt.rank()}"
+    tmp = bmt.config['save_param_gather']
+    bmt.config['save_param_gather'] = save_gather
+    state_dict = save_method(model)
+    if config["rank"] == 0 or not save_gather:
         if non_blocking is False:
             torch.save(state_dict, file_name)
         else:
@@ -118,6 +141,9 @@ def save(model : torch.nn.Module, file_name : str, non_blocking : bool=False):
             config['save_thread'] = threading.Thread(target=async_save_to_file, args=(state_dict, file_name))
             config['save_thread'].start()
     bmt.synchronize()
+    bmt.config['save_param_gather'] = tmp
+
+        
 
 DTYPE_LIST = [
     torch.float64,
@@ -299,7 +325,7 @@ class DistributedStateDictWrapper(Mapping):
         # pytorch 1.12.0 updated the load_state_dict method, which needs the state_dict to be a `Mapping`.
         return iter(self.keys())
 
-def load(model : torch.nn.Module, file_name : str, strict : bool = True):
+def load(model : torch.nn.Module, file_name : str, strict : bool = True, load_gather : bool = True):
     """Loads the model from the file.
 
     Similar to torch.load, but it uses less memory when loading large models.
@@ -312,14 +338,39 @@ def load(model : torch.nn.Module, file_name : str, strict : bool = True):
     Example:
         >>> bmtrain.load(model, "model.pt", strict=True)
     """
-    if config['rank'] == 0:
-        state_dict = DistributedStateDictWrapper(torch.load(file_name))
+    tmp = config['load_param_gather']
+    config['load_param_gather'] = load_gather
+    if load_gather:
+        if config['rank'] == 0:
+            state_dict = DistributedStateDictWrapper(torch.load(file_name))
+        else:
+            state_dict = DistributedStateDictWrapper({})
     else:
-        state_dict = DistributedStateDictWrapper({})
+        if "rank" not in file_name:
+            file_name = f"{file_name}_rank_{bmt.rank()}"
+        state_dict = torch.load(file_name)
 
     ret = model.load_state_dict(
         state_dict,
         strict = strict
     )
+    config['load_param_gather'] = tmp
     torch.cuda.synchronize()
     return ret
+
+def clean(file_name : str):
+    """Cleans the file.
+
+    Args:
+        file_name (str): The file name of the checkpoint.
+    
+    Example:
+        >>> bmtrain.clean("model.pt")
+    """
+    if bmt.rank() == 0:
+        parent = os.path.dirname(os.path.abspath(file_name))
+        for f in os.listdir(parent):
+            if f.startswith(file_name):
+                os.remove(os.path.join(parent, f))
+
+    

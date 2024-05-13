@@ -9,6 +9,7 @@ from .zero_context import ZeroContext
 from . import hook_func
 import inspect
 from torch.utils.checkpoint import checkpoint
+from .distributed.ops import send_tensor_inplace, recv_tensor_inplace
 
 def storage_type_cuda(storage_type):
     STORAGE_MAP = {
@@ -61,9 +62,10 @@ class Block(torch.nn.Module):
         >>> y2, ... = transformer_block(x)
         >>> assert torch.allclose(y1, y2)
     """
-    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3, initialized=False, mode="BLOCK"):
+    def __init__(self, inner_module : torch.nn.Module, use_checkpoint=True, zero_level=3, initialize_param=True, mode="BLOCK"):
         super().__init__()
         self._module = inner_module
+        self._module._in_block = True
         self._inputs = None
         self._layer_dict = {}
         self._forward_block_ctx = None
@@ -84,7 +86,7 @@ class Block(torch.nn.Module):
         self.all_input_no_grad = False
         self.all_param_no_grad = False
         self._zero_level = zero_level
-        if not initialized:
+        if initialize_param:
             self.init_param_storage()
 
     def reference(self, block):
@@ -106,13 +108,12 @@ class Block(torch.nn.Module):
 
             storage_type = storage_type_cuda(param.storage_type())
             kw_name = _get_param_kw(param)
-
             if kw_name not in self._storage_info:
-                if self._mode == "PIPE" and param._tp_mode:
+                if (self._mode == "PIPE" or self._mode == "1F1B") and param._tp_mode:
                     zero_comm = config["pp_tp_zero_comm"]
-                elif self._mode != "PIPE" and param._tp_mode:
+                elif (self._mode != "PIPE" and self._mode != "1F1B") and param._tp_mode:
                     zero_comm = config["tp_zero_comm"]
-                elif self._mode == "PIPE" and not param._tp_mode:
+                elif (self._mode == "PIPE" or self._mode == "1F1B") and not param._tp_mode:
                     zero_comm = config["pp_zero_comm"]
                 else:
                     zero_comm = config["zero_comm"]
@@ -188,11 +189,10 @@ class Block(torch.nn.Module):
             # copy values to buffer for normal parameter
             storage_st = self._storage_info[kw_name]["begin"]
             storage_end = self._storage_info[kw_name]["end"]
-            
+            comm = self._storage_info[kw_name]["zero_comm"] 
             # make parameter contiguous in storage
             with torch.no_grad():
                 contiguous_param = OpAllGather.apply(param)
-
             if not (param_st >= storage_end or param_end <= storage_st):
                 # copy offset in parameter storage
                 offset_st = max(storage_st - param_st, 0)
@@ -207,13 +207,18 @@ class Block(torch.nn.Module):
                 # PyTorch 1.11 changed the API of storage.__getitem__
                 d_dtype = self._storage_params[kw_name].dtype
                 d_device = self._storage_params[kw_name].device
-                param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
                 self._param_info[-1]["begin"] = to_offset_st
                 self._param_info[-1]["end"] = (to_offset_end - to_offset_st,)
                 setattr(param, "_start_partition", offset_st)
                 setattr(param, "_end_partition", offset_end)
-                param.data[:] = \
-                    torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
+                if nccl.commCount(comm) != 1:
+                    param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
+                    param.data[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
+                else:
+                    param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self._storage_params[kw_name].storage(), to_offset_st, param_shape)
+                    param.data[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, param_shape)[:]
                 del contiguous_param
             else:
                 param.data = torch.tensor([], dtype=param.dtype, device=param.device)
@@ -221,7 +226,6 @@ class Block(torch.nn.Module):
                 setattr(param, "_end_partition", 0)
             # clear parameter data, but keep the dtype and device
             setattr(param, "_in_block", True)
-
         for kw in offsets.keys():
             assert offsets[kw] == self._storage_info[kw]["total"]
 
@@ -279,8 +283,8 @@ class Block(torch.nn.Module):
         return post_out
 
     def forward(self, *args): 
+        
         arg_list = self.pre_hook(*args)
-
         if self.all_input_no_grad and not self.all_param_no_grad:
             placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
             return hook_func.OneStepNoGradFunc.apply(self, placeholder, *arg_list)
@@ -314,8 +318,12 @@ class Block(torch.nn.Module):
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         # gather here
         with torch.no_grad():
-            with ZeroContext(self):
+            if config['save_param_gather']:
+                with ZeroContext(self):
+                    return self._module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+            else:
                 return self._module.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+
     
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -330,8 +338,10 @@ class Block(torch.nn.Module):
                 tp_mode = param._tp_mode
                 if input_param.__class__.__name__ == "DistributedTensorWrapper":
                     input_param = input_param.broadcast()
-
-                verify_shape = torch.Size(it["shape"] if not tp_mode else param._tp_original_shape)
+                if config['load_param_gather']:
+                    verify_shape = torch.Size(it["shape"] if not tp_mode else param._tp_original_shape)
+                else:
+                    verify_shape = param.shape
                 if input_param.shape != verify_shape:
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
@@ -353,24 +363,28 @@ class Block(torch.nn.Module):
                 # copy to buffer
                 verify_size = verify_shape.numel()
                 assert input_param.numel() == verify_size
-
                 contiguous_param = input_param.to(it["parameter"].dtype).cuda().contiguous()
+                d_dtype = self._storage_params[kw_name].dtype
+                d_device = self._storage_params[kw_name].device
+                offset_st = max(storage_st - param_st, 0)
+                to_offset_st = offset_st + param_st - storage_st
+                if not config['load_param_gather']:
+                    partition_numel= contiguous_param.numel()
+                    torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (partition_numel,))[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), 0, (partition_numel,))[:]
+                    continue
 
                 tp_split_dim = param._tp_split_dim
                 if tp_mode and tp_split_dim >= 0:
                     contiguous_param = tp_split_tensor(contiguous_param, tp_split_dim)
                 
-                offset_st = max(storage_st - param_st, 0)
                 offset_end = min(storage_end - param_st, contiguous_param.numel())
+                to_offset_end = offset_end + param_st - storage_st
                 assert offset_st < offset_end
 
-                to_offset_st = offset_st + param_st - storage_st
-                to_offset_end = offset_end + param_st - storage_st
 
                 # copy to buffer
                 # PyTorch 1.11 changed the API of storage.__getitem__
-                d_dtype = self._storage_params[kw_name].dtype
-                d_device = self._storage_params[kw_name].device
                 torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))[:] = \
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
                 del contiguous_param
@@ -460,8 +474,12 @@ class Block(torch.nn.Module):
                 # PyTorch 1.11 changed the API of storage.__getitem__
                 d_dtype = self._storage_params[kw_name].dtype
                 d_device = self._storage_params[kw_name].device
-                param.data[:] = \
-                    torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, (offset_end - offset_st,))[:]
+                if nccl.commCount(self._storage_info[kw_name]["zero_comm"]) == 1:
+                    param.data[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, it["shape"])[:]
+                else:
+                    param.data[:] = \
+                        torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, (offset_end - offset_st,))[:]
                 del tmp_tensor
 
         
@@ -530,17 +548,18 @@ class Block(torch.nn.Module):
     def __repr__(self):
         return self._module.__repr__()
 
-def _block_wrapper(module, module_dict:dict, mode="BLOCK"):
+def _block_wrapper(module, module_dict:dict, mode="BLOCK", **kwargs):
     if not isinstance(module, Block):
-        in_block = id(module) in module_dict
-        new_module = Block(module, initialized=in_block, mode=mode)
-        if in_block:
-            new_module.reference(module_dict[id(module)])
+        if mode == "BLOCK":
+            in_block = id(module) in module_dict
+            new_module = Block(module, initialize_param=not in_block, mode=mode, **kwargs)
+            if in_block:
+                new_module.reference(module_dict[id(module)])
+        elif mode == "PIPE" or mode == "1F1B":
+            new_module = Block(module, initialize_param=False, mode=mode, **kwargs)
         else:
             module_dict[id(module)] = new_module
     else:
-        if mode == "PIPE" and module._mode != "PIPE":
-            assert False, "You must be set mode=\"PIPE\" in bmt.Block when use PipelineTransformerBlockList!"
         if id(module._module) in module_dict:
             assert False, "Duplicate bmt.Block not supported in same block list!"
         else:
@@ -569,25 +588,23 @@ class TransformerBlockList(torch.nn.Module):
     """
     _modules: Dict[str, Block]
 
-    def __init__(self, modules: Iterable[Block], num_hidden=1) -> None:
+    def __init__(self, modules: Iterable[Block], num_hidden=1, mode="BLOCK") -> None:
         super().__init__()
         
         self._modules = {}
         pre_module = None
         module_dict = {}
-        module_dict = {}
         for i, module in enumerate(modules):
-            module = _block_wrapper(module, module_dict)
+            module = _block_wrapper(module, module_dict, mode=mode)
             module.set_pre_module(pre_module)
             pre_module = module
             module._is_first_layer = False
             module._is_last_layer = False
             self._modules[str(i)] = module
             self.add_module(str(i), module)
-
         self._modules[str(0)]._is_first_layer = True
         self._modules[str(len(modules)-1)]._is_last_layer = True
-    
+        self.module_dict = module_dict 
         self.num_hidden = num_hidden
             
     def __len__(self) -> int:
@@ -621,3 +638,146 @@ class TransformerBlockList(torch.nn.Module):
             return outputs + tuple(hidden_states)
         else:
             return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
+
+def DummyForward(*args, **kwargs):
+    """
+    Only useful for embedding and layernorm layer
+    """
+    return args[0]
+
+class PipeDreamBlockList(TransformerBlockList):
+    
+    def __init__(self, modules: Iterable[Block], num_hidden=1, use_checkpoint=False) -> None:
+        module_dict = {}
+        mode = "1F1B"
+        if isinstance(use_checkpoint, bool):
+            use_checkpoint = [use_checkpoint for _ in range(len(modules))]
+        assert isinstance(use_checkpoint,Iterable) and len(use_checkpoint) == len(modules), "use_checkpoint should be a list of bool variable or a bool variable"
+        for idx in range(len(modules)):
+           modules[idx] = _block_wrapper(modules[idx], module_dict, mode=mode, zero_level=2, use_checkpoint=use_checkpoint[idx]) 
+        s,e = self.partition(modules)
+        self.head_idx = s
+        self.tail_idx = e
+        partition_modules = []
+        for idx,m in enumerate(modules):
+            if idx>=s and idx<e:
+                m.init_param_storage()
+                partition_modules.append(m)
+            else:
+                #m.init_param_storage()
+                for name, param in m.named_parameters():
+                    c = OpAllGather.apply(param)
+                    del param
+        super().__init__(partition_modules, num_hidden, mode=mode)
+        self.fisrt_module = (self._modules['0'],)
+        self.last_module = (self._modules[str(len(self._modules) - 1)],)
+        self.tied_modules = []
+
+    def forward(self, *args, return_hidden_states = False):
+
+        self.return_hidden_states = return_hidden_states
+        hidden_states = []
+        for i in range(len(self)):
+            if return_hidden_states:
+                for hidden_state in args[:self.num_hidden]:
+                    hidden_states.append(hidden_state)
+            outputs = self._modules[str(i)]._call_impl(*args)
+            if not isinstance(outputs, tuple):
+                outputs = (outputs, )
+            args = outputs + args[self.num_hidden:]
+
+        if return_hidden_states:
+            hidden_states = [
+                torch.stack(hidden_states[i::self.num_hidden], dim=0)
+                for i in range(self.num_hidden)
+            ]
+
+        if return_hidden_states:
+            return outputs + tuple(hidden_states)
+        else:
+            return tuple(outputs[:self.num_hidden]) if self.num_hidden > 1 else outputs[0]
+
+
+    def partition(self, modules):
+        pipe_size = config["topology"].pipe_size
+        pipe_rank = config["topology"].pipe_rank
+        part_lens = [0]+[len(modules) // pipe_size + (i < (len(modules) % pipe_size)) for i in range(pipe_rank+1)]
+        start = sum(part_lens[:pipe_rank+1])
+        end = start + part_lens[pipe_rank+1]
+        return start,end
+
+    def _add_head(self, module):
+        self.fisrt_module[0]._is_first_layer = False
+        module._is_first_layer = True
+        self.fisrt_module[0].set_pre_module(module)
+        self.fisrt_module = (module,)
+
+    def add_head(self, module, use_checkpoint=False):
+        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=use_checkpoint)
+        if config['topology'].pipe_rank != 0:
+            for name, param in module.named_parameters():
+                c = OpAllGather.apply(param)
+                del param
+            return DummyForward
+        else:
+            module.init_param_storage()
+        self._add_head(module)
+        return module
+
+    def get_first_layer(self):
+        return self._modules['0']
+    
+    def get_last_layer(self):
+        return self._modules[str(len(self)-1)]
+
+    def add_head_tail(self, module, use_checkpoint=False): 
+        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=use_checkpoint)
+        module.init_param_storage()
+        if config['topology'].pipe_rank != 0 and not config['topology'].is_last_rank():
+            return DummyForward
+        else:
+            if config['topology'].pipe_rank == 0:
+                module._tied = "head"
+                self._add_head(module)
+            elif config['topology'].is_last_rank():
+                module._tied = "tail"
+                self._add_tail(module)
+            self.tied_modules.append(module) 
+        return module
+
+                
+    def reduce_tied_module(self):
+        if config['topology'].pipe_rank != 0 and not config['topology'].is_last_rank():
+            return
+        else:
+            for tied_m in self.tied_modules:
+                for name, param in tied_m.named_parameters():
+                    if config['topology'].pipe_rank == 0 and param.grad is not None:
+                        with torch.no_grad():
+                            grad = torch.empty_like(param)
+                            param.grad += recv_tensor_inplace(grad, 1, config["pipe_tied_comm"])
+                            send_tensor_inplace(param.grad, 1, config["pipe_tied_comm"])
+                    elif config['topology'].pipe_rank == 0 and param.grad is None:
+                        grad = torch.empty_like(param)
+                        param.grad = recv_tensor_inplace(grad, 1, config["pipe_tied_comm"])
+                    elif config['topology'].is_last_rank() and param.grad is not None:
+                        send_tensor_inplace(param.grad, 0, config["pipe_tied_comm"])
+                        param.grad = recv_tensor_inplace(param.grad, 0, config["pipe_tied_comm"])
+
+    def _add_tail(self, module):
+        self.last_module[0]._is_last_layer = False
+        module._is_last_layer = True 
+        module.set_pre_module(self.last_module[0])
+        self.last_module = (module,) 
+
+    def add_tail(self, module, use_checkpoint=False):
+        module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=use_checkpoint)
+        if config['topology'].pipe_rank != config['topology'].pipe_size - 1:
+            for name, param in module.named_parameters():
+                c = OpAllGather.apply(param)
+                del param
+            return DummyForward
+        else:
+            module.init_param_storage()
+            self._add_tail(module)
+        return module
