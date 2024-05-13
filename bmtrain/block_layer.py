@@ -664,8 +664,10 @@ class PipeDreamBlockList(TransformerBlockList):
                 m.init_param_storage()
                 partition_modules.append(m)
             else:
-                m.init_param_storage()
-                del m
+                #m.init_param_storage()
+                for name, param in m.named_parameters():
+                    c = OpAllGather.apply(param)
+                    del param
         super().__init__(partition_modules, num_hidden, mode=mode)
         self.fisrt_module = (self._modules['0'],)
         self.last_module = (self._modules[str(len(self._modules) - 1)],)
@@ -712,9 +714,13 @@ class PipeDreamBlockList(TransformerBlockList):
 
     def add_head(self, module, use_checkpoint=False):
         module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=use_checkpoint)
-        module.init_param_storage()
         if config['topology'].pipe_rank != 0:
+            for name, param in module.named_parameters():
+                c = OpAllGather.apply(param)
+                del param
             return DummyForward
+        else:
+            module.init_param_storage()
         self._add_head(module)
         return module
 
@@ -766,9 +772,12 @@ class PipeDreamBlockList(TransformerBlockList):
 
     def add_tail(self, module, use_checkpoint=False):
         module = _block_wrapper(module, self.module_dict, mode="1F1B", zero_level=2, use_checkpoint=use_checkpoint)
-        module.init_param_storage()
         if config['topology'].pipe_rank != config['topology'].pipe_size - 1:
+            for name, param in module.named_parameters():
+                c = OpAllGather.apply(param)
+                del param
             return DummyForward
         else:
+            module.init_param_storage()
             self._add_tail(module)
         return module
