@@ -119,7 +119,7 @@ def allReduce(
     If src == dst, the operation is performed in-place.
 
     """
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()
@@ -197,7 +197,7 @@ def broadcast(
 
     """
 
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()
@@ -237,7 +237,7 @@ def reduce(
     If src == dst, the operation is performed in-place.
 
     """
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()
@@ -266,7 +266,7 @@ def allGather(
     The dst buffer is only used on rank root.
 
     """
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()
@@ -303,7 +303,7 @@ def reduceScatter(
     The dst buffer on rank `i` will contail the i-th block of the reduced result.
 
     """
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()

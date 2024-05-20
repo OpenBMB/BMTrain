@@ -1,4 +1,5 @@
 from typing import Dict, Iterable, Iterator, Union, List
+import gc
 
 from .utils import (round_up, tp_split_tensor)
 from .global_var import config
@@ -215,6 +216,9 @@ class Block(torch.nn.Module):
                 param.data[:] = \
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
                 del contiguous_param
+
+                gc.collect()
+                torch.cuda.empty_cache()
             else:
                 param.data = torch.tensor([], dtype=param.dtype, device=param.device)
                 setattr(param, "_start_partition", None)
@@ -374,6 +378,9 @@ class Block(torch.nn.Module):
                 torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))[:] = \
                     torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
                 del contiguous_param
+
+                gc.collect()
+                torch.cuda.empty_cache()
             elif strict:
                 missing_keys.append(key)
 
