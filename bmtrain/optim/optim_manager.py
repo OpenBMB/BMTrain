@@ -5,6 +5,7 @@ from ..utils import print_rank
 from ..lr_scheduler.warmup import WarmupLRScheduler
 from .. import nccl
 from ..global_var import config
+import bmtrain as bmt
 
 def check_overflow(param_groups):
     # check overflow
@@ -209,7 +210,7 @@ class OptimManager:
 
     def state_dict(self, gather_opt=False) -> dict:
         return {
-            "optimizers": [opt.state_dict(gather_opt) for opt in self.optimizers],
+            "optimizers": [opt.state_dict(gather_opt) if isinstance(opt, bmt.optim.AdamOffloadOptimizer) else opt.state_dict() for opt in self.optimizers],
             "lr_schedulers": [lrs.state_dict() if lrs else None for lrs in self.lr_schedulers],
             "loss_scale": self.loss_scale,
             "loss_scale_enabled": self.loss_scale_enabled,
