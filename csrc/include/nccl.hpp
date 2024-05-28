@@ -131,6 +131,39 @@ void pyNCCLReduceScatter(
         reinterpret_cast<cudaStream_t>(stream)
     ));
 }
+
+void pyNCCLAll2All(
+    std::uintptr_t sendbuff,
+    std::uintptr_t recvbuff,
+    size_t count,
+    size_t bytes,
+    int data_type,
+    std::uintptr_t comm,
+    std::uintptr_t stream) {
+    int num_rank;
+    checkNCCLStatus(ncclCommCount(reinterpret_cast<ncclComm_t>(comm), &num_rank));
+    count = count / num_rank;
+    bytes = bytes / num_rank;
+    checkNCCLStatus(ncclGroupStart());
+    for (int r=0; r < num_rank; r++) {
+        checkNCCLStatus(ncclSend(
+            reinterpret_cast<void*>(sendbuff + r * bytes),
+            count,
+            static_cast<ncclDataType_t>(data_type),
+            r, 
+            reinterpret_cast<ncclComm_t>(comm),
+            reinterpret_cast<cudaStream_t>(stream)));
+        checkNCCLStatus(ncclRecv(
+            reinterpret_cast<void*>(recvbuff + r * bytes),
+            count,
+            static_cast<ncclDataType_t>(data_type),
+            r,
+            reinterpret_cast<ncclComm_t>(comm),
+            reinterpret_cast<cudaStream_t>(stream)));
+    }
+    checkNCCLStatus(ncclGroupEnd());
+}
+
 void pyNCCLSend(
     std::uintptr_t sendbuff,
     size_t sendcount,

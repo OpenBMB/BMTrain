@@ -32,4 +32,5 @@ PYBIND11_MODULE(C, m) {
     m.def("ncclRecv", &pyNCCLRecv, "nccl recv");
     m.def("ncclCommCount", &pyNCCLCommCount, "nccl comm count");
     m.def("ncclCommUserRank", &pyNCCLCommUserRank, "nccl comm user rank");
+    m.def("ncclAll2All", &pyNCCLAll2All, "nccl All2All");
 }

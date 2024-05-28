@@ -6,6 +6,7 @@ from ..nccl import broadcast as ncclBroadcast
 from ..nccl import reduceScatter as ncclReduceScatter
 from ..nccl import send as ncclSend
 from ..nccl import recv as ncclRecv
+from ..nccl import all2all as ncclAllToAll
 from ..nccl import commCount,commRank,NCCLCommunicator
 DTYPE_LIST = [
     torch.float64,
@@ -44,6 +45,13 @@ def recv_meta(prev_rank, comm):
     shape = meta_data[2:n_dims+2].tolist()
     return dtype,shape
 
+def to_contiguous(x):
+    if not x.is_contiguous():
+        x = x.contiguous()
+    if x.storage_offset() != 0 or x.storage().size() != x.numel():
+        x = x.clone()
+    return x
+
 class OpBroadcast(torch.autograd.Function):
 
     @staticmethod
@@ -72,10 +80,7 @@ class OpAllGather(torch.autograd.Function):
         if comm is None:
             comm = config["comm"]
         world_size = commCount(comm)
-        if not input.is_contiguous():
-            input = input.contiguous()
-        if input.storage_offset() != 0 or input.storage().size() != input.numel():
-            input = input.clone()
+        input = to_contiguous(input)
         output = torch.empty( (world_size,) + input.size(), dtype=input.dtype, device=input.device)
         ctx.comm = comm
         ncclAllGather(
@@ -87,6 +92,7 @@ class OpAllGather(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        grad_output = to_contiguous(grad_output)
         return grad_output[commRank(ctx.comm)], None
 
 def all_gather(x : torch.Tensor, comm = None):
@@ -113,10 +119,7 @@ class OpReduceScatter(torch.autograd.Function):
         ctx.comm = comm
         rank = commRank(comm)
         assert input.shape[0] % commCount(comm) == 0, "The dimension 0 must be divisible by the number of communication processes"
-        if not input.is_contiguous():
-            input = input.contiguous()
-        if input.storage_offset() != 0 or input.storage().size() != input.numel():
-            input = input.clone()
+        input = to_contiguous(input)
         output_shape = (input.shape[0] // commCount(comm), *input.shape[1:])
         output = torch.empty( output_shape, dtype=input.dtype, device=input.device )
         ncclReduceScatter(
@@ -136,6 +139,7 @@ class OpReduceScatter(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        grad_output = to_contiguous(grad_output)
         with torch.no_grad():
             grad_output = OpAllGather.apply(grad_output, ctx.comm).flatten(0,1)
         if ctx.op in ["max", "min", "prod"]:
@@ -169,10 +173,7 @@ class OpAllReduce(torch.autograd.Function):
         if comm is None:
             comm = config["comm"]
         ctx.comm = comm
-        if not input.is_contiguous():
-            input = input.contiguous()
-        if input.storage_offset() != 0 or input.storage().size() != input.numel():
-            input = input.clone()
+        input = to_contiguous(input)
         output = torch.empty( input.size(), dtype=input.dtype, device=input.device)
         
         ncclAllReduce(
@@ -193,6 +194,7 @@ class OpAllReduce(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        grad_output = to_contiguous(grad_output)
         if ctx.op == "sum":
             return grad_output, None, None
         elif ctx.op == "avg":
@@ -220,4 +222,45 @@ def all_reduce(x : torch.Tensor, op : str = "sum", comm = None):
     return OpAllReduce.apply(x, op, comm)
 
 
-            
+class OpAllToAll(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input : torch.Tensor, comm : NCCLCommunicator = None):
+        if comm is None:
+            comm = config["comm"]
+        ctx.comm = comm
+        input = to_contiguous(input)
+        output = torch.empty(input.size(), dtype=input.dtype, device=input.device)
+        
+        ncclAllToAll(
+            input.storage(),
+            output.storage(),
+            comm
+        )
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_output = to_contiguous(grad_output)
+        grad_input = torch.empty(grad_output.size(), dtype=grad_output.dtype, device=grad_output.device)
+        ncclAllToAll(
+            grad_output.storage(),
+            grad_input.storage(),
+            ctx.comm
+        )
+        return grad_input, None
+
+def all_to_all(x : torch.Tensor, comm = None):
+    """Split input tensor and then scatter the split list to all processes in a group.
+
+    Args:
+        x (torch.Tensor): The input tensor of shape (...).
+
+    Returns:
+        torch.Tensor: the concatenated of received tensors
+    
+    """
+    if not config["initialized"]:
+        raise RuntimeError("BMTrain is not initialized")
+
+    assert x.is_cuda
+    return OpAllToAll.apply(x, comm)
