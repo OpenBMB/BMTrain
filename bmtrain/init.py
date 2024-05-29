@@ -3,9 +3,10 @@ import torch
 import random
 import torch.distributed as dist
 import os
-from .utils import print_dict
+from .utils import print_dict, topology_helper
 import ctypes
 from .global_var import config
+from collections import OrderedDict
 
 from . import nccl
 from .synchronize import synchronize
@@ -16,6 +17,7 @@ def init_distributed(
         pipe_size: int = -1,
         num_micro_batches: int = None,
         tp_size : int = 1,
+        sp_size : int = 1,
     ):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
@@ -66,6 +68,7 @@ def init_distributed(
     torch.cuda.set_device(local_rank)
     config["initialized"] = True
     config["pipe_size"] = pipe_size if pipe_size > 0 else 1
+    config["sp_size"] = sp_size if size > 0 else 1
     config["pipe_enabled"] = pipe_size > 0
     config["local_rank"] = local_rank
     config["local_size"] = local_size
@@ -148,6 +151,13 @@ def init_distributed(
         unique_id = bytes.fromhex(store.get(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}").decode())
         config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id)
 
+    if config['sp_size'] > 1:
+        assert world_size // (config['pipe_size'] * config['tp_size']) % config['sp_size'] == 0, "The nums of GPUs must be divisible by the pipeline parallel size * tensor parallel size * sp size"
+        if topo.sp_id == 0:
+            unique_id = nccl.getUniqueId()
+            store.set(f"SP_UNIQUE_ID{topo.sp_idx}", unique_id.hex())
+        unique_id = bytes.fromhex(store.get(f"SP_UNIQUE_ID{topo.sp_idx}").decode())
+        config['sp_comm'] = nccl.commInitRank(unique_id, sp_size, topo.sp_id)
     config ['zero_comm'] = config['comm']
 
     for i in range(world_size):
@@ -175,27 +185,44 @@ class topology:
         dp_size = world_size // (pp_size * tp_size)
         config['tp_zero_size'] = dp_size
         config['zero_size'] = world_size // pp_size 
+        order = ["tp", "dp", "pp"]
+        order_dict = OrderedDict()
+        for o in order:
+            if o == "tp":
+                order_dict[o] = tp_size
+            elif o == "dp":
+                order_dict[o] = dp_size
+            elif o == "pp":
+                order_dict[o] = pp_size
+        self._topo = topology_helper(order_dict)
         self.stages = config['pipe_size']
+        self.pipe_idx = self._topo.get_group_id(self.rank, "pipe")
+        self.stage_id = self._topo.get_group_rank(self.rank, "pipe")
+        self.tp_id = self._topo.get_group_rank(self.rank, "tp")
+        self.tp_idx = self._topo.get_group_id(self.rank, "tp")
+        # pp->zero
+        self.pp_zero_idx = self.stage_id 
+        self.pp_zero_id = self.pipe_idx 
+        # tp->zero
+        self.tp_zero_idx = self.tp_id 
+        self.tp_zero_id = self.tp_idx
+        # pp->tp->zero
+        self.dp_id = self._topo.get_group_rank(self.rank, "dp")
+        self.dp_idx = self._topo.get_group_id(self.rank, "dp")
+        self.pp_tp_zero_id = self.dp_id
+        self.pp_tp_zero_idx = self.dp_idx
+        # only zero
+        self.zero_idx = self._topo.get_group_id(self.rank, "dp")
+        self.zero_id = self._topo.get_group_rank(self.rank, "dp")
         
-        stage_size = world_size // pp_size
-        for i in range(world_size):
-            self.pipe_idx = self.rank % stage_size 
-            self.stage_id = self.rank // stage_size 
-            self.tp_id = self.rank % tp_size
-            self.tp_idx = self.rank // tp_size 
-            #pp->zero
-            self.pp_zero_idx = self.stage_id 
-            self.pp_zero_id = self.pipe_idx 
-            #tp->zero
-            self.tp_zero_idx = self.tp_id 
-            self.tp_zero_id = self.tp_idx
-            #pp->tp->zero
-            self.pp_tp_zero_idx = self.stage_id * tp_size + self.tp_id 
-            self.pp_tp_zero_id = self.pipe_idx // tp_size
-        #only zero
-        self.zero_idx = 0
-        self.zero_id = self.rank
-
+        # divide sp group based on dp 
+        order_dict = OrderedDict()
+        order_dict["sp"] = config["sp_size"]
+        order_dict["dp_sp"] = dp_size // config["sp_size"]
+        self._topo_sp = topology_helper(order_dict)
+        offset = self.dp_idx * self.dp_size // self.sp_size
+        self.sp_idx = offset + self._topo_sp.get_group_id(self.dp_id, "sp")
+        self.sp_id = self._topo_sp.get_group_rank(self.dp_id, "sp")
 
     def get_group_id(self,group_name):
         if group_name == "pipe":
@@ -206,6 +233,8 @@ class topology:
             return self.tp_zero_idx
         elif group_name == "tp":
             return self.tp_idx
+        elif group_name == "sp":
+            return self.sp_idx
         
     def get_group_rank(self,group_name):
         if group_name == "pipe":
@@ -216,6 +245,8 @@ class topology:
             return self.tp_zero_id
         elif group_name == "tp":
             return self.tp_id
+        elif group_name == "sp":
+            return self.sp_id
 
 def is_initialized() -> bool:
     return config["initialized"]

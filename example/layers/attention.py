@@ -9,6 +9,26 @@ from bmtrain.nn import (
 import math
 from bmtrain.global_var import config
 from bmtrain.distributed import all_gather 
+def all2all_tensor(tensor, gather_dim, scatter_dim)
+    # Input shape: (B, S, N, D) | (B, N, S, D)
+    origin_size = list(tensor.size())
+    output_size = origin_size.copy()
+    output_size[gather_dim] = origin_size[gather_dim] * bmt.config['sp_size']
+    output_size[scatter_dim] = origin_size[scatter_dim] / bmt.config['sp_size']
+    tensor = tensor.permute(seq_dim, head_dim, tensor.size(0), tensor.size(-1))
+    tensor = torch.cat(tensor.chunk(bmt.config['sp_size'], dim=1), dim=0).contiguous()
+    tensor = bmt.distributed.all_to_all(tensor, bmt.config['sp_comm'])
+    tensor = tensor.view(*output_size)
+    return tensor
+
+def all2all_qkv(q, k, v, seq_dim, head_dim):
+    q = all2all_tensor(q, seq_dim, head_dim)
+    k = all2all_tensor(k, seq_dim, head_dim)
+    v = all2all_tensor(v, seq_dim, head_dim)
+    return q, k, v
+
+
+
 
 class Attention(bmt.DistributedModule):
     def __init__(self, 
@@ -62,10 +82,19 @@ class Attention(bmt.DistributedModule):
 
         seq_q = h_q.size()[1]
         seq_kv = h_k.size(1)
-
+            
         h_q = h_q.view(batch_size, seq_q, -1, self.dim_head)
         h_k = h_k.view(batch_size, seq_kv, -1, self.dim_head)
         h_v = h_v.view(batch_size, seq_kv, -1, self.dim_head)
+        if config['sequence_parallel']:
+            seq_dim = 1
+            head_dim = 2
+            all2all_qkv(h_q, h_k, h_v, seq_dim, head_dim)
+            seq_q = h_q.size()[1]
+            seq_kv = h_k.size(1)
+            
+            
+            
 
         h_q = h_q.permute(0, 2, 1, 3).contiguous()
         h_k = h_k.permute(0, 2, 1, 3).contiguous()
@@ -103,6 +132,9 @@ class Attention(bmt.DistributedModule):
             score, h_v
         )
         h_out = h_out.view(batch_size, -1, seq_q, self.dim_head)
+        if config['sequence_parallel']:
+           h_out = all2all_tensor(h_out, 1, 2)
+           seq_q = h_out.size(2)
         h_out = h_out.permute(0, 2, 1, 3).contiguous()
         h_out = h_out.view(batch_size, seq_q, -1)
         if config['tp_size'] > 1:

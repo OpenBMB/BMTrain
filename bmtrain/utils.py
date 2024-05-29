@@ -1,6 +1,8 @@
 import torch
 import sys
 from typing import Any, Dict, Iterable, Optional
+from itertools import product
+import math
 from .global_var import config
 import os
 import ctypes
@@ -143,3 +145,48 @@ class AverageRecorder:
         if self._steps <= 0:
             return self._value
         return self._value / (1 - pow(self.alpha, self._steps))
+
+
+def get_offset(sizes, pos):
+    offset = 0
+    for idx in range(len(sizes)):
+        if idx == (len(sizes) - 1):
+            offset += pos[idx]
+        else:
+            offset += math.prod(sizes[idx+1:]) * pos[idx]
+    return offset
+
+class topology_helper:
+    def __init__(self, groups_dict):
+        self.keys = list(groups_dict.keys())[::-1]
+        self.values = list(groups_dict.values())[::-1]
+        self.world_size = math.prod(list(groups_dict.values()))
+        self.rank_grid, self.group_ids  = self._init_rank_grid()
+        
+    def _init_rank_grid(self):
+        grid_shape = tuple(self.values)
+        rank_grid = [None for _ in range(self.world_size)]
+        group_ids = [None for _ in range(self.world_size)]
+        
+        for rank, group_ranks in enumerate(product(*[range(size) for size in grid_shape])):
+            rank_grid[rank] = group_ranks
+            group_ids[rank] = [0 for _ in range(len(self.keys))]
+            for i,r in enumerate(rank_grid[rank]):
+                ranks = list(rank_grid[rank])
+                sizes = list(self.values)
+                group_pos = [group_ranks[j] for j in range(len(group_ranks))if j != i ]
+                group_offset = get_offset([sizes[s] for s in range(len(sizes)) if s != i], group_pos)
+                group_ids[rank][i] = group_offset
+
+        return rank_grid, group_ids  
+
+    def get_group_rank(self, rank, group):
+        if group not in self.keys:
+            raise ValueError(f"Group {group} not found ")
+        return self.rank_grid[rank][self.keys.index(group)]
+    
+    def get_group_id(self, rank, group):
+        if group not in self.keys:
+            raise ValueError(f"Group {group} not found ")
+        idx = self.keys.index(group)
+        return self.group_ids[rank][idx]
