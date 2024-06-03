@@ -53,12 +53,18 @@ class GPT(bmt.DistributedModule):
         if config["tp_size"] > 1:
             input = input.chunk(config["tp_size"], dim=1)[config["tp_rank"]]
             pos = pos.chunk(config["tp_size"], dim=1)[config["tp_rank"]]    
+        if config["sp_size"] > 1:
+            input = input.chunk(config["sp_size"], dim=1)[config["sp_rank"]]
+            pos = pos.chunk(config["sp_size"], dim=1)[config["sp_rank"]]    
+
         out = self.pos_emb(pos) + self.word_emb(input)
 
         # for layer in self.transformers:
         out = self.transformers(out, mask_2d, None)
         out = self.layernorm(out)
         logits = self.word_emb(out, projection=True)
+        if bmt.config['sp_size'] > 1:
+            logits = bmt.distributed.all_gather(logits, comm=bmt.config['sp_comm']).view(logits.shape[0], -1, logits.shape[-1])
         bmt.inspect.record_tensor(logits, "logits")
 
         return logits

@@ -67,7 +67,7 @@ class OptimManager:
         self.min_loss_scale = min_loss_scale
         self.max_loss_scale = max_loss_scale
         if grad_scale is None:
-            grad_scale = config['zero_size']
+            grad_scale = config['zero_size'] // config['tp_size']
         self.grad_scale = grad_scale
 
         self.optimizers = []
@@ -90,7 +90,7 @@ class OptimManager:
 
     def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
 
-        return loss * ( self.loss_scale / self.grad_scale ) # loss scale
+        return loss * ( self.loss_scale / self.grad_scale) # loss scale
 
     def backward(self, loss : torch.Tensor):
         """
