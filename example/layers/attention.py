@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Literal
 import torch
 import bmtrain as bmt
 from bmtrain.nn import (
@@ -8,6 +8,8 @@ from bmtrain.nn import (
 )
 import math
 from bmtrain.global_var import config
+from bmtrain.distributed import all2all_transpose
+from bmtrain.nn import OpBurstAttn
 
 def inverse_permute(permute_dims):
     inverse_dims = [0] * len(permute_dims)
@@ -15,24 +17,10 @@ def inverse_permute(permute_dims):
         inverse_dims[dim] = i
     return inverse_dims
 
-def all2all_tensor(tensor, gather_dim, scatter_dim):
-    # Input shape: (B, S, N, D) | (B, N, S, D)
-    origin_size = list(tensor.size())
-    output_size = origin_size.copy()
-    output_size[gather_dim] = origin_size[gather_dim] * bmt.config['sp_size']
-    output_size[scatter_dim] = origin_size[scatter_dim] // bmt.config['sp_size']
-    inv_order = inverse_permute([gather_dim, scatter_dim, 0, -1])
-    tensor = tensor.permute(gather_dim, scatter_dim, 0, -1)
-    tensor = torch.cat(tensor.chunk(bmt.config['sp_size'], dim=1), dim=0).contiguous()
-    tensor = bmt.distributed.all_to_all(tensor, bmt.config['sp_comm'])
-    tensor = tensor.permute(inv_order).contiguous()
-    return tensor
-
-
 def all2all_qkv(q, k, v, seq_dim, head_dim):
-    q = all2all_tensor(q, seq_dim, head_dim)
-    k = all2all_tensor(k, seq_dim, head_dim)
-    v = all2all_tensor(v, seq_dim, head_dim)
+    q = all2all_transpose(q, seq_dim, head_dim)
+    k = all2all_transpose(k, seq_dim, head_dim)
+    v = all2all_transpose(v, seq_dim, head_dim)
     return q, k, v
 
 
@@ -40,7 +28,9 @@ class Attention(bmt.DistributedModule):
     def __init__(self, 
             dim_model : int, dim_head : int,
             num_heads : int, bias : bool = True,
-            dtype = None
+            dtype : Optional[torch.dtype] = None,
+            sp_method : Optional[Literal["all2all", "burst"]] = None,
+
         ) -> None:
         super().__init__()
 
@@ -54,6 +44,11 @@ class Attention(bmt.DistributedModule):
             self.project_k = Linear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
             self.project_v = Linear(dim_model, dim_head * num_heads, bias=bias, dtype=dtype)
             self.project_out = Linear(dim_head * num_heads, dim_model, bias=bias, dtype=dtype)
+
+
+        self.sp_method = sp_method
+        if bmt.config['sp_size'] > 1:
+            assert sp_method is not None
 
         self.softmax = torch.nn.Softmax(dim=-1)
         self.num_heads = num_heads
@@ -92,11 +87,18 @@ class Attention(bmt.DistributedModule):
         h_k = h_k.view(batch_size, seq_kv, -1, self.dim_head)
         h_v = h_v.view(batch_size, seq_kv, -1, self.dim_head)
         if config['sp_size'] > 1:
-            seq_dim = 1
-            head_dim = 2
-            h_q, h_k, h_v = all2all_qkv(h_q, h_k, h_v, seq_dim, head_dim)
-            seq_q = h_q.size()[1]
-            seq_kv = h_k.size(1)
+            if self.sp_method == "all2all":
+                seq_dim = 1
+                head_dim = 2
+                h_q, h_k, h_v = all2all_qkv(h_q, h_k, h_v, seq_dim, head_dim)
+                seq_q = h_q.size()[1]
+                seq_kv = h_k.size(1)
+            elif self.sp_method == "burst":
+                o = OpBurstAttn(h_q, h_k, h_v, math.sqrt(self.dim_head), "none", optimize_bwd_comm=False)
+                return o
+            else:
+                raise ValueError("Invalid sp_method for sequence parallel, should be 'all2all' or 'burst'")
+
 
         h_q = h_q.permute(0, 2, 1, 3).contiguous()
         h_k = h_k.permute(0, 2, 1, 3).contiguous()
@@ -135,7 +137,7 @@ class Attention(bmt.DistributedModule):
         )
         h_out = h_out.view(batch_size, -1, seq_q, self.dim_head).contiguous()
         if config['sp_size'] > 1:
-            h_out = all2all_tensor(h_out, 1, 2)
+            h_out = all2all_transpose(h_out, 1, 2)
             seq_q = h_out.size(2)
         h_out = h_out.permute(0, 2, 1, 3).contiguous()
         h_out = h_out.view(batch_size, seq_q, -1)

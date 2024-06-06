@@ -264,3 +264,27 @@ def all_to_all(x : torch.Tensor, comm = None):
 
     assert x.is_cuda
     return OpAllToAll.apply(x, comm)
+
+def inverse_permute(permute_dims):
+    inverse_dims = [0] * len(permute_dims)
+    for i, dim in enumerate(permute_dims):
+        inverse_dims[dim] = i
+    return inverse_dims
+
+def all2all_transpose(tensor : torch.Tensor, gather_dim : int, scatter_dim : int, comm = None):
+    # Input shape: (B, S, N, D) | (B, N, S, D)
+    origin_size = list(tensor.size())
+    output_size = origin_size.copy()
+    count = commCount(comm)
+    output_size[gather_dim] = origin_size[gather_dim] * count
+    output_size[scatter_dim] = origin_size[scatter_dim] // count
+    inv_order = inverse_permute([gather_dim, scatter_dim, 0, -1])
+    tensor = tensor.permute(gather_dim, scatter_dim, 0, -1)
+    tensor = torch.cat(tensor.chunk(count, dim=1), dim=0).contiguous()
+    tensor = all_to_all(tensor, count)
+    tensor = tensor.permute(inv_order).contiguous()
+    return tensor
+
+
+
+

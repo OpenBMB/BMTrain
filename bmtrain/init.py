@@ -76,6 +76,7 @@ def init_distributed(
     config["world_size"] = world_size
     config["calc_stream"] = torch.cuda.current_stream()
     config["load_stream"] = torch.cuda.Stream(priority=-1)
+    config["sp_stream"] = torch.cuda.Stream(priority=-1)
     config["tp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config["pp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config['barrier_stream'] = torch.cuda.Stream()
@@ -194,10 +195,12 @@ class topology:
         stage_size = world_size // pp_size
         self.pipe_idx = self.rank % stage_size 
         self.stage_id = self.rank // stage_size 
-        self.tp_id = self.rank % tp_size
-        self.tp_idx = self.rank // tp_size 
         self.tp_sp_idx = self.rank // tp_size // sp_size
         self.tp_sp_id = self.rank % (tp_size * sp_size)
+        self.tp_id = self.tp_sp_id % tp_size
+        self.tp_idx = self.tp_sp_idx * sp_size + self.tp_sp_id // tp_size
+        self.sp_id = self.tp_sp_id // tp_size
+        self.sp_idx = self.tp_sp_idx * tp_size + self.tp_sp_id % tp_size
         #pp->zero
         self.pp_zero_idx = self.stage_id 
         self.pp_zero_id = self.pipe_idx 
