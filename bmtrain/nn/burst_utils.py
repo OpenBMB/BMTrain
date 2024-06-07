@@ -147,7 +147,7 @@ def inter_normal_attn_backward(
     d_p = do @ v.transpose(-2, -1)
     softmax_scale = softmax_scale
     d_s = p * (d_p - delta) * softmax_scale
-    d_q += d_s @ k
+    d_q[:] = d_s @ k
     d_k += d_s.transpose(-2, -1) @ q
 
 

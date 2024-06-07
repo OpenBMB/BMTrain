@@ -17,7 +17,7 @@ def flash(q, k, v):
 
 
 def burst(q, k, v):
-    res_burst = OpBurstAttn.apply(q, k, v, None, "cuda", False)
+    res_burst = OpBurstAttn.apply(q, k, v, None, None, False)
     return res_burst
 
 def test_func(q, k, v, func, grad_output):
@@ -30,9 +30,9 @@ def test_func(q, k, v, func, grad_output):
     return o, (gq, gk, gv)
 
 def test_burst():
-    dtype = torch.float32
+    dtype = torch.float16
     bmt.init_distributed(sp_size=4)
-    flash = "cuda"
+    flash = None
     seq_dim = 2 if not flash else 1
     def get_chunk(t, dim):
         return t.chunk(bmt.config['sp_size'], dim=dim)[bmt.config['sp_rank']].contiguous()
@@ -67,9 +67,6 @@ def test_burst():
     if flash:
         o1 = o1.transpose(1, 2).contiguous()
         grad_qkv1 = [g.transpose(1, 2).contiguous() for g in grad_qkv1]
-    if bmt.rank() == 0:
-        from IPython import embed;embed()
-    bmt.synchronize()
     o_ref = get_chunk(o_ref, dim=2)
     g_ref = [get_chunk(g, dim=2) for g in g_ref]
     np.testing.assert_allclose(

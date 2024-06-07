@@ -23,7 +23,7 @@ class OpBurstAttn(torch.autograd.Function):
 
     @staticmethod
     def forward(
-        ctx, q, k, v, softmax_scale=None, flash=None, optimize_bwd_comm=False
+        ctx, q, k, v, softmax_scale=None, flash=None, optimize_bwd_comm=False, return_softmax=False
     ):
         m_i = None
         acc_o = None
@@ -76,7 +76,7 @@ class OpBurstAttn(torch.autograd.Function):
         if flash is not None:
             lse_i = lse_i.squeeze(dim=-1).transpose(1, 2).contiguous()
         ctx.save_for_backward(q, k, v, lse_i.contiguous(), acc_o)
-        return acc_o
+        return acc_o if not return_softmax else (acc_o, lse_i)
 
     @staticmethod
     def backward(ctx, grad_output):
