@@ -1,6 +1,5 @@
 import torch
 import bmtrain as bmt
-from flash_attn.flash_attn_interface import flash_attn_func as flash_cuda
 import numpy as np
 
 OpBurstAttn = bmt.nn.OpBurstAttn
