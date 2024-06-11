@@ -155,8 +155,8 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                 )
                 total_numel += state["_param_fp16"].numel()
                 if self.record_delta:
-                    sum_delta += param._delta_info[2].item();
-                    sum_sq_delta += param._delta_info[3].item();
+                    sum_delta += param._delta_info[2].item()
+                    sum_sq_delta += param._delta_info[3].item()
                 # transfer parameters back to device asynchronously
                 param.copy_(state["_param_fp16"], non_blocking=True)
         if self.record_delta:

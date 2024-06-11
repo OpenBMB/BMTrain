@@ -1,6 +1,8 @@
 import torch
 import sys
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Optional
+from itertools import product
+import math
 from .global_var import config
 import os
 import ctypes
@@ -143,3 +145,13 @@ class AverageRecorder:
         if self._steps <= 0:
             return self._value
         return self._value / (1 - pow(self.alpha, self._steps))
+
+
+def get_offset(sizes, pos):
+    offset = 0
+    for idx in range(len(sizes)):
+        if idx == (len(sizes) - 1):
+            offset += pos[idx]
+        else:
+            offset += math.prod(sizes[idx+1:]) * pos[idx]
+    return offset

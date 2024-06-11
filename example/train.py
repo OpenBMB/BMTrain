@@ -10,6 +10,7 @@ def main():
     bmt.init_distributed(
         seed=0,
         tp_size=2,
+        sp_size=2,
     )
 
     model = GPT(
@@ -36,8 +37,8 @@ def main():
 
     batch_size = 2
     seq_len = 512
-    world_size = bmt.config["world_size"] if bmt.config["tp_size"] == 1 else bmt.config["tp_zero_size"]
-    r = bmt.config["rank"] if bmt.config["tp_size"] == 1 else bmt.config["tp_zero_rank"] 
+    world_size = bmt.world_size() // config['sp_size'] // config['tp_size'] 
+    r = bmt.config["tp_sp_zero_rank"]
 
     for i in range(world_size):
         sent = torch.randint(0, 10240, (batch_size, seq_len + 1))
@@ -93,7 +94,7 @@ def main():
             optim_manager.zero_grad()
 
             optim_manager.backward(loss)
-        
+            grad_norm = optim_manager.clip_grad_norm(optimizer.param_groups, max_norm=1.0)
         # print inspected tensors in the forward & backward pass
         # print parameters of the model
         if iteration % 100 == 0:
@@ -118,10 +119,11 @@ def main():
 
         # print time and loss
         bmt.print_rank(
-            "| Iter: {:6d} | loss: {:.4f} average_loss: {:.4f} | lr: {:.4e} scale: {:10.4f} | time: {:.4f}".format(
+            "| Iter: {:6d} | loss: {:.4f} average_loss: {:.4f} | grad_norm: {:.2f} | lr: {:.4e} scale: {:10.4f} | time: {:.4f}".format(
                 iteration,
                 global_loss,
                 avg_loss_recorder.value,
+                grad_norm,
                 lr_scheduler.current_lr,
                 optim_manager.loss_scale,
                 avg_time_recorder.value

@@ -2,7 +2,6 @@ from utils import *
 
 import torch
 import bmtrain as bmt
-import torch
 import random
 import copy
 

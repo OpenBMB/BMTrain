@@ -4,19 +4,21 @@ import random
 import torch.distributed as dist
 import os
 from .utils import print_dict
-import ctypes
 from .global_var import config
+from collections import OrderedDict
 
 from . import nccl
 from .synchronize import synchronize
 
+
 def init_distributed(
-        init_method : str = "env://",
-        seed : int = 0,
-        pipe_size: int = -1,
-        num_micro_batches: int = None,
-        tp_size : int = 1,
-    ):
+    init_method: str = "env://",
+    seed: int = 0,
+    pipe_size: int = -1,
+    num_micro_batches: int = None,
+    tp_size: int = 1,
+    sp_size: int = 1,
+):
     """Initialize distributed training.
     This function will initialize the distributed training, set the random seed and global configurations.
     It must be called before any other distributed functions.
@@ -47,14 +49,14 @@ def init_distributed(
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     rank = int(os.environ.get("RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    local_size = int(os.environ.get("LOCAL_WORLD_SIZE","1"))
+    local_size = int(os.environ.get("LOCAL_WORLD_SIZE", "1"))
     if "MASTER_ADDR" not in os.environ:
-        os.environ["MASTER_ADDR"]="localhost"
+        os.environ["MASTER_ADDR"] = "localhost"
     if "MASTER_PORT" not in os.environ:
-        os.environ["MASTER_PORT"]="10010"
+        os.environ["MASTER_PORT"] = "10010"
     addr = os.environ["MASTER_ADDR"]
     port = os.environ["MASTER_PORT"]
-    master = addr+":"+port
+    master = addr + ":" + port
     timeout = datetime.timedelta(seconds=1800)
     rendezvous_iterator = dist.rendezvous(
         init_method, rank, world_size, timeout=timeout
@@ -66,6 +68,7 @@ def init_distributed(
     torch.cuda.set_device(local_rank)
     config["initialized"] = True
     config["pipe_size"] = pipe_size if pipe_size > 0 else 1
+    config["sp_size"] = sp_size if sp_size > 0 else 1
     config["pipe_enabled"] = pipe_size > 0
     config["local_rank"] = local_rank
     config["local_size"] = local_size
@@ -73,6 +76,7 @@ def init_distributed(
     config["world_size"] = world_size
     config["calc_stream"] = torch.cuda.current_stream()
     config["load_stream"] = torch.cuda.Stream(priority=-1)
+    config["sp_stream"] = torch.cuda.Stream(priority=-1)
     config["tp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config["pp_comm_stream"] = torch.cuda.Stream(priority=-1)
     config['barrier_stream'] = torch.cuda.Stream()
@@ -81,7 +85,9 @@ def init_distributed(
     config["topology"] = topology(config)
     config["zero_rank"] = config['topology'].get_group_rank("zero")
     config["tp_rank"] = config['topology'].get_group_rank("tp")
+    config["sp_rank"] = config['topology'].get_group_rank("sp")
     config["tp_zero_rank"] = config['topology'].get_group_rank("tp_zero")
+    config["tp_sp_zero_rank"] = config['topology'].get_group_rank("tp_sp_zero")
     config["save_param_to_cpu"] = True
     cpus_this_worker = None
     
@@ -146,9 +152,16 @@ def init_distributed(
             unique_id = nccl.getUniqueId()
             store.set(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}", unique_id.hex() )
         unique_id = bytes.fromhex(store.get(f"PP_TP_ZERO_UNIQUE_ID{topo.pp_tp_zero_idx}").decode())
-        config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size//(config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id)
+        config['pp_tp_zero_comm'] = nccl.commInitRank(unique_id, world_size // (config['pipe_size'] * config['tp_size']), topo.pp_tp_zero_id)
 
-    config ['zero_comm'] = config['comm']
+    if config['sp_size'] > 1:
+        assert world_size % (config['pipe_size'] * config['tp_size'] * config['sp_size']) == 0, "The nums of GPUs must be divisible by the pipeline parallel size * tensor parallel size * sp size"
+        if topo.sp_id == 0:
+            unique_id = nccl.getUniqueId()
+            store.set(f"SP_UNIQUE_ID{topo.sp_idx}", unique_id.hex())
+        unique_id = bytes.fromhex(store.get(f"SP_UNIQUE_ID{topo.sp_idx}").decode())
+        config['sp_comm'] = nccl.commInitRank(unique_id, sp_size, topo.sp_id)
+    config['zero_comm'] = config['comm']
 
     for i in range(world_size):
         if i == rank:
@@ -157,47 +170,54 @@ def init_distributed(
                 "local_rank": local_rank,
                 "world_size": world_size,
                 "local_size": local_size,
-                "master" : master,
+                "master": master,
                 "device": torch.cuda.current_device(),
                 "cpus": cpus_this_worker 
             })
         synchronize()
 
+
 class topology:
-    def __init__(self,config):
+    def __init__(self, config):
         # pipe_idx is the idx of the pipeline in the group
         self.rank = config['rank']
         pp_size = config["pipe_size"]
         tp_size = config["tp_size"]
         world_size = config["world_size"]
-        assert world_size % (pp_size * tp_size) == 0, "The nums of GPUs must be divisible by the pipeline parallel size * tensor parallel size"
+        sp_size = config["sp_size"]
+        assert world_size % (pp_size * tp_size * sp_size) == 0, "The nums of GPUs must be divisible by the pipeline parallel size * tensor parallel size * sequence parallel size"
 
         dp_size = world_size // (pp_size * tp_size)
         config['tp_zero_size'] = dp_size
         config['zero_size'] = world_size // pp_size 
         self.stages = config['pipe_size']
-        
+
         stage_size = world_size // pp_size
-        for i in range(world_size):
-            self.pipe_idx = self.rank % stage_size 
-            self.stage_id = self.rank // stage_size 
-            self.tp_id = self.rank % tp_size
-            self.tp_idx = self.rank // tp_size 
-            #pp->zero
-            self.pp_zero_idx = self.stage_id 
-            self.pp_zero_id = self.pipe_idx 
-            #tp->zero
-            self.tp_zero_idx = self.tp_id 
-            self.tp_zero_id = self.tp_idx
-            #pp->tp->zero
-            self.pp_tp_zero_idx = self.stage_id * tp_size + self.tp_id 
-            self.pp_tp_zero_id = self.pipe_idx // tp_size
+        self.pipe_idx = self.rank % stage_size 
+        self.stage_id = self.rank // stage_size 
+        self.tp_sp_idx = self.rank // tp_size // sp_size
+        self.tp_sp_id = self.rank % (tp_size * sp_size)
+        self.tp_id = self.tp_sp_id % tp_size
+        self.tp_idx = self.tp_sp_idx * sp_size + self.tp_sp_id // tp_size
+        self.sp_id = self.tp_sp_id // tp_size
+        self.sp_idx = self.tp_sp_idx * tp_size + self.tp_sp_id % tp_size
+        #pp->zero
+        self.pp_zero_idx = self.stage_id 
+        self.pp_zero_id = self.pipe_idx 
+        #tp->zero
+        self.tp_zero_idx = self.tp_id 
+        self.tp_zero_id = self.tp_idx
+        #tp->sp->zero
+        self.tp_sp_zero_idx = self.tp_sp_id
+        self.tp_sp_zero_id = self.tp_sp_idx
+        #pp->tp->zero
+        self.pp_tp_zero_idx = self.stage_id * tp_size + self.tp_id 
+        self.pp_tp_zero_id = self.pipe_idx // tp_size
         #only zero
         self.zero_idx = 0
         self.zero_id = self.rank
 
-
-    def get_group_id(self,group_name):
+    def get_group_id(self, group_name):
         if group_name == "pipe":
             return self.pipe_idx
         elif group_name == "zero":
@@ -206,8 +226,12 @@ class topology:
             return self.tp_zero_idx
         elif group_name == "tp":
             return self.tp_idx
-        
-    def get_group_rank(self,group_name):
+        elif group_name == "sp":
+            return self.sp_idx
+        elif group_name == "tp_sp_zero":
+            return self.tp_sp_zero_idx
+
+    def get_group_rank(self, group_name):
         if group_name == "pipe":
             return self.stage_id
         elif group_name == "zero":
@@ -216,7 +240,11 @@ class topology:
             return self.tp_zero_id
         elif group_name == "tp":
             return self.tp_id
+        elif group_name == "sp":
+            return self.sp_id
+        elif group_name == "tp_sp_zero":
+            return self.tp_sp_zero_id
+
 
 def is_initialized() -> bool:
     return config["initialized"]
-

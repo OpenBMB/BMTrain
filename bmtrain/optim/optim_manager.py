@@ -5,6 +5,7 @@ from ..utils import print_rank
 from ..lr_scheduler.warmup import WarmupLRScheduler
 from .. import nccl
 from ..global_var import config
+import bmtrain as bmt
 
 def check_overflow(param_groups):
     # check overflow
@@ -66,7 +67,7 @@ class OptimManager:
         self.min_loss_scale = min_loss_scale
         self.max_loss_scale = max_loss_scale
         if grad_scale is None:
-            grad_scale = config['zero_size']
+            grad_scale = config['zero_size'] // config['tp_size']
         self.grad_scale = grad_scale
 
         self.optimizers = []
@@ -89,7 +90,7 @@ class OptimManager:
 
     def scale_loss(self, loss : torch.Tensor) -> torch.Tensor:
 
-        return loss * ( self.loss_scale / self.grad_scale ) # loss scale
+        return loss * ( self.loss_scale / self.grad_scale) # loss scale
 
     def backward(self, loss : torch.Tensor):
         """
@@ -209,7 +210,7 @@ class OptimManager:
 
     def state_dict(self, gather_opt=False) -> dict:
         return {
-            "optimizers": [opt.state_dict(gather_opt) for opt in self.optimizers],
+            "optimizers": [opt.state_dict(gather_opt) if isinstance(opt, bmt.optim.AdamOffloadOptimizer) else opt.state_dict() for opt in self.optimizers],
             "lr_schedulers": [lrs.state_dict() if lrs else None for lrs in self.lr_schedulers],
             "loss_scale": self.loss_scale,
             "loss_scale_enabled": self.loss_scale_enabled,

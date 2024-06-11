@@ -244,7 +244,7 @@ class FusedCrossEntropy(torch.nn.Module):
 
         if self.weight is not None:
             if self.weight.dim() != 1 or self.weight.size(0) != input.size(1):
-                raise ValueError("weight should be a 1D tensor of size C");
+                raise ValueError("weight should be a 1D tensor of size C")
             w = self.weight[torch.where(target==self.ignore_index, 0, target)].float()
             w[target==self.ignore_index] = 0
         else:

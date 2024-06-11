@@ -46,6 +46,26 @@ def dtype2nccl(dtype : torch.dtype) -> int:
         raise TypeError("Unsupport dtype %s" % dtype)
     return MAP[dtype]
 
+def dtype2byte(dtype : torch.dtype) -> int:
+    MAP = {
+        torch.int8: 1,
+        torch.uint8 : 1,
+        torch.int32 : 4,
+        torch.int : 4,
+        torch.int64 : 8,
+        torch.float16 : 2,
+        torch.half : 2,
+        torch.bfloat16 : 2,
+        torch.float32 : 4,
+        torch.float : 4,
+        torch.float64 : 8,
+        torch.double : 8,
+        torch.bool : 1
+    }
+    if dtype not in MAP:
+        raise TypeError("Unsupport dtype %s" % dtype)
+    return MAP[dtype]
+
 def op2nccl(
     op : Literal["sum", "prod", "max", "min", "avg"]
 ):
@@ -322,6 +342,70 @@ def reduceScatter(
         comm.ptr,
         torch.cuda.current_stream().cuda_stream
     )
+
+def all2all(
+        src : torch.storage._StorageBase,
+        dst : torch.storage._StorageBase,
+        comm : NCCLCommunicator
+    ):
+    """NCCL all2all (https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/p2p.html#all-to-all)
+    Args:
+        src (torch.storage._StorageBase): Source buffer.
+        dst (torch.storage._StorageBase): Destination buffer.
+        comm (NCCLCommunicator): NCCL communicator.
+    
+    The size of the dst buffer must be equal to the size of src buffer / world_size.
+    The dst buffer on rank `i` will contail the i-th block of the reduced result.
+    """
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.is_cuda and dst.is_cuda
+
+    sendbuff = src.data_ptr()
+    recvbuff = dst.data_ptr()
+    assert src.size() == dst.size(), "src and dst Buffer size not equal"
+    # assert src.size() % world_size == 0, "Buffer size cannot be evenly divided by world_size"
+    datatype = dtype2nccl(src.dtype)
+    databyte = dtype2byte(src.dtype)
+    datacount = src.size() 
+    databytes = datacount * databyte
+
+    C.ncclAll2All(sendbuff, recvbuff, datacount, databytes, datatype, comm.ptr, torch.cuda.current_stream().cuda_stream)
+
+
+def all2one(
+        src : torch.storage._StorageBase,
+        dst : torch.storage._StorageBase,
+        rank : int,
+        comm : NCCLCommunicator
+    ):
+    """NCCL all2one (https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/p2p.html?highlight=point#all-to-one-gather)
+    Args:
+        src (torch.storage._StorageBase): Source buffer.
+        dst (torch.storage._StorageBase): Destination buffer.
+        rank : all send to rank.
+        comm (NCCLCommunicator): NCCL communicator.
+    
+    The size of the dst buffer must be equal to the size of src buffer / world_size.
+    The dst buffer on rank `i` will contail the i-th block of the reduced result.
+    """
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.is_cuda and dst.is_cuda
+
+    sendbuff = src.data_ptr()
+    recvbuff = dst.data_ptr()
+    world_size = commCount(comm)
+    assert src.size() == dst.size(), "src and dst Buffer size not equal"
+    assert src.size() % world_size == 0, "Buffer size cannot be evenly divided by world_size"
+    datacount = src.size() // world_size
+    datatype = dtype2nccl(src.dtype)
+    databyte = dtype2byte(src.dtype)
+
+    groupStart()
+    if commRank(comm) == rank:
+        for r in range(world_size):
+            C.ncclRecv(recvbuff + r * datacount * databyte, datacount, datatype, r, comm.ptr, torch.cuda.current_stream().cuda_stream)
+    C.ncclSend(sendbuff + rank * datacount * databyte, datacount, datatype, rank, comm.ptr, torch.cuda.current_stream().cuda_stream)
+    groupEnd()
 
 def groupStart():
     """

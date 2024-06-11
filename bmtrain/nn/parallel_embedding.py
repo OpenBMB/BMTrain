@@ -16,7 +16,7 @@ class VPEmbedding(bmt.DistributedModule):
         embedding_size: int,
         dtype: torch.dtype = torch.half,
         init_mean: float = 0.0,
-        init_std: float = 1,
+        init_std: float = 0.02,
     ):
         super().__init__()
 
