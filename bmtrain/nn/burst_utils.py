@@ -90,9 +90,15 @@ def record_stream(*tensorlist):
     return tensorlist
 
 
-def inter_normal_attn(q, k, v, m_i, lse_i, acc_o, softmax_scale=1.0, mask_bias=None):
+def inter_normal_attn(q, k, v, m_i, lse_i, acc_o, softmax_scale=1.0, mask_bias=None, causal=False):
     m_i = m_i.to(q.dtype) if m_i is not None else None
     qk = q @ k.transpose(-2, -1) * softmax_scale
+    if causal:
+        tril_mask = torch.tril(
+            torch.ones((qk.size(-2), qk.size(-1)), device=qk.device, dtype=qk.dtype)
+        ) 
+        mask_bias = mask_bias * tril_mask if mask_bias is not None else tril_mask
+
     if mask_bias is not None:
         qk = torch.masked_fill(
             qk,
@@ -126,10 +132,15 @@ def inter_normal_attn(q, k, v, m_i, lse_i, acc_o, softmax_scale=1.0, mask_bias=N
 
 
 def inter_normal_attn_backward(
-    do, q, k, v, delta, lse, d_q, d_k, d_v, softmax_scale, mask_bias
+    do, q, k, v, delta, lse, d_q, d_k, d_v, softmax_scale, mask_bias, causal
 ):
     # ensure q,k,v with shape [b,n,s,d]
     qk = q @ k.transpose(-2, -1) * softmax_scale
+    if causal:
+        tril_mask = torch.tril(
+            torch.ones((qk.size(-2), qk.size(-1)), device=qk.device, dtype=qk.dtype)
+        ) 
+        mask_bias = mask_bias * tril_mask if mask_bias is not None else tril_mask
     if mask_bias is not None:
         qk = torch.masked_fill(
             qk,
@@ -152,10 +163,15 @@ def inter_normal_attn_backward(
 
 
 def inter_flash_attn_triton(
-    q, k, v, m_i, lse_i, acc_o, softmax_scale=1.0, mask_bias=None
+    q, k, v, m_i, lse_i, acc_o, softmax_scale=1.0, mask_bias=None, causal=False
 ):
     from .burst_lao import _flash_attn_forward
     b, s, n, d = q.shape
+    if causal:
+        tril_mask = torch.tril(
+            torch.ones((s, s), device=q.device, dtype=q.dtype)
+        ) 
+        mask_bias = mask_bias * tril_mask if mask_bias is not None else tril_mask
     if m_i is None:
         m_i = (
             -torch.ones((b, n, s), dtype=torch.float32, device="cuda") * torch.inf
@@ -181,10 +197,16 @@ def inter_flash_attn_triton(
 
 
 def inter_flash_attn_backward_triton(
-    do, q, k, v, delta, lse, dq, dk, dv, softmax_scale, mask_bias
+    do, q, k, v, delta, lse, dq, dk, dv, softmax_scale, mask_bias, causal
 ):
     from .burst_lao import _flash_attn_backward
     # dq_ = torch.empty_like(q)
+    b, s, n, d = q.shape
+    if causal:
+        tril_mask = torch.tril(
+            torch.ones((s, s), device=q.device, dtype=q.dtype)
+        ) 
+        mask_bias = mask_bias * tril_mask if mask_bias is not None else tril_mask
     dk_ = torch.empty_like(q)
     dv_ = torch.empty_like(q)
     _flash_attn_backward(
@@ -205,14 +227,14 @@ def inter_flash_attn_backward_triton(
     dv += dv_
 
 
-def inter_flash_cuda_fwd(q, k, v, o, lse, softmax_scale=1.0):
+def inter_flash_cuda_fwd(q, k, v, o, lse, softmax_scale=1.0, causal=False):
     o_i, _, _, _, _, lse_i, _, _ = _flash_attn_forward_cuda(
         q,
         k,
         v,
         0.0,
         softmax_scale,
-        causal=False,
+        causal=causal,
         window_size=(-1, -1),
         alibi_slopes=None,
         return_softmax=False,
@@ -225,7 +247,7 @@ def inter_flash_cuda_fwd(q, k, v, o, lse, softmax_scale=1.0):
     return o, lse
 
 
-def inter_flash_cuda_bwd(do, q, k, v, o, lse, dq, dk, dv, softmax_scale, mask_bias):
+def inter_flash_cuda_bwd(do, q, k, v, o, lse, dq, dk, dv, softmax_scale, causal):
     dk_ = torch.empty_like(q)
     dv_ = torch.empty_like(q)
     if len(o.shape) == 3:
@@ -253,7 +275,7 @@ def inter_flash_cuda_bwd(do, q, k, v, o, lse, dq, dk, dv, softmax_scale, mask_bi
             dv_,
             0.0,
             softmax_scale,
-            False,
+            causal,
             (-1, -1),
             None,
             False,
@@ -273,7 +295,7 @@ def inter_flash_cuda_bwd(do, q, k, v, o, lse, dq, dk, dv, softmax_scale, mask_bi
             dv_,
             0.0,
             softmax_scale,
-            False,
+            causal,
             (-1, -1),
             None,
             False,
