@@ -136,6 +136,12 @@ class OptimManager:
                     self.zero_grad()
                 return
         for optimizer, lr_scheduler in zip(self.optimizers, self.lr_schedulers):
+            try:
+                check_overflow(optimizer.param_groups)
+            except OverflowError:
+                has_overflow = True
+                print_rank("Gradient overflow, change scale from %lf to %lf" % (self.loss_scale, self.loss_scale / self.loss_scale_factor))
+                break
             if hasattr(optimizer, "_bmtrain_optimizer") and optimizer._bmtrain_optimizer:
                 optimizer.step(scale=self.loss_scale)
             else:
