@@ -2,6 +2,7 @@
 #include <cuda.h>
 #include <cuda_fp16.h>
 #include "bfloat16.cuh"
+#include <stdio.h>
 
 namespace {
 // blocks <n // 1024>,      threads<min(n, 1024)>
@@ -71,6 +72,35 @@ __global__ void adam_fp32_accum_bf16(
 #endif
 }
 
+__global__ void adam_fp32_accum_fp32(
+    int32_t n,
+    const float *g,        // (n)
+    float *m,        // (n)
+    float *v,        // (n)
+    float *param,   // (n)
+    float beta1,
+    float beta2,
+    float eps,
+    float lr,
+    float scale,
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2
+) {
+    int32_t col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (col < n) {
+        float local_g = g[col] / scale;
+        float local_m = beta1 * m[col] + (1 - beta1) * local_g;
+        float local_v = beta2 * v[col] + (1 - beta2) * local_g * local_g;
+        float local_p = param[col];
+        local_p = local_p - lr * local_m / bias_correction1 / (sqrtf(local_v / bias_correction2) + eps) - lr * weight_decay * local_p;
+        
+        param[col] = local_p;
+        v[col] = local_v;
+        m[col] = local_m;
+    }
+}
+
 }
 
 void adam_fp16_launcher(
@@ -123,4 +153,29 @@ void adam_bf16_launcher(
     dim3 block_size = dim3(threads, 1, 1);
     dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
     adam_fp32_accum_bf16<<<grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_bf16, m_ptr, v_fp32_ptr, param_fp32_ptr, param_bf16, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
+}
+
+void adam_fp32_launcher(
+    int n,
+    std::uintptr_t param_fp32,
+    std::uintptr_t g_fp32,
+    std::uintptr_t m_fp32,
+    std::uintptr_t v_fp32,
+    float beta1, float beta2,
+    float eps, float lr,
+    float scale,
+    float weight_decay,
+    float bias_correction1,
+    float bias_correction2,
+    uintptr_t stream
+) {
+    if (n <= 0) return;
+    auto g_ptr = reinterpret_cast<float*>(g_fp32);
+    auto m_ptr = reinterpret_cast<float*>(m_fp32);
+    auto param_fp32_ptr = reinterpret_cast<float*>(param_fp32);
+    auto v_fp32_ptr = reinterpret_cast<float*>(v_fp32);
+    int32_t threads = 1024;
+    dim3 block_size = dim3(threads, 1, 1);
+    dim3 grid_size = dim3((n + threads - 1) / threads, 1, 1);
+    adam_fp32_accum_fp32<<<grid_size, block_size, 0, reinterpret_cast<cudaStream_t>(stream)>>>(n, g_ptr, m_ptr, v_fp32_ptr, param_fp32_ptr, beta1, beta2, eps, lr, scale, weight_decay, bias_correction1, bias_correction2);
 }

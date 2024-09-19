@@ -6,8 +6,9 @@ PYBIND11_MODULE(C, m) {
     m.def("is_bf16_supported", &is_bf16_supported, "whether bf16 supported");
     m.def("has_nan_inf_fp16_launcher", &has_nan_inf_fp16_launcher, "has nan inf");
     m.def("has_nan_inf_bf16_launcher", &has_nan_inf_bf16_launcher, "has nan inf bf16");
-    m.def("adam_fp16_launcher", &adam_fp16_launcher, "adam function cpu");
-    m.def("adam_bf16_launcher", &adam_bf16_launcher, "adam function cpu");
+    m.def("adam_fp16_launcher", &adam_fp16_launcher, "adam function");
+    m.def("adam_bf16_launcher", &adam_bf16_launcher, "adam function");
+    m.def("adam_fp32_launcher", &adam_fp32_launcher, "adam function");
     m.def("adam_cpu_fp16_launcher", &adam_cpu_fp16_launcher, "adam function cpu");
     m.def("adam_cpu_bf16_launcher", &adam_cpu_bf16_launcher, "adam function cpu");
     m.def("cross_entropy_forward_fp16_launcher", &cross_entropy_forward_fp16_launcher, "cross entropy forward");

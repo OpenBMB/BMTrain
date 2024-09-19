@@ -57,9 +57,14 @@ def main(dtype):
     optim_manager.add_optimizer(opt4)
     optim_manager.add_optimizer(opt5)
 
+    # fp16 bmt.adam
+    # fp16 bmt.Offload
+    # fp32 torch.adam
+    # fp32 bmt.adam
+    # fp32 bmt.Offload
+
     for _ in range(100):
         optim_manager.zero_grad()
-
         for p1, p2, p3, p4, p5 in zip(model1.parameters(), model2.parameters(), model3.parameters(), model4.parameters(), model5.parameters()):
             grad = torch.randn_like(p1)
             p1.grad = grad.to(dtype)
@@ -81,7 +86,7 @@ def main(dtype):
             assert_lt(diff1, 1)
             assert_lt(diff2, 1)
             assert_lt(diff3, 1)
-            assert_eq(diff4, 0)
+            assert_lt(diff4, 0.001)
             assert_lt(diff5, 0.00001)
 
 if __name__ == "__main__":
