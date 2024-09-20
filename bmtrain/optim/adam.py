@@ -10,7 +10,6 @@ from copy import deepcopy
 from itertools import chain
 from collections import defaultdict
 
-
 class AdamOptimizer(torch.optim.Optimizer):
     """
     Adam optimizer support fp16 and bf16.
@@ -112,34 +111,21 @@ class AdamOptimizer(torch.optim.Optimizer):
                         grad = p.grad
 
                     if p.dtype == torch.float32:
-                        other_kwargs = {}
-                        if (
-                            "maximize"
-                            in inspect.signature(
-                                torch.optim._functional.adam
-                            ).parameters
-                        ):
-                            other_kwargs["maximize"] = False
-                        torch.optim._functional.adam(
-                            [p],
-                            [grad / scale],
-                            [state["exp_avg"]],
-                            [state["exp_avg_sq"]],
-                            [],
-                            (
-                                [state["step"]]
-                                if check_torch_version("1.12.0") < 0
-                                else [torch.tensor(state["step"])]
-                            ),
-                            amsgrad=False,
-                            beta1=group["betas"][0],
-                            beta2=group["betas"][1],
-                            lr=0.0 if state["step"] < self._hold_steps else group["lr"],
-                            weight_decay=group["weight_decay"],
-                            eps=group["eps"],
-                            **other_kwargs
+                        f = F.adam_fp32
+                        state["step"] += 1      
+                        f(
+                            p,  # fp32
+                            grad,  # fp32
+                            state["exp_avg"],  # fp32: m
+                            state["exp_avg_sq"],  # fp32: v
+                            group["betas"][0],
+                            group["betas"][1],
+                            group["eps"],
+                            0.0 if state["step"] < self._hold_steps else group["lr"],
+                            scale,
+                            group["weight_decay"],
+                            state["step"],
                         )
-                        state["step"] += 1
                     else:
                         f = F.adam_fp16 if p.dtype == torch.float16 else F.adam_bf16
                         state["step"] += 1
