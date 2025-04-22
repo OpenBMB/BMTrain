@@ -15,11 +15,15 @@ def make_distributed(model: torch.nn.Module):
     for kw in list(model._buffers.keys()):
         if model._buffers[kw] is not None:
             model._buffers[kw] = model._buffers[kw].cuda()
-
+    is_module_list = isinstance(model, torch.nn.ModuleList)
+    pre_module = None
     for kw in list(model._modules.keys()):
-        if isinstance(model, torch.nn.ModuleList):
+        if is_module_list:
             if not isinstance(model._modules[kw], Block):
                 model._modules[kw] = Block(model_wrapper_dispatch(model._modules[kw]))
+                if pre_module is not None:
+                    model._modules[kw].set_pre_module(pre_module)
+                pre_module = model._modules[kw]
         else:
             model._modules[kw] = model_wrapper_dispatch(model._modules[kw])
 

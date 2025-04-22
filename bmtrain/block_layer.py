@@ -311,8 +311,12 @@ class Block(torch.nn.Module):
         post_out = tuple(post_out)
         return post_out
 
-    def forward(self, *args):
+    def forward(self, *args, **kwargs):
+        signature = inspect.signature(self._module.forward)
+        bound_args = signature.bind(*args, **kwargs)
+        args = bound_args.args
         arg_list = self.pre_hook(*args)
+
 
         if self.all_input_no_grad and not self.all_param_no_grad:
             placeholder = torch.tensor([], requires_grad=torch.is_grad_enabled())
