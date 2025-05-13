@@ -70,14 +70,14 @@ jobs:
     - name: Download source distribution
       uses: actions/download-artifact@v4
       with:
-        path: dist
-        pattern: source_dist/*.tar.gz
+        path: source_dist
+        name: source_dist
 
     - name: Combine all wheels into a single directory
       run: |
         mkdir -p dist
         find wheels -name '*.whl' -exec mv {} dist/ \;
-        find dist -name '*.tar.gz' -exec mv {} dist/ \;
+        find source_dist -name '*.tar.gz' -exec mv {} dist/ \;
 
     - name: Archive distribution files
       uses: actions/upload-artifact@v4
