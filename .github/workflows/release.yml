@@ -40,7 +40,7 @@ jobs:
           dist/*.tar.gz
           dist/*.whl
         prerelease: false
-        name: "BMTrain v0.2.3"
+        name: "BMTrain"
         token: ${{ secrets.RELEASE_TOKEN }}
         tag_name: ${{ steps.create_release.outputs.tag }}
       env:
