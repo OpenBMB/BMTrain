@@ -3,7 +3,6 @@ import torch
 from ..loss._function import has_inf_nan
 from ..utils import print_rank
 from ..lr_scheduler.warmup import WarmupLRScheduler
-from .. import nccl
 from ..global_var import config
 
 def check_overflow(param_groups):
@@ -16,7 +15,7 @@ def check_overflow(param_groups):
                     # Pass a 1-element slice to keep the tensor contiguous with nonzero numel.
                     has_inf_nan(p.grad, has_inf_or_nan[0:1])
     if "comm" in config:
-        nccl.allReduce(has_inf_or_nan, has_inf_or_nan, "max", config["comm"])
+        config["comm"].all_reduce(has_inf_or_nan, has_inf_or_nan, "max")
 
     if has_inf_or_nan[0] > 0:
         raise OverflowError("Gradient overflow")
@@ -188,7 +187,7 @@ class OptimManager:
         if norm_type == 'inf':
             # unsqueeze to 1-element tensor so nccl.allReduce gets a valid buffer.
             total_norm_cuda = max(g.data.abs().max() for g in grads).detach().unsqueeze(0)
-            nccl.allReduce(total_norm_cuda, total_norm_cuda, "max", config["comm"])
+            config["comm"].all_reduce(total_norm_cuda, total_norm_cuda, "max")
             total_norm = total_norm_cuda[0]
         else:
             norm_type = float(norm_type)
@@ -196,7 +195,7 @@ class OptimManager:
             for index, g in enumerate(grads):
                 param_norm = g.data.float().norm(norm_type)
                 total_norm_cuda += param_norm ** norm_type
-            nccl.allReduce(total_norm_cuda, total_norm_cuda, "sum", config["comm"])
+            config["comm"].all_reduce(total_norm_cuda, total_norm_cuda, "sum")
             total_norm = total_norm_cuda[0] ** (1. / norm_type)
         # total_norm = total_norm / scale
         # clip_coef = float(max_norm) / (total_norm + eps)

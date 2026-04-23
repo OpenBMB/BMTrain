@@ -1,7 +1,6 @@
 import torch
 from ..global_var import config
 from . import _function as F
-from .. import nccl
 # torch.optim._functional was removed in some PyTorch versions; fall back to manual Adam if unavailable.
 try:
     import torch.optim._functional as _optim_functional

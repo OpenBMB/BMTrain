@@ -1,7 +1,6 @@
 from typing import Optional
 import torch
 from .. import debug
-from .. import nccl
 from ..global_var import config
 from ..store import broadcast_object
 from ..distributed import broadcast
@@ -229,8 +228,8 @@ class InspectTensor:
                 info = torch.empty(2, dtype=x.dtype, device=x.device)
                 info[0] = x.mean()
                 info[1] = x.var()
-                nccl.allReduce(info, info, "sum", comm)
-                info = info / nccl.commCount(comm)
+                comm.all_reduce(info, info, "sum")
+                info = info / comm.world_size
                 x_mean = info[0].cpu().item()
                 x_std = math.sqrt(info[1].cpu().item())
                 grad_mean = None
@@ -242,8 +241,8 @@ class InspectTensor:
                 info[1] = x.var()
                 info[2] = x.grad.mean()
                 info[3] = x.grad.var()
-                nccl.allReduce(info, info, "sum", comm)
-                info = info / nccl.commCount(comm)
+                comm.all_reduce(info, info, "sum")
+                info = info / comm.world_size
                 x_mean = info[0].cpu().item()
                 x_std = math.sqrt(info[1].cpu().item())
                 grad_mean = info[2].cpu().item()
@@ -251,7 +250,7 @@ class InspectTensor:
 
             info[0] = x.max()
             info[1] = -x.min()
-            nccl.allReduce(info, info, "max", comm)
+            comm.all_reduce(info, info, "max")
             x_max = info[0].cpu().item()
             x_min = -info[1].cpu().item()
 

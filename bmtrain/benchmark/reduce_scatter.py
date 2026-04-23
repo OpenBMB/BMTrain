@@ -1,4 +1,3 @@
-from .. import nccl
 from .shape import SHAPES
 from ..global_var import config
 from ..utils import round_up, print_rank
@@ -18,7 +17,7 @@ def reduce_scatter():
         end_evt = torch.cuda.Event(enable_timing=True)
 
         current_stream.record_event(start_evt)
-        nccl.reduceScatter(global_tensor.view(-1), partition_tensor.view(-1), 'avg', config['comm'])
+        config['comm'].reduce_scatter(global_tensor.view(-1), partition_tensor.view(-1), 'avg')
         current_stream.record_event(end_evt)
         current_stream.synchronize()
         time_usage = start_evt.elapsed_time(end_evt)

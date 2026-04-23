@@ -3,13 +3,12 @@ from typing import Dict, Iterable, Iterator, Union, List
 from .utils import round_up, tp_split_tensor
 from .global_var import config
 import torch
-from . import nccl
 from .parameter import DistributedParameter, OpAllGather
 from .zero_context import ZeroContext
 from . import hook_func
 import inspect
 from torch.utils.checkpoint import checkpoint
-from .distributed.ops import send_tensor_inplace, recv_tensor_inplace
+from .distributed import send_tensor_inplace, recv_tensor_inplace
 
 
 def _get_param_kw(param: DistributedParameter):
@@ -48,7 +47,7 @@ class Block(torch.nn.Module):
         inner_module: torch.nn.Module,
         use_checkpoint=True,
         zero_level=3,
-        initialized=False,
+        initialize_param=False,
         mode="BLOCK",
     ):
         super().__init__()
@@ -129,8 +128,8 @@ class Block(torch.nn.Module):
         # intialize storage buffers
         for kw, val in self._storage_info.items():
             comm = val["zero_comm"]
-            world_size = nccl.commCount(comm)
-            rank = nccl.commRank(comm)
+            world_size = comm.world_size
+            rank = comm.rank
             val["world_size"] = world_size
             partition_size = (
                 round_up(val["total"], val["world_size"]) // val["world_size"]

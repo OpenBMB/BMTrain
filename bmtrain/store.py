@@ -5,7 +5,6 @@ from .pipe_layer import PipelineTransformerBlockList
 from .block_layer import TransformerBlockList
 from .global_var import config
 from .block_layer import Block
-from . import nccl
 import io, pickle
 from typing import Mapping
 import threading
@@ -186,40 +185,20 @@ def allgather_objects(obj):
         return ret
 
 def broadcast_object(obj, comm, src = 0):
-    if nccl.commRank(comm) == src:
+    if comm.rank == src:
         f = io.BytesIO()
         _pickler(f).dump(obj)
         byte_tensor = torch.frombuffer(bytearray(f.getvalue()), dtype=torch.uint8).cuda()
         local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long, device="cuda")
 
-        nccl.broadcast(
-            local_size,
-            local_size,
-            src,
-            comm
-        )
-        nccl.broadcast(
-            byte_tensor,
-            byte_tensor,
-            src,
-            comm
-        )
+        comm.broadcast(local_size, local_size, src)
+        comm.broadcast(byte_tensor, byte_tensor, src)
     else:
         local_size = torch.tensor([0], dtype=torch.long, device="cuda")
-        nccl.broadcast(
-            local_size,
-            local_size,
-            src,
-            comm
-        )
+        comm.broadcast(local_size, local_size, src)
         byte_tensor_size = local_size[0].item()
         byte_tensor = torch.empty(int(byte_tensor_size), dtype=torch.uint8, device="cuda")
-        nccl.broadcast(
-            byte_tensor,
-            byte_tensor,
-            src,
-            comm
-        )
+        comm.broadcast(byte_tensor, byte_tensor, src)
         buf = byte_tensor.cpu().numpy().tobytes()
         obj = _unpickler(io.BytesIO(buf)).load()
     return obj
@@ -241,18 +220,12 @@ class DistributedTensorWrapper:
             else:
                 input_param = input_param.cuda().contiguous()
 
-            nccl.broadcast(
-                input_param.view(-1),
-                output_param.view(-1),
-                0,
-                config['comm']
+            config['comm'].broadcast(
+                input_param.view(-1), output_param.view(-1), 0
             )
         else:
-            nccl.broadcast(
-                output_param.view(-1),
-                output_param.view(-1),
-                0,
-                config['comm']
+            config['comm'].broadcast(
+                output_param.view(-1), output_param.view(-1), 0
             )
         return output_param
     
@@ -288,12 +261,7 @@ class DistributedStateDictWrapper(Mapping):
             tmp_shape[1] = dtype_idx
             tmp_shape[2:2 + shape_list.size(0)] = shape_list
 
-        nccl.broadcast(
-            tmp_shape,
-            tmp_shape,
-            0,
-            config['comm']
-        )
+        config['comm'].broadcast(tmp_shape, tmp_shape, 0)
 
         shape_list_size = tmp_shape[0].item()
         dtype_idx = tmp_shape[1].item()
@@ -335,13 +303,18 @@ def load(model : torch.nn.Module, file_name : str, strict : bool = True, load_ga
     Example:
         >>> bmtrain.load(model, "model.pt", strict=True)
     """
-    if config['rank'] == 0:
-        # weights_only=False: BMTrain checkpoints may contain non-tensor objects (e.g. metadata).
-        state_dict = DistributedStateDictWrapper(torch.load(file_name, weights_only=False))
+    tmp = config['load_param_gather']
+    config['load_param_gather'] = load_gather
+    if load_gather:
+        if config['rank'] == 0:
+            # weights_only=False: BMTrain checkpoints may contain non-tensor objects (e.g. metadata).
+            state_dict = DistributedStateDictWrapper(torch.load(file_name, weights_only=False))
+        else:
+            state_dict = DistributedStateDictWrapper({})
     else:
         if "rank" not in file_name:
             file_name = f"{file_name}_rank_{bmt.rank()}"
-        state_dict = torch.load(file_name)
+        state_dict = torch.load(file_name, weights_only=False)
 
     ret = model.load_state_dict(
         state_dict,

@@ -3,7 +3,7 @@ from ..store import broadcast_object
 from ..pipe_layer import PipelineTransformerBlockList
 from ..block_layer import Block
 from ..parameter import DistributedParameter
-from .. import nccl
+from ..comm import groupcall
 from ..global_var import config
 import fnmatch
 
@@ -15,17 +15,9 @@ def _gather_value(value : torch.Tensor, partition_size, origin_size):
     if value.numel() != partition_size:
         tmp_buf = torch.zeros(partition_size, dtype=value.dtype, device=value.device)
         tmp_buf[:value.numel()] = value[:]
-        nccl.allGather(
-            tmp_buf,
-            global_buffer,
-            config['comm']
-        )
+        config['comm'].all_gather(tmp_buf, global_buffer)
     else:
-        nccl.allGather(
-            value,
-            global_buffer,
-            config['comm']
-        )
+        config['comm'].all_gather(value, global_buffer)
 
     output_tensor = global_buffer[:origin_size.numel()].view(origin_size)
 
@@ -62,21 +54,15 @@ def inspect_pipeline_transformer_block_list(pipe_model: PipelineTransformerBlock
                         dtype=local_param.dtype, device=local_param.device
                     )
             
-            nccl.groupStart()
-            for kw, val in model._storage_info.items():
-                nccl.allGather(
-                    model._storage_params[kw],
-                    _param_buffer[kw],
-                    val["zero_comm"]
-                )
-                if model._storage_params[kw].grad is not None:
-                    nccl.allGather(
-                        model._storage_params[kw].grad,
-                        _grad_buffer[kw],
-                        val["zero_comm"]
+            with groupcall():
+                for kw, val in model._storage_info.items():
+                    val["zero_comm"].all_gather(
+                        model._storage_params[kw], _param_buffer[kw]
                     )
-
-            nccl.groupEnd()
+                    if model._storage_params[kw].grad is not None:
+                        val["zero_comm"].all_gather(
+                            model._storage_params[kw].grad, _grad_buffer[kw]
+                        )
             for param in model._param_info:
                 abs_name = prefix + param["name"]
                 if fnmatch.fnmatch(abs_name, param_name):
@@ -145,21 +131,15 @@ def inspect_block(model : Block, param_name : str, prefix : str = ''):
                 dtype=local_param.dtype, device=local_param.device
             )
     
-    nccl.groupStart()
-    for kw, val in model._storage_info.items():
-        nccl.allGather(
-            model._storage_params[kw],
-            _param_buffer[kw],
-            config["comm"]
-        )
-        if model._storage_params[kw].grad is not None:
-            nccl.allGather(
-                model._storage_params[kw].grad,
-                _grad_buffer[kw],
-                config["comm"]
+    with groupcall():
+        for kw, val in model._storage_info.items():
+            config["comm"].all_gather(
+                model._storage_params[kw], _param_buffer[kw]
             )
-
-    nccl.groupEnd()
+            if model._storage_params[kw].grad is not None:
+                config["comm"].all_gather(
+                    model._storage_params[kw].grad, _grad_buffer[kw]
+                )
     ret = []
     for param in model._param_info:
         abs_name = prefix + param["name"]

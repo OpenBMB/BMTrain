@@ -1,25 +1,33 @@
-import torch
-from . import distributed, nccl
-from .global_var import config
 import warnings
 from typing import Optional
 
+import torch
+import torch.distributed as dist
+
+from . import distributed
+from .comm import Communicator
+from .global_var import config
+
+
 def synchronize(comm=None):
     """
-    Synchronize all the workers across all nodes. (both CPU and GPU are synchronized)
+    Synchronize all the workers across all nodes. (both CPU and GPU are
+    synchronized)
     """
     if not config["initialized"]:
         raise RuntimeError("BMTrain is not initialized")
 
+    group = (comm or config["comm"]).group
     with torch.cuda.stream(config["barrier_stream"]):
-        barrier = torch.tensor([1.0], dtype=torch.float32, device="cuda")
-        nccl.allReduce(barrier, barrier, "sum", config["comm"])
+        barrier = torch.ones(1, device="cuda")
+        dist.all_reduce(barrier, group=group)
     config["barrier_stream"].synchronize()
 
 
 def wait_loader():
     """
-    Clac_stream (normally current stream) wait latest loader event, and set a new one.
+    Calc_stream (normally current stream) wait latest loader event, and set
+    a new one.
     """
     if not config["initialized"]:
         raise RuntimeError("BMTrain is not initialized")
@@ -28,7 +36,7 @@ def wait_loader():
     config["calc_stream"].record_event(config["load_event"])
 
 
-def sum_loss(loss: torch.Tensor, comm: Optional[nccl.NCCLCommunicator] = None):
+def sum_loss(loss: torch.Tensor, comm: Optional[Communicator] = None):
     """
     Sum the loss across all workers.
 
@@ -37,7 +45,8 @@ def sum_loss(loss: torch.Tensor, comm: Optional[nccl.NCCLCommunicator] = None):
     if comm is None:
         comm = config["comm"]
     warnings.warn(
-        "bmtrain.sum_loss is deprecated and will be removed in later version. Use bmtrain.distributed.all_reduce instead.",
+        "bmtrain.sum_loss is deprecated and will be removed in later version. "
+        "Use bmtrain.distributed.all_reduce instead.",
         DeprecationWarning,
     )
 
@@ -49,7 +58,8 @@ def gather_result(result: torch.Tensor):
     Gather result across all workers.
     """
     warnings.warn(
-        "bmtrain.gather_result is deprecated and will be removed in later version. Use bmtrain.distributed.all_gather instead.",
+        "bmtrain.gather_result is deprecated and will be removed in later "
+        "version. Use bmtrain.distributed.all_gather instead.",
         DeprecationWarning,
     )
     # Clone sliced or non-contiguous tensors so data_ptr is at offset 0 for NCCL.
@@ -65,7 +75,7 @@ def gather_result(result: torch.Tensor):
         device=result.device,
         dtype=result.dtype,
     )
-    nccl.allGather(result, ret, config["comm"])
+    config["comm"].all_gather(result, ret)
     if output_cuda:
         return ret
     else:

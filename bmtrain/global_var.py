@@ -18,7 +18,7 @@ class ConfigMap(TypedDict):
     gradient_inspect : bool
     initialized : bool
 
-    comm : 'NCCLCommunicator'
+    comm : 'comm.Communicator'
 
 config = ConfigMap(rank=0, local_rank=0, world_size=1, initialized=False)
 

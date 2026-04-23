@@ -7,7 +7,6 @@ import torch
 
 from .distributed import all_gather, broadcast, all_reduce, send_tensor, recv_tensor 
 from .global_var import config
-from . import nccl
 from .zero_context import (
         ZeroContext
 )

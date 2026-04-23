@@ -1,4 +1,3 @@
-from .. import nccl
 from .shape import SHAPES
 from ..global_var import config
 from ..utils import round_up, print_rank
@@ -17,7 +16,7 @@ def all_reduce():
         end_evt = torch.cuda.Event(enable_timing=True)
 
         current_stream.record_event(start_evt)
-        nccl.allReduce(partition_tensor.storage(), global_tensor.storage(),"sum", config['comm'])
+        config['comm'].all_reduce(partition_tensor, global_tensor, "sum")
         current_stream.record_event(end_evt)
         current_stream.synchronize()
         time_usage = start_evt.elapsed_time(end_evt)

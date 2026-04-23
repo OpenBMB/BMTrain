@@ -2,7 +2,6 @@ from typing import Callable, Iterable, Optional
 import torch
 from .utils import round_up
 from .global_var import config
-from . import nccl
 from .distributed import all_gather
 
 
@@ -47,8 +46,8 @@ class DistributedParameter(torch.nn.Parameter):
             comm = config["tp_zero_comm"]
         else:
             comm = config["zero_comm"]
-        world_size = nccl.commCount(comm)
-        rank = nccl.commRank(comm)
+        world_size = comm.world_size
+        rank = comm.rank
         cuda_storage_size = round_up(num_of_elements, world_size) // world_size
 
         original_shape = data.size()
@@ -171,7 +170,7 @@ class OpAllGather(torch.autograd.Function):
     def forward(ctx, value: DistributedParameter):
         assert isinstance(value, DistributedParameter)
         comm = value._zero_comm
-        world_size = nccl.commCount(comm)
+        world_size = comm.world_size
         ctx.comm = comm
         ctx.world_size = world_size
 
@@ -183,7 +182,7 @@ class OpAllGather(torch.autograd.Function):
         local_buffer = torch.empty(partition_size, dtype=value.dtype, device="cuda")
         local_buffer[:value.numel()].copy_(value)
 
-        nccl.allGather(local_buffer, global_buffer, comm)
+        comm.all_gather(local_buffer, global_buffer)
 
         output_tensor = global_buffer[:value._original_shape.numel()].view(value._original_shape)
 
@@ -208,7 +207,7 @@ class OpAllGather(torch.autograd.Function):
             grad_flat = grad_flat[:expected_size].contiguous()
 
         grad_partition = torch.empty(ctx.partition_size, dtype=grad_output.dtype, device=grad_output.device)
-        nccl.reduceScatter(grad_flat, grad_partition, "sum", ctx.comm)
+        ctx.comm.reduce_scatter(grad_flat, grad_partition, "sum")
         return grad_partition[:ctx.tensor_size]
 
 

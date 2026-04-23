@@ -1,5 +1,5 @@
 import torch
-from . import nccl
+from .comm import groupcall
 from .global_var import config
 from .synchronize import wait_loader
 
@@ -57,16 +57,14 @@ class ZeroContext:
                         device=local_param.device,
                     )
             if flag != 2:
-                nccl.groupStart()
-                for kw, val in self.block._storage_info.items():
-                    if val["world_size"] == 1:
-                        continue
-                    nccl.allGather(
-                        self.block._storage_params[kw],
-                        self._param_buffer[kw],
-                        val["zero_comm"],
-                    )
-                nccl.groupEnd()
+                with groupcall():
+                    for kw, val in self.block._storage_info.items():
+                        if val["world_size"] == 1:
+                            continue
+                        val["zero_comm"].all_gather(
+                            self.block._storage_params[kw],
+                            self._param_buffer[kw],
+                        )
 
         current_stream = torch.cuda.current_stream()
         current_stream.wait_stream(config["load_stream"])
@@ -86,6 +84,19 @@ class ZeroContext:
             numel = shape.numel()
 
             if self.block._storage_info[kw_name]["world_size"] == 1:
+                # No ZeRO sharding: the (single) storage_params buffer already
+                # contains the full flat tensor. We still need to bind
+                # ``param.data`` (and grad) to it with the original shape.
+                storage = self.block._storage_params[kw_name]
+                param["parameter"].data = storage.view(-1)[offset:offset+numel].view(shape)
+                if (
+                    requires_grad
+                    and param["parameter"].requires_grad
+                    and storage.grad is not None
+                ):
+                    param["parameter"].grad = (
+                        storage.grad.view(-1)[offset:offset+numel].view(shape)
+                    )
                 continue
 
             if flag != 2:
@@ -130,17 +141,15 @@ class ZeroContext:
             config["load_stream"].wait_stream(current_stream)
 
             with torch.cuda.stream(config["load_stream"]):
-                nccl.groupStart()
-                for kw, val in self.block._storage_info.items():
+                with groupcall():
+                    for kw, val in self.block._storage_info.items():
 
-                    if local_param.requires_grad:
-                        nccl.reduceScatter(
-                            self._grad_buffer[kw],
-                            local_param.grad,
-                            "sum",
-                            val["zero_comm"],
-                        )
-                nccl.groupEnd()
+                        if local_param.requires_grad:
+                            val["zero_comm"].reduce_scatter(
+                                self._grad_buffer[kw],
+                                local_param.grad,
+                                "sum",
+                            )
 
             for kw in self._grad_buffer.keys():
                 self._grad_buffer[kw].record_stream(config["load_stream"])

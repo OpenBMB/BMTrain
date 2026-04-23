@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 from bmtrain.global_var import config
 from ..distributed import all_gather, all_reduce
-from .. import nccl
 import bmtrain as bmt
 from enum import Enum
 
@@ -90,8 +89,8 @@ def async_reduce_scatter_linear_func(input, weight, bias, async_chunks=2):
             shape = list(out.shape)
             shape[0] = shape[0] // config["tp_size"]
             outputs[i] = torch.empty(shape, dtype=out.dtype, device=out.device)
-            nccl.reduceScatter(
-                out.contiguous().view(-1), outputs[i].view(-1), "sum", config["tp_comm"]
+            config["tp_comm"].reduce_scatter(
+                out.contiguous().view(-1), outputs[i].view(-1), "sum"
             )
 
     current_stream.wait_stream(comm_stream)
@@ -254,7 +253,9 @@ class OpParallelLinear(torch.autograd.Function):
             return out
 
         if reduce_output_type == ReduceType.ALL_REDUCE:
-            nccl.allReduce(out.contiguous().view(-1), out.view(-1), "sum", config["tp_comm"])
+            config["tp_comm"].all_reduce(
+                out.contiguous().view(-1), out.view(-1), "sum"
+            )
             return out
         else:
             assert False, "no support reduce type{}".format(reduce_output_type)
@@ -308,21 +309,19 @@ class OpParallelLinear(torch.autograd.Function):
                     config["tp_comm_stream"].wait_stream(current_stream)
                     grad_input.record_stream(config["tp_comm_stream"])
                     grad_all_input.record_stream(config["tp_comm_stream"])
-                    nccl.reduceScatter(
+                    config["tp_comm"].reduce_scatter(
                         grad_all_input.contiguous().view(-1),
                         grad_input.view(-1),
                         "sum",
-                        config["tp_comm"],
                     )
             elif ctx.reduce_output_type is None:
                 with torch.cuda.stream(config["tp_comm_stream"]):
                     config["tp_comm_stream"].wait_stream(current_stream)
                     grad_input.record_stream(config["tp_comm_stream"])
-                    nccl.allReduce(
+                    config["tp_comm"].all_reduce(
                         grad_all_input.contiguous().view(-1),
                         grad_all_input.view(-1),
                         "sum",
-                        config["tp_comm"],
                     )
                     grad_input = grad_all_input
             else:

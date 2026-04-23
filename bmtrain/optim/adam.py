@@ -8,7 +8,6 @@ try:
 except ImportError:
     _has_torch_adam = False
 from .. import C
-from .. import nccl
 import inspect
 from copy import deepcopy
 from itertools import chain

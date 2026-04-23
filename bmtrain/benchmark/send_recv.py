@@ -1,4 +1,4 @@
-from .. import nccl
+from ..comm import groupcall
 from .shape import SHAPES
 from ..global_var import config
 from ..utils import print_rank
@@ -16,12 +16,12 @@ def send_recv():
         end_evt = torch.cuda.Event(enable_timing=True)
 
         current_stream.record_event(start_evt)
-        nccl.groupStart()
-        if config['rank'] in [0,2,4,6]:
-            nccl.send(send_buffer.view(-1), config['rank']+1, config['comm'])
-        else:
-            nccl.recv(recv_buffer.view(-1), config['rank']-1, config['comm'])
-        nccl.groupEnd()
+        with groupcall():
+            comm = config['comm']
+            if config['rank'] in [0,2,4,6]:
+                comm.send(send_buffer.view(-1), config['rank']+1)
+            else:
+                comm.recv(recv_buffer.view(-1), config['rank']-1)
         current_stream.record_event(end_evt)
         current_stream.synchronize()
         time_usage = start_evt.elapsed_time(end_evt)

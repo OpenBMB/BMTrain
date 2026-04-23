@@ -1,8 +1,9 @@
 from .utils import print_block, print_dict, print_rank, print_rank_pp, see_memory, load_nccl_pypi
 try:
-    from . import nccl
-except:
     load_nccl_pypi()
+except Exception:
+    pass
+from . import comm
 from .global_var import config, world_size, rank
 from .init import init_distributed
 
