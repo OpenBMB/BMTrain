@@ -229,7 +229,7 @@ class InspectTensor:
                 info = torch.empty(2, dtype=x.dtype, device=x.device)
                 info[0] = x.mean()
                 info[1] = x.var()
-                nccl.allReduce(info.storage(), info.storage(), "sum", comm)
+                nccl.allReduce(info, info, "sum", comm)
                 info = info / nccl.commCount(comm)
                 x_mean = info[0].cpu().item()
                 x_std = math.sqrt(info[1].cpu().item())
@@ -242,7 +242,7 @@ class InspectTensor:
                 info[1] = x.var()
                 info[2] = x.grad.mean()
                 info[3] = x.grad.var()
-                nccl.allReduce(info.storage(), info.storage(), "sum", comm)
+                nccl.allReduce(info, info, "sum", comm)
                 info = info / nccl.commCount(comm)
                 x_mean = info[0].cpu().item()
                 x_std = math.sqrt(info[1].cpu().item())
@@ -251,7 +251,7 @@ class InspectTensor:
 
             info[0] = x.max()
             info[1] = -x.min()
-            nccl.allReduce(info.storage(), info.storage(), "max", comm)
+            nccl.allReduce(info, info, "max", comm)
             x_max = info[0].cpu().item()
             x_min = -info[1].cpu().item()
 

@@ -101,34 +101,34 @@ def commRank(comm : NCCLCommunicator):
     """
     return C.ncclCommUserRank(comm.ptr)
 def allReduce(
-        src : torch.storage._StorageBase,
-        dst : torch.storage._StorageBase,
+        src : torch.Tensor,
+        dst : torch.Tensor,
         op : Literal["sum", "prod", "max", "min", "avg"],
         comm : NCCLCommunicator
     ):
     """NCCL API: `ncclAllReduce <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/colls.html#ncclallreduce>`_
 
     Args:
-        src (torch.storage._StorageBase): Source buffer.
-        dst (torch.storage._StorageBase): Destination buffer.
+        src (torch.Tensor): Source tensor.
+        dst (torch.Tensor): Destination tensor.
         op (Literal["sum", "prod", "max", "min", "avg"]): Reduction operation.
         comm (NCCLCommunicator): NCCL communicator.
     
-    The src and dst buffers must be the same size, type and on the same device.
+    The src and dst tensors must be the same size, type and on the same device.
 
-    If src == dst, the operation is performed in-place.
+    If src is dst, the operation is performed in-place.
 
     """
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()
     recvbuff = dst.data_ptr()
-    count = src.size()
+    count = src.numel()
     datatype = dtype2nccl(src.dtype)
     operator = op2nccl(op)
 
-    assert src.size() == dst.size(), "Buffer size not aligned"
+    assert src.numel() == dst.numel(), "Buffer size not aligned"
     C.ncclAllReduce(
         sendbuff,
         recvbuff,
@@ -138,20 +138,20 @@ def allReduce(
         comm.ptr,
         torch.cuda.current_stream().cuda_stream
     )
-def send(src : torch.storage._StorageBase,
+def send(src : torch.Tensor,
          peer : int,
          comm : NCCLCommunicator
     ):
     """NCCL API: `ncclsend <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/p2p.html#ncclsend>`_
 
         Args:
-            src (torch.storage._StorageBase): Source buffer.
+            src (torch.Tensor): Source tensor.
             peer (int): rank peer needs to call ncclRecv
             comm (NCCLCommunicator): NCCL communicator.
     """
 
     sendbuff = src.data_ptr()
-    count = src.size()
+    count = src.numel()
     datatype = dtype2nccl(src.dtype)
     C.ncclSend(
         sendbuff,
@@ -161,12 +161,12 @@ def send(src : torch.storage._StorageBase,
         comm.ptr,
         torch.cuda.current_stream().cuda_stream
     )
-def recv(dst : torch.storage._StorageBase,
+def recv(dst : torch.Tensor,
          peer : int,
          comm : NCCLCommunicator
         ):
     recvbuff = dst.data_ptr()
-    count = dst.size()
+    count = dst.numel()
     datatype = dtype2nccl(dst.dtype)
     C.ncclRecv(
         recvbuff,
@@ -178,34 +178,34 @@ def recv(dst : torch.storage._StorageBase,
     )
     
 def broadcast(
-        src : torch.storage._StorageBase,
-        dst : torch.storage._StorageBase,
+        src : torch.Tensor,
+        dst : torch.Tensor,
         root : int,
         comm : NCCLCommunicator
     ):
     """NCCL API: `ncclBroadcast <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/colls.html#ncclbroadcast>`_
 
     Args:
-        src (torch.storage._StorageBase): Source buffer.
-        dst (torch.storage._StorageBase): Destination buffer.
+        src (torch.Tensor): Source tensor.
+        dst (torch.Tensor): Destination tensor.
         root (int): Rank of the root.
         comm (NCCLCommunicator): NCCL communicator.
     
-    The src and dst buffers must be the same size, type and on the same device.
+    The src and dst tensors must be the same size, type and on the same device.
 
-    If src == dst, the operation is performed in-place.
+    If src is dst, the operation is performed in-place.
 
     """
 
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()
     recvbuff = dst.data_ptr()
-    count = src.size()
+    count = src.numel()
     datatype = dtype2nccl(src.dtype)
 
-    assert dst.size() == src.size(), "Buffer size not aligned"
+    assert dst.numel() == src.numel(), "Buffer size not aligned"
     C.ncclBroadcast(
         sendbuff, 
         recvbuff, 
@@ -217,8 +217,8 @@ def broadcast(
     )
 
 def reduce(
-        src : torch.storage._StorageBase,
-        dst : torch.storage._StorageBase,
+        src : torch.Tensor,
+        dst : torch.Tensor,
         op : Literal["sum", "prod", "max", "min", "avg"],
         root : int,
         comm : NCCLCommunicator
@@ -226,54 +226,52 @@ def reduce(
     """NCCL API: `ncclReduce <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/colls.html#ncclreduce>`_
 
     Args:
-        src (torch.storage._StorageBase): Source buffer.
-        dst (torch.storage._StorageBase): Destination buffer.
+        src (torch.Tensor): Source tensor.
+        dst (torch.Tensor): Destination tensor.
         op (Literal["sum", "prod", "max", "min", "avg"]): Reduction operation.
         root (int): Rank of the root.
         comm (NCCLCommunicator): NCCL communicator.
     
-    The src and dst buffers must be the same size, type and on the same device.
+    The src and dst tensors must be the same size, type and on the same device.
 
-    If src == dst, the operation is performed in-place.
+    If src is dst, the operation is performed in-place.
 
     """
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()
     recvbuff = dst.data_ptr()
-    count = src.size()
+    count = src.numel()
     datatype = dtype2nccl(src.dtype)
     operator = op2nccl(op)
 
-    assert dst.size() == src.size(), "Buffer size not aligned"
+    assert dst.numel() == src.numel(), "Buffer size not aligned"
     C.ncclReduce(sendbuff, recvbuff, count, datatype, operator, root, comm.ptr, torch.cuda.current_stream().cuda_stream)
 
 def allGather(
-        src : torch.storage._StorageBase,
-        dst : torch.storage._StorageBase,
+        src : torch.Tensor,
+        dst : torch.Tensor,
         comm : NCCLCommunicator
     ):
     """NCCL API: `ncclAllGather <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/colls.html#ncclallgather>`_
 
     Args:
-        src (torch.storage._StorageBase): Source buffer.
-        dst (torch.storage._StorageBase): Destination buffer.
+        src (torch.Tensor): Source tensor.
+        dst (torch.Tensor): Destination tensor.
         comm (NCCLCommunicator): NCCL communicator.
     
-    The size of the dst buffer must be equal to the size of src buffer * world_size.
-
-    The dst buffer is only used on rank root.
+    The size of the dst tensor must be equal to the size of src tensor * world_size.
 
     """
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()
     recvbuff = dst.data_ptr()
-    sendcount = src.size()
+    sendcount = src.numel()
     datatype = dtype2nccl(src.dtype)
-    assert dst.size() % sendcount == 0, "Buffer size not aligned"
+    assert dst.numel() % sendcount == 0, "Buffer size not aligned"
     C.ncclAllGather(
         sendbuff, 
         recvbuff, 
@@ -285,34 +283,34 @@ def allGather(
 
 
 def reduceScatter(
-        src : torch.storage._StorageBase,
-        dst : torch.storage._StorageBase,
+        src : torch.Tensor,
+        dst : torch.Tensor,
         op : Literal["sum", "prod", "max", "min", "avg"],
         comm : NCCLCommunicator
     ):
     """NCCL API: `ncclReduceScatter <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/colls.html#ncclreducescatter>`_
 
     Args:
-        src (torch.storage._StorageBase): Source buffer.
-        dst (torch.storage._StorageBase): Destination buffer.
+        src (torch.Tensor): Source tensor.
+        dst (torch.Tensor): Destination tensor.
         op (Literal["sum", "prod", "max", "min", "avg"]): Reduction operation.
         comm (NCCLCommunicator): NCCL communicator.
     
-    The size of the dst buffer must be equal to the size of src buffer / world_size.
+    The size of the dst tensor must be equal to the size of src tensor / world_size.
 
-    The dst buffer on rank `i` will contail the i-th block of the reduced result.
+    The dst tensor on rank `i` will contain the i-th block of the reduced result.
 
     """
-    assert src.dtype == dst.dtype, "send and recv buffers must be the same time"
+    assert src.dtype == dst.dtype, "send and recv buffers must be the same type"
     assert src.is_cuda and dst.is_cuda
 
     sendbuff = src.data_ptr()
     recvbuff = dst.data_ptr()
-    recvcount = dst.size()
+    recvcount = dst.numel()
     datatype = dtype2nccl(src.dtype)
     operator = op2nccl(op)
 
-    assert src.size() % recvcount == 0, "Buffer size not aligned"
+    assert src.numel() % recvcount == 0, "Buffer size not aligned"
     C.ncclReduceScatter(
         sendbuff,
         recvbuff,

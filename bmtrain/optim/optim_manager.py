@@ -7,17 +7,18 @@ from .. import nccl
 from ..global_var import config
 
 def check_overflow(param_groups):
-    # check overflow
-    has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")[0]
+    # Use a 1-element tensor (not a scalar) so nccl.allReduce receives a valid data_ptr.
+    has_inf_or_nan = torch.zeros(1, dtype=torch.uint8, device="cuda")
     for group in param_groups:
         for p in group['params']:
             if p.grad is not None:
                 if p.dtype != torch.float:
-                    has_inf_nan(p.grad, has_inf_or_nan)
+                    # Pass a 1-element slice to keep the tensor contiguous with nonzero numel.
+                    has_inf_nan(p.grad, has_inf_or_nan[0:1])
     if "comm" in config:
-        nccl.allReduce(has_inf_or_nan.storage(), has_inf_or_nan.storage(), "max", config["comm"])
+        nccl.allReduce(has_inf_or_nan, has_inf_or_nan, "max", config["comm"])
 
-    if has_inf_or_nan > 0:
+    if has_inf_or_nan[0] > 0:
         raise OverflowError("Gradient overflow")
 
 def grad_rescale(param_groups, scale):
@@ -185,16 +186,17 @@ class OptimManager:
                 grads.append(torch.zeros_like(p.data))
 
         if norm_type == 'inf':
-            total_norm_cuda = max(g.data.abs().max() for g in grads).detach()
-            nccl.allReduce(total_norm_cuda.storage(), total_norm_cuda.storage(), "max", config["comm"])
-            total_norm = total_norm_cuda
+            # unsqueeze to 1-element tensor so nccl.allReduce gets a valid buffer.
+            total_norm_cuda = max(g.data.abs().max() for g in grads).detach().unsqueeze(0)
+            nccl.allReduce(total_norm_cuda, total_norm_cuda, "max", config["comm"])
+            total_norm = total_norm_cuda[0]
         else:
             norm_type = float(norm_type)
-            total_norm_cuda = torch.cuda.FloatTensor([0])
+            total_norm_cuda = torch.tensor([0.0], dtype=torch.float32, device="cuda")
             for index, g in enumerate(grads):
                 param_norm = g.data.float().norm(norm_type)
                 total_norm_cuda += param_norm ** norm_type
-            nccl.allReduce(total_norm_cuda.storage(), total_norm_cuda.storage(), "sum", config["comm"])
+            nccl.allReduce(total_norm_cuda, total_norm_cuda, "sum", config["comm"])
             total_norm = total_norm_cuda[0] ** (1. / norm_type)
         # total_norm = total_norm / scale
         # clip_coef = float(max_norm) / (total_norm + eps)
@@ -214,8 +216,17 @@ class OptimManager:
         self.steps_since_last_scale = 0
 
     def state_dict(self, gather_opt=False) -> dict:
+        def _optimizer_state_dict(opt):
+            # BMTrain optimizers (e.g. AdamOffloadOptimizer) accept gather=; std PyTorch Optimizer does not.
+            if gather_opt:
+                try:
+                    return opt.state_dict(gather_opt)
+                except TypeError:
+                    pass
+            return opt.state_dict()
+
         return {
-            "optimizers": [opt.state_dict(gather_opt) for opt in self.optimizers],
+            "optimizers": [_optimizer_state_dict(opt) for opt in self.optimizers],
             "lr_schedulers": [lrs.state_dict() if lrs else None for lrs in self.lr_schedulers],
             "loss_scale": self.loss_scale,
             "loss_scale_enabled": self.loss_scale_enabled,

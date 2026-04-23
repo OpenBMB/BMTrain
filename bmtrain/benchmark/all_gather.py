@@ -18,7 +18,7 @@ def all_gather():
         end_evt = torch.cuda.Event(enable_timing=True)
 
         current_stream.record_event(start_evt)
-        nccl.allGather(partition_tensor.storage(), global_tensor.storage(), config['comm'])
+        nccl.allGather(partition_tensor.view(-1), global_tensor.view(-1), config['comm'])
         current_stream.record_event(end_evt)
         current_stream.synchronize()
         time_usage = start_evt.elapsed_time(end_evt)

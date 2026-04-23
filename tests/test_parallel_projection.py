@@ -1,11 +1,12 @@
 import torch
 import bmtrain as bmt
 from bmtrain.global_var import config
+from bmtrain.nn.parallel_projection import Projection, VPProjection
 import numpy as np
 import os
 
 def run_normal(x, t, ckp_path, dtype):
-    proj = bmt.nn.Projection(100, 64, dtype=dtype)
+    proj = Projection(100, 64, dtype=dtype)
     bmt.init_parameters(proj)
     bmt.save(proj, ckp_path)
     loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=False)
@@ -16,7 +17,7 @@ def run_normal(x, t, ckp_path, dtype):
     return y, loss, y.grad
 
 def run_vp(x, t, ckp_path, dtype):
-    proj = bmt.nn.VPProjection(100, 64, dtype=dtype)
+    proj = VPProjection(100, 64, dtype=dtype)
     bmt.load(proj, ckp_path)
     loss_func = bmt.loss.FusedCrossEntropy(ignore_index=-100, parallel=True)
     y = proj(x)
@@ -30,10 +31,11 @@ def run(dtype):
     torch.cuda.manual_seed(100)
     tp_size = config["tp_size"]
     tp_rank = config['tp_rank']
-    x = torch.randn(110, 64, device='cuda', dtype=dtype)
+    x_full = torch.randn(110, 64, device='cuda', dtype=dtype)
+    x_shard = x_full.chunk(tp_size, dim=-1)[tp_rank].contiguous()
     t = torch.cat([torch.arange(100).view(10, 10), torch.ones((10, 1))*-100], dim=-1).view(110).int().cuda()
-    y1, loss1, grad1 = run_normal(x, t, ckp_path, dtype)
-    y2, loss2, grad2 = run_vp(x, t, ckp_path, dtype)
+    y1, loss1, grad1 = run_normal(x_full, t, ckp_path, dtype)
+    y2, loss2, grad2 = run_vp(x_shard, t, ckp_path, dtype)
     y1 = y1.chunk(tp_size, dim=-1)[tp_rank]
     grad1 = grad1.chunk(tp_size, dim=-1)[tp_rank]
     for r in range(tp_size):

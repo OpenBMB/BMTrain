@@ -2,12 +2,17 @@ import torch
 from ..global_var import config
 from . import _function as F
 from .. import nccl
-import inspect
-from ..utils import check_torch_version
+# torch.optim._functional was removed in some PyTorch versions; fall back to manual Adam if unavailable.
+try:
+    import torch.optim._functional as _optim_functional
+    _has_torch_adam = True
+except ImportError:
+    _has_torch_adam = False
 from copy import deepcopy
 from itertools import chain
 from collections import defaultdict
 from ._distributed import state_dict_gather
+from .adam import _functional_adam_state_step, _torch_functional_adam_other_kwargs
 
 
 class AdamOffloadOptimizer(torch.optim.Optimizer):
@@ -160,31 +165,36 @@ class AdamOffloadOptimizer(torch.optim.Optimizer):
                     grad = -state["_grad_fp32"]
                 else:
                     grad = state["_grad_fp32"]
-                other_kwargs = {}
-                if (
-                    "maximize"
-                    in inspect.signature(torch.optim._functional.adam).parameters
-                ):
-                    other_kwargs["maximize"] = False
-                torch.optim._functional.adam(
-                    [state["_param_fp32"]],
-                    [grad],
-                    [state["exp_avg"]],
-                    [state["exp_avg_sq"]],
-                    [],
-                    (
-                        [state["step"]]
-                        if check_torch_version("1.12.0") < 0
-                        else [torch.tensor(state["step"])]
-                    ),
-                    amsgrad=False,
-                    beta1=beta1,
-                    beta2=beta2,
-                    lr=0.0 if state["step"] < self._hold_steps else lr,
-                    weight_decay=weight_decay,
-                    eps=eps,
-                    **other_kwargs
-                )
+                if _has_torch_adam:
+                    other_kwargs = _torch_functional_adam_other_kwargs()
+                    _optim_functional.adam(
+                        [state["_param_fp32"]],
+                        [grad],
+                        [state["exp_avg"]],
+                        [state["exp_avg_sq"]],
+                        [],
+                        [_functional_adam_state_step(state["step"])],
+                        amsgrad=False,
+                        beta1=beta1,
+                        beta2=beta2,
+                        lr=0.0 if state["step"] < self._hold_steps else lr,
+                        weight_decay=weight_decay,
+                        eps=eps,
+                        **other_kwargs
+                    )
+                else:
+                    # Fallback: manual Adam when torch.optim._functional is unavailable.
+                    actual_lr = 0.0 if state["step"] < self._hold_steps else lr
+                    g = grad.clone()
+                    if weight_decay != 0:
+                        g = g.add(state["_param_fp32"], alpha=weight_decay)
+                    state["exp_avg"].mul_(beta1).add_(g, alpha=1 - beta1)
+                    state["exp_avg_sq"].mul_(beta2).addcmul_(g, g, value=1 - beta2)
+                    bias_correction1 = 1 - beta1 ** (state["step"] + 1)
+                    bias_correction2 = 1 - beta2 ** (state["step"] + 1)
+                    step_size = actual_lr / bias_correction1
+                    denom = (state["exp_avg_sq"].sqrt() / (bias_correction2 ** 0.5)).add_(eps)
+                    state["_param_fp32"].addcdiv_(state["exp_avg"], denom, value=-step_size)
                 # transfer parameters back to device asynchronously
                 param.copy_(state["_param_fp32"], non_blocking=True)
                 state["step"] += 1

@@ -35,7 +35,7 @@ tq = tqdm([
 ])
 
 for t, num_gpu in tq:
-    PREFIX = f"python3 -m torch.distributed.launch --nnodes=1 --node_rank=0 --nproc_per_node={num_gpu} --master_addr=localhost --master_port=32123"
+    PREFIX = f"torchrun --nnodes=1 --nproc_per_node={num_gpu} --rdzv_backend=c10d --rdzv_endpoint=localhost:32123"
     SUFFIX = f"> test_log.txt 2>&1"
     command = f"{PREFIX} test_{t}.py {SUFFIX}"
     completedProc = subprocess.run(command, shell=True)

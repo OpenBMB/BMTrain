@@ -12,31 +12,6 @@ from torch.utils.checkpoint import checkpoint
 from .distributed.ops import send_tensor_inplace, recv_tensor_inplace
 
 
-def storage_type_cuda(storage_type):
-    """Convert storage_type to cuda storage_type."""
-    STORAGE_MAP = {
-        torch.FloatStorage: torch.cuda.FloatStorage,
-        torch.DoubleStorage: torch.cuda.DoubleStorage,
-        torch.HalfStorage: torch.cuda.HalfStorage,
-        torch.BFloat16Storage: torch.cuda.BFloat16Storage,
-        torch.CharStorage: torch.cuda.CharStorage,
-        torch.ByteStorage: torch.cuda.ByteStorage,
-        torch.ShortStorage: torch.cuda.ShortStorage,
-        torch.IntStorage: torch.cuda.IntStorage,
-        torch.cuda.FloatStorage: torch.cuda.FloatStorage,
-        torch.cuda.DoubleStorage: torch.cuda.DoubleStorage,
-        torch.cuda.HalfStorage: torch.cuda.HalfStorage,
-        torch.cuda.BFloat16Storage: torch.cuda.BFloat16Storage,
-        torch.cuda.CharStorage: torch.cuda.CharStorage,
-        torch.cuda.ByteStorage: torch.cuda.ByteStorage,
-        torch.cuda.ShortStorage: torch.cuda.ShortStorage,
-        torch.cuda.IntStorage: torch.cuda.IntStorage,
-    }
-    if storage_type not in STORAGE_MAP:
-        raise ValueError("Unknown storage type: {}".format(storage_type))
-    return STORAGE_MAP[storage_type]
-
-
 def _get_param_kw(param: DistributedParameter):
     """Get DistributedParameter kw name."""
     type_name = str(param.dtype).split(".")[-1]
@@ -123,7 +98,6 @@ class Block(torch.nn.Module):
                     "All parameters in checkpoint block must be DistributedParameter."
                 )
 
-            storage_type = storage_type_cuda(param.storage_type())
             kw_name = _get_param_kw(param)
             if kw_name not in self._storage_info:
                 if (self._mode == "PIPE" or self._mode == "1F1B") and param._tp_mode:
@@ -137,7 +111,7 @@ class Block(torch.nn.Module):
 
                 self._storage_info[kw_name] = {
                     "total": 0,
-                    "storage_type": storage_type,
+                    "dtype": param.dtype,
                     "requires_grad": param.requires_grad,
                     "group": param.group,
                     "zero_comm": zero_comm,
@@ -166,16 +140,10 @@ class Block(torch.nn.Module):
             val["end"] = (rank + 1) * partition_size
             offsets[kw] = 0
 
-            storage_type = val["storage_type"]
-
-            storage_param_buffer = storage_type(partition_size)
-
-            dtype = storage_param_buffer.dtype
-            device = storage_param_buffer.device
-
+            dtype = val["dtype"]
             # bind storage to buffer tensor
             storage_param = torch.nn.Parameter(
-                torch.tensor([], dtype=dtype, device=device).set_(storage_param_buffer)
+                torch.empty(partition_size, dtype=dtype, device="cuda")
             )
             if val["requires_grad"]:
                 storage_param.requires_grad_(True)
@@ -223,21 +191,12 @@ class Block(torch.nn.Module):
                 to_offset_end = offset_end + param_st - storage_st
 
                 # copy to buffer
-                # PyTorch 1.11 changed the API of storage.__getitem__
-                d_dtype = self._storage_params[kw_name].dtype
-                d_device = self._storage_params[kw_name].device
+                param.data = self._storage_params[kw_name].view(-1)[to_offset_st:to_offset_end]
                 self._param_info[-1]["begin"] = to_offset_st
                 self._param_info[-1]["end"] = (to_offset_end - to_offset_st,)
                 setattr(param, "_start_partition", offset_st)
                 setattr(param, "_end_partition", offset_end)
-                if nccl.commCount(comm) != 1:
-                    param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))
-                    param.data[:] = \
-                        torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
-                else:
-                    param.data = torch.tensor([], dtype=param.dtype, device=param.device).set_(self._storage_params[kw_name].storage(), to_offset_st, param_shape)
-                    param.data[:] = \
-                        torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, param_shape)[:]
+                param.data[:] = contiguous_param.view(-1)[offset_st:offset_end]
                 del contiguous_param
             else:
                 param.data = torch.tensor([], dtype=param.dtype, device=param.device)
@@ -417,9 +376,10 @@ class Block(torch.nn.Module):
 
 
                 # copy to buffer
-                # PyTorch 1.11 changed the API of storage.__getitem__
-                torch.tensor([], dtype=d_dtype, device=d_device).set_(self._storage_params[kw_name].storage(), to_offset_st, (to_offset_end - to_offset_st,))[:] = \
-                    torch.tensor([], dtype=d_dtype, device=d_device).set_(contiguous_param.storage(), offset_st, (offset_end - offset_st,))[:]
+                with torch.no_grad():
+                    self._storage_params[kw_name].data.view(-1)[
+                        to_offset_st:to_offset_end
+                    ].copy_(contiguous_param.view(-1)[offset_st:offset_end])
                 del contiguous_param
             elif strict:
                 missing_keys.append(key)
@@ -533,15 +493,7 @@ class Block(torch.nn.Module):
                 assert offset_st < offset_end
 
                 # copy to buffer
-                # PyTorch 1.11 changed the API of storage.__getitem__
-                d_dtype = self._storage_params[kw_name].dtype
-                d_device = self._storage_params[kw_name].device
-                if nccl.commCount(self._storage_info[kw_name]["zero_comm"]) == 1:
-                    param.data[:] = \
-                        torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, it["shape"])[:]
-                else:
-                    param.data[:] = \
-                        torch.tensor([], dtype=d_dtype, device=d_device).set_(tmp_tensor.storage(), offset_st, (offset_end - offset_st,))[:]
+                param.data[:] = tmp_tensor.view(-1)[offset_st:offset_end]
                 del tmp_tensor
 
     def _named_members(self, get_members_fn, prefix="", recurse=True, **kwargs):

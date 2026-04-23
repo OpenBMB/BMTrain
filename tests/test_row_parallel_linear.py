@@ -16,7 +16,7 @@ def run_bmt(x, ckp_path, split_input=True, use_checkpoint_block=True):
 
 def run_torch(x, ckp_path):
     linear = torch.nn.Linear(8, 8)
-    linear_dict = torch.load(ckp_path)
+    linear_dict = torch.load(ckp_path, weights_only=False)
     linear.load_state_dict(linear_dict)
     linear = linear.cuda()
     linear.weight.requires_grad_()

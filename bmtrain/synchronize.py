@@ -10,11 +10,12 @@ def synchronize(comm=None):
     """
     if not config["initialized"]:
         raise RuntimeError("BMTrain is not initialized")
-    comm = config['comm'] if comm is None else comm
-    with torch.cuda.stream(config['barrier_stream']):
-        barrier = torch.cuda.FloatTensor([1])
-        nccl.allReduce(barrier.storage(), barrier.storage(), 'sum', comm)
-    config['barrier_stream'].synchronize()
+
+    with torch.cuda.stream(config["barrier_stream"]):
+        barrier = torch.tensor([1.0], dtype=torch.float32, device="cuda")
+        nccl.allReduce(barrier, barrier, "sum", config["comm"])
+    config["barrier_stream"].synchronize()
+
 
 def wait_loader():
     """
@@ -51,8 +52,8 @@ def gather_result(result: torch.Tensor):
         "bmtrain.gather_result is deprecated and will be removed in later version. Use bmtrain.distributed.all_gather instead.",
         DeprecationWarning,
     )
-    if result.storage_offset() != 0 or result.storage().size() != result.numel():
-        # Create a clone of the original tensor if it's a slice
+    # Clone sliced or non-contiguous tensors so data_ptr is at offset 0 for NCCL.
+    if result.storage_offset() != 0 or not result.is_contiguous():
         result = result.clone()
 
     output_cuda = True
@@ -64,7 +65,7 @@ def gather_result(result: torch.Tensor):
         device=result.device,
         dtype=result.dtype,
     )
-    nccl.allGather(result.storage(), ret.storage(), config["comm"])
+    nccl.allGather(result, ret, config["comm"])
     if output_cuda:
         return ret
     else:

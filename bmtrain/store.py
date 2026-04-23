@@ -48,7 +48,8 @@ def _save_to_local_rank0(model : torch.nn.Module, destination=None, prefix=''):
     for name, module in model._modules.items():
         if module is not None:
             _save_to_local_rank0(module, destination, prefix + name + '.')
-    for hook in model._state_dict_hooks.values():
+    # _state_dict_hooks may not exist in newer PyTorch versions; use getattr for safety.
+    for hook in getattr(model, '_state_dict_hooks', {}).values():
         hook_result = hook(model, destination, prefix, local_metadata)
         if hook_result is not None:
             destination = hook_result
@@ -65,7 +66,7 @@ def _save_to_rank0(model : torch.nn.Module, destination=None, prefix=''):
         for name, module in model._modules.items():
             if module is not None:
                 _save_to_rank0(module, destination, prefix + name + '.')
-        for hook in model._state_dict_hooks.values():
+        for hook in getattr(model, '_state_dict_hooks', {}).values():
             hook_result = hook(model, destination, prefix, local_metadata)
             if hook_result is not None:
                 destination = hook_result
@@ -89,7 +90,7 @@ def _save_to_infer_model(model : torch.nn.Module, infer_model, destination=None,
                         infer_model.load_layer_state_dict(local_state_dict)
             else:
                 _save_to_infer_model(module, infer_model, destination, prefix + name + '.')
-    for hook in model._state_dict_hooks.values():
+    for hook in getattr(model, '_state_dict_hooks', {}).values():
         hook_result = hook(model, destination, prefix, local_metadata)
         if hook_result is not None:
             destination = hook_result
@@ -173,8 +174,8 @@ def allgather_objects(obj):
         max_data_length = gathered_length.max().item()
 
         gpu_data_bytes = torch.zeros(max_data_length, dtype=torch.uint8, device="cuda")
-        byte_storage = torch.ByteStorage.from_buffer(data_bytes)
-        gpu_data_bytes[:data_length] = torch.ByteTensor(byte_storage)
+        byte_tensor = torch.frombuffer(bytearray(data_bytes), dtype=torch.uint8)
+        gpu_data_bytes[:data_length] = byte_tensor
 
         gathered_data = bmt.distributed.all_gather(gpu_data_bytes).cpu()
 
@@ -188,38 +189,34 @@ def broadcast_object(obj, comm, src = 0):
     if nccl.commRank(comm) == src:
         f = io.BytesIO()
         _pickler(f).dump(obj)
-        byte_storage = torch.ByteStorage.from_buffer(f.getvalue())
-        # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
-        # Otherwise, it will casue 100X slowdown.
-        # See: https://github.com/pytorch/pytorch/issues/65696
-        byte_tensor = torch.ByteTensor(byte_storage).cuda()
-        local_size = torch.LongTensor([byte_tensor.numel()]).cuda()
+        byte_tensor = torch.frombuffer(bytearray(f.getvalue()), dtype=torch.uint8).cuda()
+        local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long, device="cuda")
 
         nccl.broadcast(
-            local_size.storage(),
-            local_size.storage(),
+            local_size,
+            local_size,
             src,
             comm
         )
         nccl.broadcast(
-            byte_tensor.storage(),
-            byte_tensor.storage(),
+            byte_tensor,
+            byte_tensor,
             src,
             comm
         )
     else:
-        local_size = torch.LongTensor([0]).cuda()
+        local_size = torch.tensor([0], dtype=torch.long, device="cuda")
         nccl.broadcast(
-            local_size.storage(),
-            local_size.storage(),
+            local_size,
+            local_size,
             src,
             comm
         )
         byte_tensor_size = local_size[0].item()
         byte_tensor = torch.empty(int(byte_tensor_size), dtype=torch.uint8, device="cuda")
         nccl.broadcast(
-            byte_tensor.storage(),
-            byte_tensor.storage(),
+            byte_tensor,
+            byte_tensor,
             src,
             comm
         )
@@ -245,15 +242,15 @@ class DistributedTensorWrapper:
                 input_param = input_param.cuda().contiguous()
 
             nccl.broadcast(
-                input_param.storage(),
-                output_param.storage(),
+                input_param.view(-1),
+                output_param.view(-1),
                 0,
                 config['comm']
             )
         else:
             nccl.broadcast(
-                output_param.storage(),
-                output_param.storage(),
+                output_param.view(-1),
+                output_param.view(-1),
                 0,
                 config['comm']
             )
@@ -292,8 +289,8 @@ class DistributedStateDictWrapper(Mapping):
             tmp_shape[2:2 + shape_list.size(0)] = shape_list
 
         nccl.broadcast(
-            tmp_shape.storage(),
-            tmp_shape.storage(),
+            tmp_shape,
+            tmp_shape,
             0,
             config['comm']
         )
@@ -338,13 +335,9 @@ def load(model : torch.nn.Module, file_name : str, strict : bool = True, load_ga
     Example:
         >>> bmtrain.load(model, "model.pt", strict=True)
     """
-    tmp = config['load_param_gather']
-    config['load_param_gather'] = load_gather
-    if load_gather:
-        if config['rank'] == 0:
-            state_dict = DistributedStateDictWrapper(torch.load(file_name))
-        else:
-            state_dict = DistributedStateDictWrapper({})
+    if config['rank'] == 0:
+        # weights_only=False: BMTrain checkpoints may contain non-tensor objects (e.g. metadata).
+        state_dict = DistributedStateDictWrapper(torch.load(file_name, weights_only=False))
     else:
         if "rank" not in file_name:
             file_name = f"{file_name}_rank_{bmt.rank()}"

@@ -91,7 +91,7 @@ def async_reduce_scatter_linear_func(input, weight, bias, async_chunks=2):
             shape[0] = shape[0] // config["tp_size"]
             outputs[i] = torch.empty(shape, dtype=out.dtype, device=out.device)
             nccl.reduceScatter(
-                out.storage(), outputs[i].storage(), "sum", config["tp_comm"]
+                out.contiguous().view(-1), outputs[i].view(-1), "sum", config["tp_comm"]
             )
 
     current_stream.wait_stream(comm_stream)
@@ -254,7 +254,7 @@ class OpParallelLinear(torch.autograd.Function):
             return out
 
         if reduce_output_type == ReduceType.ALL_REDUCE:
-            nccl.allReduce(out.storage(), out.storage(), "sum", config["tp_comm"])
+            nccl.allReduce(out.contiguous().view(-1), out.view(-1), "sum", config["tp_comm"])
             return out
         else:
             assert False, "no support reduce type{}".format(reduce_output_type)
@@ -309,8 +309,8 @@ class OpParallelLinear(torch.autograd.Function):
                     grad_input.record_stream(config["tp_comm_stream"])
                     grad_all_input.record_stream(config["tp_comm_stream"])
                     nccl.reduceScatter(
-                        grad_all_input.storage(),
-                        grad_input.storage(),
+                        grad_all_input.contiguous().view(-1),
+                        grad_input.view(-1),
                         "sum",
                         config["tp_comm"],
                     )
@@ -319,8 +319,8 @@ class OpParallelLinear(torch.autograd.Function):
                     config["tp_comm_stream"].wait_stream(current_stream)
                     grad_input.record_stream(config["tp_comm_stream"])
                     nccl.allReduce(
-                        grad_all_input.storage(),
-                        grad_all_input.storage(),
+                        grad_all_input.contiguous().view(-1),
+                        grad_all_input.view(-1),
                         "sum",
                         config["tp_comm"],
                     )

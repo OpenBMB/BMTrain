@@ -52,11 +52,11 @@ class Embedding(bmt.DistributedModule):
 
         Examples::
 
-            >>> # FloatTensor containing pretrained weights
-            >>> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
+            >>> # Tensor containing pretrained weights
+            >>> weight = torch.tensor([[1, 2.3, 3], [4, 5.1, 6.3]], dtype=torch.float32)
             >>> embedding = nn.Embedding.from_pretrained(weight)
             >>> # Get embeddings for index 1
-            >>> input = torch.LongTensor([1])
+            >>> input = torch.tensor([1], dtype=torch.long)
             >>> embedding(input)
             tensor([[ 4.0000,  5.1000,  6.3000]])
         """

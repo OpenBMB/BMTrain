@@ -46,7 +46,12 @@ def main(dtype):
 
     opt1 = bmt.optim.AdamOptimizer(model1.parameters(), lr=1)
     opt2 = bmt.optim.AdamOffloadOptimizer(model2.parameters(), lr=1)
-    opt3 = torch.optim.Adam(model3.parameters(), lr=1)
+    # Match bmtrain.optim.AdamOptimizer: it calls torch.optim._functional.adam with
+    # foreach=False, fused=False. PyTorch 2.4+ defaults foreach=True on CUDA; the
+    # multi-tensor path differs slightly in float rounding from the single-tensor path.
+    opt3 = torch.optim.Adam(
+        model3.parameters(), lr=1, foreach=False, fused=False
+    )
     opt4 = bmt.optim.AdamOptimizer(model4.parameters(), lr=1)
     opt5 = bmt.optim.AdamOffloadOptimizer(model5.parameters(), lr=1)
 

@@ -18,7 +18,7 @@ def reduce_scatter():
         end_evt = torch.cuda.Event(enable_timing=True)
 
         current_stream.record_event(start_evt)
-        nccl.reduceScatter(global_tensor.storage(), partition_tensor.storage(), 'avg', config['comm'])
+        nccl.reduceScatter(global_tensor.view(-1), partition_tensor.view(-1), 'avg', config['comm'])
         current_stream.record_event(end_evt)
         current_stream.synchronize()
         time_usage = start_evt.elapsed_time(end_evt)

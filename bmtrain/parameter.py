@@ -43,7 +43,6 @@ class DistributedParameter(torch.nn.Parameter):
 
         num_of_elements = data.numel()
 
-        cuda_tensor = torch.tensor([], dtype=data.dtype, device="cuda")
         if tp_mode:
             comm = config["tp_zero_comm"]
         else:
@@ -58,16 +57,23 @@ class DistributedParameter(torch.nn.Parameter):
             tp_original_shape = list(original_shape)
             tp_original_shape[tp_split_dim] *= config["tp_size"]
 
-        cuda_storage = cuda_tensor.storage_type()(cuda_storage_size)
+        storage_tensor = torch.empty(cuda_storage_size, dtype=data.dtype, device="cuda")
 
         start_of_partition = cuda_storage_size * rank
         end_of_partition = min(num_of_elements, cuda_storage_size * (rank + 1))
 
-        # FX: cuda_tensor_size < 0 if num_of_elements is too small
         cuda_tensor_size = max(end_of_partition - start_of_partition, 0)
 
-        cuda_tensor.set_(cuda_storage, 0, (cuda_tensor_size,))
-        cuda_tensor.copy_(data.view(-1)[start_of_partition:end_of_partition])
+        cuda_tensor = storage_tensor[:cuda_tensor_size]
+        # Detach, flatten, clone on CUDA so we read plain tensor storage. Copying from
+        # `nn.Parameter(...).view(-1)[...]` alone can yield zeros for the common pattern
+        # `self.weight = nn.Parameter(torch.empty(...)); init_(self.weight)` (see tests).
+        with torch.no_grad():
+            src = data.detach()
+            if src.device.type != "cuda":
+                src = src.cuda()
+            src_flat = src.reshape(-1).contiguous().clone()
+        cuda_tensor.copy_(src_flat[start_of_partition:end_of_partition])
         ret = torch.Tensor._make_subclass(cls, cuda_tensor, requires_grad)
 
         setattr(ret, "_original_shape", original_shape)
@@ -81,6 +87,7 @@ class DistributedParameter(torch.nn.Parameter):
         setattr(ret, "_zero_comm", comm)
         setattr(ret, "_tp_split_dim", tp_split_dim)
         setattr(ret, "_tp_original_shape", tp_original_shape)
+        setattr(ret, "_partition_size", cuda_storage_size)
         return ret
 
     @property
@@ -103,7 +110,7 @@ class DistributedParameter(torch.nn.Parameter):
         current_stream.wait_stream(config["load_stream"])
         return output_tensor
 
-    def gather_all(self) -> torch.tensor:
+    def gather_all(self) -> torch.Tensor:
         """Gather the data from ZeRO and Tensor Parallel distributed nodes.
 
         Return:
@@ -124,7 +131,7 @@ class DistributedParameter(torch.nn.Parameter):
         else:
             return zero_param
 
-    def tp_gather(self) -> torch.tensor:
+    def tp_gather(self) -> torch.Tensor:
         """Gather the data from Tensor Parallel distributed nodes.
 
         Return:
@@ -145,28 +152,40 @@ class DistributedParameter(torch.nn.Parameter):
             return self
 
     def _copy_data(self, data: torch.Tensor):
-        """Copy data to self.data."""
-        self.data.copy_(data.view(-1)[self._start_partition : self._end_partition])
+        """Copy data to self.data.
+
+        Detach → move to CUDA → flatten → clone to ensure we read from a
+        materialized contiguous buffer, avoiding stale-storage issues when the
+        source comes from nn.Parameter wrappers.
+        """
+        with torch.no_grad():
+            src = data.detach()
+            if src.device.type != "cuda":
+                src = src.cuda()
+            flat = src.reshape(-1).contiguous().clone()
+        self.data.copy_(flat[self._start_partition : self._end_partition])
 
 
 class OpAllGather(torch.autograd.Function):
     @staticmethod
     def forward(ctx, value: DistributedParameter):
         assert isinstance(value, DistributedParameter)
-        comm = value._zero_comm  # config['zero_comm']
+        comm = value._zero_comm
         world_size = nccl.commCount(comm)
         ctx.comm = comm
         ctx.world_size = world_size
 
-        partition_size = value.storage().size()
+        partition_size = value._partition_size
         global_size = partition_size * world_size
 
-        storage = value.storage_type()(global_size)
+        global_buffer = torch.empty(global_size, dtype=value.dtype, device="cuda")
+        # Pad local data to partition_size; value.numel() may be smaller on the last rank.
+        local_buffer = torch.empty(partition_size, dtype=value.dtype, device="cuda")
+        local_buffer[:value.numel()].copy_(value)
 
-        nccl.allGather(value.storage(), storage, comm)
+        nccl.allGather(local_buffer, global_buffer, comm)
 
-        output_tensor = torch.tensor([], dtype=value.dtype, device="cuda")
-        output_tensor.set_(storage, 0, value._original_shape)
+        output_tensor = global_buffer[:value._original_shape.numel()].view(value._original_shape)
 
         ctx.partition_size = partition_size
         ctx.tensor_size = value.size(0)
@@ -177,16 +196,20 @@ class OpAllGather(torch.autograd.Function):
         if not grad_output.is_contiguous():
             grad_output = grad_output.contiguous()
 
-        grad_storage = grad_output.storage_type()(ctx.partition_size)
-        grad_output_storage = grad_output.storage()
-        if grad_output_storage.size() == ctx.partition_size * ctx.world_size:
-            pass
-        else:
-            grad_output_storage.resize_(ctx.partition_size * ctx.world_size)
-        nccl.reduceScatter(grad_output_storage, grad_storage, "sum", ctx.comm)
-        grad_tensor = torch.tensor([], dtype=grad_output.dtype, device="cuda")
-        grad_tensor.set_(grad_storage, 0, (ctx.tensor_size,))
-        return grad_tensor
+        expected_size = ctx.partition_size * ctx.world_size
+        # Pad or truncate grad to match the allGather buffer size (partition_size * world_size),
+        # because the original tensor may have been smaller due to non-divisible partitioning.
+        grad_flat = grad_output.reshape(-1)
+        if grad_flat.numel() < expected_size:
+            padded = torch.zeros(expected_size, dtype=grad_output.dtype, device=grad_output.device)
+            padded[:grad_flat.numel()].copy_(grad_flat)
+            grad_flat = padded
+        elif grad_flat.numel() > expected_size:
+            grad_flat = grad_flat[:expected_size].contiguous()
+
+        grad_partition = torch.empty(ctx.partition_size, dtype=grad_output.dtype, device=grad_output.device)
+        nccl.reduceScatter(grad_flat, grad_partition, "sum", ctx.comm)
+        return grad_partition[:ctx.tensor_size]
 
 
 class ParameterInitializer:

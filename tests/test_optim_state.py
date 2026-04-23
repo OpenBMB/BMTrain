@@ -108,7 +108,7 @@ def main():
     optim_manager.add_optimizer(opt1, lrs1)
     optim_manager.add_optimizer(opt2, lrs2)
     optim_manager.add_optimizer(opt3, lrs3)
-    optim_manager.load_state_dict(torch.load(f"test_optim_manager_{bmt.rank()}.opt"))
+    optim_manager.load_state_dict(torch.load(f"test_optim_manager_{bmt.rank()}.opt", weights_only=False))
 
     manual_seed()
     train(model1, model2, model3, optim_manager)

@@ -88,13 +88,13 @@ class Attention(bmt.DistributedModule):
         score = torch.where(
             mask.view(batch_size, 1, seq_q, seq_kv),
             score,
-            torch.scalar_tensor(float('-inf'), device=score.device, dtype=score.dtype)
+            torch.tensor(float('-inf'), device=score.device, dtype=score.dtype)
         )
 
         score = torch.where(
             mask.view(batch_size, 1, seq_q, seq_kv),
             self.softmax(score),
-            torch.scalar_tensor(0, device=score.device, dtype=score.dtype)
+            torch.tensor(0, device=score.device, dtype=score.dtype)
         )
 
         score = score.view(-1, seq_q, seq_kv)

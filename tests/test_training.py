@@ -33,18 +33,18 @@ def clip_grad_norm(loss_scale, param_groups, max_norm, norm_type=2, eps=1e-6, is
                 grads.append(torch.zeros_like(p.data))
 
         if norm_type == 'inf':
-            total_norm_cuda = max(g.data.abs().max() for g in grads).detach()
+            total_norm_cuda = max(g.data.abs().max() for g in grads).detach().unsqueeze(0)
             if not is_torch:
-                bmt.nccl.allReduce(total_norm_cuda.storage(), total_norm_cuda.storage(), "max", bmt.config["comm"])
-            total_norm = total_norm_cuda
+                bmt.nccl.allReduce(total_norm_cuda, total_norm_cuda, "max", bmt.config["comm"])
+            total_norm = total_norm_cuda[0]
         else:
             norm_type = float(norm_type)
-            total_norm_cuda = torch.cuda.FloatTensor([0])
+            total_norm_cuda = torch.tensor([0.0], dtype=torch.float32, device="cuda")
             for index, g in enumerate(grads):
                 param_norm = g.data.float().norm(norm_type)
                 total_norm_cuda += param_norm ** norm_type
             if not is_torch:
-                bmt.nccl.allReduce(total_norm_cuda.storage(), total_norm_cuda.storage(), "sum", bmt.config["comm"])
+                bmt.nccl.allReduce(total_norm_cuda, total_norm_cuda, "sum", bmt.config["comm"])
             total_norm = total_norm_cuda[0] ** (1. / norm_type)
         clip_coef = float(max_norm * scale) / (total_norm + eps)
         if clip_coef < 1:
@@ -110,13 +110,13 @@ class Attention(torch.nn.Module):
         score = torch.where(
             mask.view(batch_size, 1, seq_q, seq_kv),
             score,
-            torch.scalar_tensor(float('-inf'), device=score.device, dtype=score.dtype)
+            torch.tensor(float('-inf'), device=score.device, dtype=score.dtype)
         )
 
         score = torch.where(
             mask.view(batch_size, 1, seq_q, seq_kv),
             self.softmax(score),
-            torch.scalar_tensor(0, device=score.device, dtype=score.dtype)
+            torch.tensor(0, device=score.device, dtype=score.dtype)
         )
 
         score = score.view(batch_size * self.num_heads, seq_q, seq_kv)
@@ -408,7 +408,7 @@ def test_main(test_fp16=True, test_fp32=True):
     ret = {}
     def torch_model():
         model = GPT(**kwargs)
-        model.load_state_dict(torch.load(ckpt_path))
+        model.load_state_dict(torch.load(ckpt_path, weights_only=False))
         model = model.cuda()
         return model
 

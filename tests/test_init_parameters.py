@@ -164,6 +164,11 @@ def test_main():
     m[1] = Linear_NormalInitAfter(*shape)
     ret[1] = (m[1].weight.data, m[1].bias.data)
 
+    # Wrap m[1] right after ret[1] so this case stays next to Linear_NormalInitAfter;
+    # DistributedParameter now materializes a flat clone when copying (see parameter.py).
+    m[5] = bmt.BMTrainModelWrapper(m[1])
+    ret[5] = (m[5].weight.data, m[5].bias.data)
+
     # bmtrain
     manual_seed(33)
     m[2] = Linear_BMTInitializer(*shape)
@@ -183,10 +188,6 @@ def test_main():
     manual_seed(33)
     m[4] = bmt.BMTrainModelWrapper(m[0])
     ret[4] = (m[4].weight.data, m[4].bias.data)
-
-    manual_seed(33)
-    m[5] = bmt.BMTrainModelWrapper(m[1])
-    ret[5] = (m[5].weight.data, m[5].bias.data)
 
     manual_seed(33)
     m[6] = Linear_Pipeline(*shape)

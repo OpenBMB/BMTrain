@@ -10,25 +10,24 @@ import fnmatch
 def _gather_value(value : torch.Tensor, partition_size, origin_size):
     global_size = partition_size * config['world_size']
 
-    storage = value.storage_type()(global_size)
+    global_buffer = torch.empty(global_size, dtype=value.dtype, device=value.device)
 
-    if value.storage().size() != partition_size:
+    if value.numel() != partition_size:
         tmp_buf = torch.zeros(partition_size, dtype=value.dtype, device=value.device)
         tmp_buf[:value.numel()] = value[:]
         nccl.allGather(
-            tmp_buf.storage(),
-            storage,
+            tmp_buf,
+            global_buffer,
             config['comm']
         )
     else:
         nccl.allGather(
-            value.storage(),
-            storage,
+            value,
+            global_buffer,
             config['comm']
         )
 
-    output_tensor = torch.tensor([], dtype=value.dtype, device="cuda")
-    output_tensor.set_(storage, 0, origin_size)
+    output_tensor = global_buffer[:origin_size.numel()].view(origin_size)
 
     return output_tensor
 
@@ -52,22 +51,27 @@ def inspect_pipeline_transformer_block_list(pipe_model: PipelineTransformerBlock
             _param_buffer = {}
             _grad_buffer = {}
             for kw, val in model._storage_info.items():
-                storage_type = model._storage_params[kw].storage_type()
-
-                _param_buffer[kw] = storage_type(val["partition_size"] * val['world_size'])
-                if model._storage_params[kw].grad is not None:
-                    _grad_buffer[kw] = storage_type(val["partition_size"] * val['world_size'])
+                local_param = model._storage_params[kw]
+                _param_buffer[kw] = torch.empty(
+                    val["partition_size"] * val['world_size'],
+                    dtype=local_param.dtype, device=local_param.device
+                )
+                if local_param.grad is not None:
+                    _grad_buffer[kw] = torch.empty(
+                        val["partition_size"] * val['world_size'],
+                        dtype=local_param.dtype, device=local_param.device
+                    )
             
             nccl.groupStart()
             for kw, val in model._storage_info.items():
                 nccl.allGather(
-                    model._storage_params[kw].storage(),
+                    model._storage_params[kw],
                     _param_buffer[kw],
                     val["zero_comm"]
                 )
                 if model._storage_params[kw].grad is not None:
                     nccl.allGather(
-                        model._storage_params[kw].grad.storage(),
+                        model._storage_params[kw].grad,
                         _grad_buffer[kw],
                         val["zero_comm"]
                     )
@@ -77,13 +81,12 @@ def inspect_pipeline_transformer_block_list(pipe_model: PipelineTransformerBlock
                 abs_name = prefix + param["name"]
                 if fnmatch.fnmatch(abs_name, param_name):
                     kw_name = param["kw_name"]
-                    dtype = _param_buffer[kw_name].dtype
-                    device = _param_buffer[kw_name].device
                     offset = param["offset"]
                     shape = param["shape"]
-                    p = torch.tensor([], dtype=dtype, device=device).set_(_param_buffer[kw_name], offset, shape)
+                    numel = shape.numel()
+                    p = _param_buffer[kw_name][offset:offset+numel].view(shape)
                     if kw_name in _grad_buffer:
-                        g = torch.tensor([], dtype=dtype, device=device).set_(_grad_buffer[kw_name], offset, shape)
+                        g = _grad_buffer[kw_name][offset:offset+numel].view(shape)
                         info = {
                             "name": abs_name,
                             "shape": tuple(shape),
@@ -131,22 +134,27 @@ def inspect_block(model : Block, param_name : str, prefix : str = ''):
     _param_buffer = {}
     _grad_buffer = {}
     for kw, val in model._storage_info.items():
-        storage_type = model._storage_params[kw].storage_type()
-
-        _param_buffer[kw] = storage_type(val["partition_size"] * config['world_size'])
-        if model._storage_params[kw].grad is not None:
-            _grad_buffer[kw] = storage_type(val["partition_size"] * config['world_size'])
+        local_param = model._storage_params[kw]
+        _param_buffer[kw] = torch.empty(
+            val["partition_size"] * config['world_size'],
+            dtype=local_param.dtype, device=local_param.device
+        )
+        if local_param.grad is not None:
+            _grad_buffer[kw] = torch.empty(
+                val["partition_size"] * config['world_size'],
+                dtype=local_param.dtype, device=local_param.device
+            )
     
     nccl.groupStart()
     for kw, val in model._storage_info.items():
         nccl.allGather(
-            model._storage_params[kw].storage(),
+            model._storage_params[kw],
             _param_buffer[kw],
             config["comm"]
         )
         if model._storage_params[kw].grad is not None:
             nccl.allGather(
-                model._storage_params[kw].grad.storage(),
+                model._storage_params[kw].grad,
                 _grad_buffer[kw],
                 config["comm"]
             )
@@ -157,13 +165,12 @@ def inspect_block(model : Block, param_name : str, prefix : str = ''):
         abs_name = prefix + param["name"]
         if fnmatch.fnmatch(abs_name, param_name):
             kw_name = param["kw_name"]
-            dtype = _param_buffer[kw_name].dtype
-            device = _param_buffer[kw_name].device
             offset = param["offset"]
             shape = param["shape"]
-            p = torch.tensor([], dtype=dtype, device=device).set_(_param_buffer[kw_name], offset, shape)
+            numel = shape.numel()
+            p = _param_buffer[kw_name][offset:offset+numel].view(shape)
             if kw_name in _grad_buffer:
-                g = torch.tensor([], dtype=dtype, device=device).set_(_grad_buffer[kw_name], offset, shape)
+                g = _grad_buffer[kw_name][offset:offset+numel].view(shape)
                 ret.append({
                     "name": abs_name,
                     "shape": tuple(shape),
@@ -217,7 +224,7 @@ def inspect_model(model : torch.nn.Module, param_name : str, prefix : str = ''):
         for name, param in model._parameters.items():
             if fnmatch.fnmatch(prefix + name, param_name):
                 if isinstance(param, DistributedParameter):
-                    p = _gather_value(param.data, param.storage().size(), param._original_shape)
+                    p = _gather_value(param.data, param._partition_size, param._original_shape)
                 else:
                     p = param
                 if p is None:
@@ -232,7 +239,7 @@ def inspect_model(model : torch.nn.Module, param_name : str, prefix : str = ''):
                 }
                 if param.grad is not None:
                     if isinstance(param, DistributedParameter):
-                        g = _gather_value(param.grad.data, param.storage().size(), param._original_shape)
+                        g = _gather_value(param.grad.data, param._partition_size, param._original_shape)
                     else:
                         g = param.grad
                     stats["grad_std"] = g.std().cpu().item()

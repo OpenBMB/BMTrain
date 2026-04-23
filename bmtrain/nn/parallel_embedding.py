@@ -51,9 +51,10 @@ class VPEmbedding(bmt.DistributedModule):
             out = F.embedding(x, weight)
             return out
         else:
-            x = bmt.distributed.all_gather(x, comm=bmt.config["tp_comm"]).view(
-                x.shape[0], -1, x.shape[-1]
-            )
+            # Same as VPProjection: gather TP shards, merge to full hidden, then linear to this vocab partition.
+            shape = x.shape
+            g = bmt.distributed.all_gather(x, comm=bmt.config["tp_comm"])
+            x = g.permute(1, 0, *range(2, g.ndim)).reshape(*shape[:-1], -1)
             return bmt.nn.OpParallelLinear.apply(
                 x, self.weight, None, False, False, False, None, 1
             )

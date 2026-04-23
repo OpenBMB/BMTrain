@@ -13,7 +13,7 @@ $ pip install bmtrain
 ```shell
 $ git clone https://github.com/OpenBMB/BMTrain.git
 $ cd BMTrain
-$ python3 setup.py install
+$ pip install .
 ```
 
 ## Compilation Options
@@ -27,7 +27,7 @@ By setting environment variables, you can configure the compilation options of B
 
 ### CUDA Compute Capability
 
-`TORCH_CUDA_ARCH_LIST=6.0 6.1 7.0 7.5 8.0+PTX`
+`TORCH_CUDA_ARCH_LIST="6.1 7.0 7.5 8.0 8.6 8.9 9.0"`
 
 ## Recommended Configuration
 

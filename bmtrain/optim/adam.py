@@ -1,14 +1,46 @@
 import torch
 from ..global_var import config
 from . import _function as F
-import torch.optim._functional
+# torch.optim._functional was removed in some PyTorch versions; fall back to manual Adam if unavailable.
+try:
+    import torch.optim._functional as _optim_functional
+    _has_torch_adam = True
+except ImportError:
+    _has_torch_adam = False
 from .. import C
 from .. import nccl
 import inspect
-from ..utils import check_torch_version
 from copy import deepcopy
 from itertools import chain
 from collections import defaultdict
+
+
+def _functional_adam_state_step(step) -> torch.Tensor:
+    """Scalar step tensor for torch.optim._functional.adam.
+
+    PyTorch 2.x _multi_tensor_adam groups state tensors with params; step is only
+    exempted when it is CPU float32/float64. torch.tensor(int) yields int64 and
+    triggers RuntimeError in _group_tensors_by_device_and_dtype.
+    """
+    if isinstance(step, torch.Tensor):
+        return step.detach().to(dtype=torch.float64, device="cpu").reshape(())
+    return torch.tensor(float(step), dtype=torch.float64, device="cpu")
+
+
+def _torch_functional_adam_other_kwargs():
+    """Build extra kwargs needed by torch.optim._functional.adam across versions."""
+    other_kwargs = {}
+    if not _has_torch_adam:
+        return other_kwargs
+    sig = inspect.signature(_optim_functional.adam).parameters
+    if "maximize" in sig:
+        other_kwargs["maximize"] = False
+    # PyTorch 2.4+ defaults foreach=True on CUDA; int64 step used to break grouping
+    if "foreach" in sig:
+        other_kwargs["foreach"] = False
+    if "fused" in sig:
+        other_kwargs["fused"] = False
+    return other_kwargs
 
 
 class AdamOptimizer(torch.optim.Optimizer):
@@ -112,33 +144,39 @@ class AdamOptimizer(torch.optim.Optimizer):
                         grad = p.grad
 
                     if p.dtype == torch.float32:
-                        other_kwargs = {}
-                        if (
-                            "maximize"
-                            in inspect.signature(
-                                torch.optim._functional.adam
-                            ).parameters
-                        ):
-                            other_kwargs["maximize"] = False
-                        torch.optim._functional.adam(
-                            [p],
-                            [grad / scale],
-                            [state["exp_avg"]],
-                            [state["exp_avg_sq"]],
-                            [],
-                            (
-                                [state["step"]]
-                                if check_torch_version("1.12.0") < 0
-                                else [torch.tensor(state["step"])]
-                            ),
-                            amsgrad=False,
-                            beta1=group["betas"][0],
-                            beta2=group["betas"][1],
-                            lr=0.0 if state["step"] < self._hold_steps else group["lr"],
-                            weight_decay=group["weight_decay"],
-                            eps=group["eps"],
-                            **other_kwargs
-                        )
+                        if _has_torch_adam:
+                            other_kwargs = _torch_functional_adam_other_kwargs()
+                            _optim_functional.adam(
+                                [p],
+                                [grad / scale],
+                                [state["exp_avg"]],
+                                [state["exp_avg_sq"]],
+                                [],
+                                [_functional_adam_state_step(state["step"])],
+                                amsgrad=False,
+                                beta1=group["betas"][0],
+                                beta2=group["betas"][1],
+                                lr=0.0 if state["step"] < self._hold_steps else group["lr"],
+                                weight_decay=group["weight_decay"],
+                                eps=group["eps"],
+                                **other_kwargs
+                            )
+                        else:
+                            # Fallback: manual Adam when torch.optim._functional is unavailable.
+                            lr = 0.0 if state["step"] < self._hold_steps else group["lr"]
+                            beta1, beta2 = group["betas"]
+                            eps = group["eps"]
+                            weight_decay = group["weight_decay"]
+                            g = grad / scale
+                            if weight_decay != 0:
+                                g = g.add(p, alpha=weight_decay)
+                            state["exp_avg"].mul_(beta1).add_(g, alpha=1 - beta1)
+                            state["exp_avg_sq"].mul_(beta2).addcmul_(g, g, value=1 - beta2)
+                            bias_correction1 = 1 - beta1 ** (state["step"] + 1)
+                            bias_correction2 = 1 - beta2 ** (state["step"] + 1)
+                            step_size = lr / bias_correction1
+                            denom = (state["exp_avg_sq"].sqrt() / (bias_correction2 ** 0.5)).add_(eps)
+                            p.addcdiv_(state["exp_avg"], denom, value=-step_size)
                         state["step"] += 1
                     else:
                         f = F.adam_fp16 if p.dtype == torch.float16 else F.adam_bf16

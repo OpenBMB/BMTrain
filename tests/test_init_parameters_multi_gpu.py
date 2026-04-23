@@ -97,8 +97,8 @@ class Linear_CheckpointList(bmt.DistributedModule):
 
 def check(ckpt_path, ckpt_path_ref):
     if bmt.rank() == 0:
-        ckpt1 = torch.load(ckpt_path)
-        ckpt2 = torch.load(ckpt_path_ref)
+        ckpt1 = torch.load(ckpt_path, weights_only=False)
+        ckpt2 = torch.load(ckpt_path_ref, weights_only=False)
         for (k1, v1), (k2, v2) in zip(ckpt1.items(), ckpt2.items()):
             assert_eq(k1, k2)
             print(v1, v2)

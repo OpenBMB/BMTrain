@@ -35,8 +35,12 @@ def load_nccl_pypi():
     """
     try:
         import nvidia.nccl
-    except:
-        raise ImportError("Run pip install nvidia-nccl-cu11 >=2.14.3 first")
+    except ImportError:
+        raise ImportError(
+            "NCCL not found. Install the appropriate package:\n"
+            "  pip install nvidia-nccl-cu12>=2.14.3  (for CUDA 12.x)\n"
+            "  pip install nvidia-nccl-cu11>=2.14.3  (for CUDA 11.x)"
+        )
 
     path = os.path.join(os.path.dirname(nvidia.nccl.__file__), "lib")
     for file_so in os.listdir(path):

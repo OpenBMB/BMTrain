@@ -100,11 +100,11 @@ setup(
     packages=find_packages(),
     install_requires=[
         "numpy",
-		"nvidia-nccl-cu11>=2.14.3"
+		"nvidia-nccl-cu12>=2.14.3"
     ],
     setup_requires=[
         "pybind11",
-        "nvidia-nccl-cu11>=2.14.3"
+        "nvidia-nccl-cu12>=2.14.3"
     ],
     ext_modules=ext_modules,
     cmdclass={
