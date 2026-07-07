@@ -356,7 +356,7 @@ for iteration in range(1000):
 
 您也可以在其他平台与我们沟通交流：
 - QQ群: 735930538
-- 官方网站: https://www.openbmb.org
+- 官方网站: https://www.openbmb.cn
 - 微博: http://weibo.cn/OpenBMB
 - Twitter: https://twitter.com/OpenBMB
 
