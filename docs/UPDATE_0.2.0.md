@@ -70,7 +70,7 @@ layers = bmt.PipelineTransformerBlockList([
 ```
 
 Replacing TransformerBlockList with PipelineTransformerBlockList allows the parallel algorithm to switch from ZeRO to pipeline parallelism.
-The number of stages in the pipeline can be set by passing the `pipe_size` parameter to bmtrain.init_distributed.
+The number of pipe_size in the pipeline can be set by passing the `pipe_size` parameter to bmtrain.init_distributed.
 
 ### 3. Others
 

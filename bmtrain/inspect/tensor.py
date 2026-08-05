@@ -40,8 +40,8 @@ class InspectTensor:
                     kw = f'{item["prefix"]}{item["name"]}'
 
                     assert item["inside_pipe"] is not None
-                    stage_id = item["inside_pipe"]["stage_id"]
-                    stages = item["inside_pipe"]["stages"]
+                    pipe_rank = item["inside_pipe"]["pipe_rank"]
+                    pipe_size = item["inside_pipe"]["pipe_size"]
                     st = item["inside_pipe"]["st"]
                     ed = item["inside_pipe"]["ed"]
 
@@ -53,8 +53,8 @@ class InspectTensor:
                     if ed:
                         break
 
-                for stage in range(stages):
-                    if stage_id == stage:
+                for stage in range(pipe_size):
+                    if pipe_rank == stage:
                         broadcast_object(pipe_cnt, config["pipe_comm"], src=stage)
                         for k in range(i, j):
                             item = summary[k]
@@ -96,7 +96,7 @@ class InspectTensor:
                                     "tensor": tensor,
                                     "grad": grad,
                                     "requires_grad": item["requires_grad"],
-                                    "inside_pipe": {"stage_id": stage},
+                                    "inside_pipe": {"pipe_rank": stage},
                                 }
                             )
                             kw_cnt[kw] += 1
@@ -121,7 +121,7 @@ class InspectTensor:
                                         "tensor": None,
                                         "grad": None,
                                         "requires_grad": None,
-                                        "inside_pipe": {"stage_id": stage},
+                                        "inside_pipe": {"pipe_rank": stage},
                                     }
                                 )
                                 kw_cnt[kw] += 1
@@ -140,12 +140,12 @@ class InspectTensor:
                             broadcast_object(
                                 info,
                                 config["pipe_comm"],
-                                src=it["inside_pipe"]["stage_id"],
+                                src=it["inside_pipe"]["pipe_rank"],
                             )
                             tensor = it["tensor"]
                             tensor = broadcast(
                                 tensor,
-                                it["inside_pipe"]["stage_id"],
+                                it["inside_pipe"]["pipe_rank"],
                                 config["pipe_comm"],
                             )
                             grad = it["grad"]
@@ -153,25 +153,25 @@ class InspectTensor:
                             info = broadcast_object(
                                 {},
                                 config["pipe_comm"],
-                                src=it["inside_pipe"]["stage_id"],
+                                src=it["inside_pipe"]["pipe_rank"],
                             )
                             has_grad = info.pop("has_grad")
                             it.update(info)
                             tensor = torch.empty(it["shape"]).cuda().requires_grad_()
                             tensor = broadcast(
                                 tensor,
-                                it["inside_pipe"]["stage_id"],
+                                it["inside_pipe"]["pipe_rank"],
                                 config["pipe_comm"],
                             )
                             if has_grad:
                                 grad = torch.empty(it["shape"]).cuda()
-                        tensor = tensor.chunk(stages, dim=0)[stage_id].clone()
+                        tensor = tensor.chunk(pipe_size, dim=0)[pipe_rank].clone()
                         it["tensor"] = tensor
                         if has_grad:
                             grad = broadcast(
-                                grad, it["inside_pipe"]["stage_id"], config["pipe_comm"]
+                                grad, it["inside_pipe"]["pipe_rank"], config["pipe_comm"]
                             )
-                            grad = grad.chunk(stages, dim=0)[stage_id].clone()
+                            grad = grad.chunk(pipe_size, dim=0)[pipe_rank].clone()
                             tensor.grad = grad
                         it["shape"] = (it["shape"][0] // config["pipe_size"],) + it[
                             "shape"

@@ -89,6 +89,9 @@ def print_block(title: str, content: Optional[str] = None, file=sys.stdout):
     if content is not None:
         print(content, file=file)
 
+def print_rank_pp(*args, pipe_rank=0, **kwargs):
+    if config['topology'].pipe_rank == pipe_rank:
+        print(*args, **kwargs)
 
 def print_rank(*args, rank=0, **kwargs):
     """

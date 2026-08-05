@@ -1,0 +1,11 @@
+remote_host qiyuan
+remote_user hanxv 
+remote_port '0'
+remote_path  /home/hanxv/workspace/BMTrain/
+local_path    /Users/tachicoma/projects/BMTrain/
+ignore_dotfiles 0
+ignore_path ["*.pt", "*.nsys-rep"]
+auto_sync_up    1
+remote_or_local remote
+sleep_before_sync 0
+rsync_flags ["--max-size=10m"]

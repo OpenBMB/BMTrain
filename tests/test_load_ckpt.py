@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 import bmtrain as bmt
 import os
+from collections import OrderedDict
 
 class Linear_Normal(torch.nn.Module):
     def __init__(self, in_features : int, out_features: int, bias: bool = True, dtype = None) -> None:
@@ -36,25 +37,30 @@ class Linear_BMT(bmt.DistributedModule):
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
 
+def test_save_load(m):
+    bmt.save(m, "test.pt", non_blocking=False)
+    bmt.load(m, "test.pt")
+    bmt.save(m, "test.pt", non_blocking=True)
+    bmt.load(m, "test.pt")
+    bmt.save(m, "test.pt", non_blocking=False, save_gather=True)
+    bmt.load(m, "test.pt", load_gather=True)
+    bmt.clean("test.pt")
+
 
 def test_main():
-    ckpt_path = "test_ckpt.pt"
     # Transformer BlockList
     m = Linear_Normal(256, 256).cuda()
     m2 = bmt.TransformerBlockList([bmt.Block(Linear_BMT(256, 256))])
-    if bmt.rank() == 0:
-        torch.save(m.state_dict(), ckpt_path)
-    dic2 = m.state_dict()
-    dic2["0.weight"] = dic2.pop("weight")
-    dic2["0.bias"] = dic2.pop("bias")
-    m2.load_state_dict(dic2)
+    m2_state = m.state_dict().copy()
+    m2_state["0.weight"] = m2_state.pop("weight")
+    m2_state["0.bias"] = m2_state.pop("bias")
+    test_save_load(m2)
+    m2.load_state_dict(m2_state)
     for key in m.state_dict():
         bmt_key = f"0.{key}"
         assert bmt_key in m2.state_dict(), "wrong key in bmtrain model"
         assert (m2.state_dict()[bmt_key].cuda() == m.state_dict()[key]).all() , "wrong param in bmtrain model"
-    if bmt.rank() == 0:
-        os.remove(ckpt_path)
-    print("Transformer Blocklist load_state_dict and state_dict test passed")
+    print("Transformer Blocklist load_state_dict ,state_dict, bmt.load/save test passed")
 
     # Block 
     m3 = bmt.Block(Linear_BMT(256, 256))
@@ -62,7 +68,8 @@ def test_main():
     for key in m.state_dict():
         assert key in m3.state_dict(), "wrong key in bmtrain model"
         assert (m.state_dict()[key] == m3.state_dict()[key].cuda()).all(), "wrong param in bmtrain model"
-    print("Block load_state_dict and state_dict test passed")
+    test_save_load(m2)
+    print("Block load_state_dict ,state_dict, bmt.load/save test passed")
 
     # normal Distributed module
     m4 = Linear_BMT(256, 256)
@@ -70,7 +77,8 @@ def test_main():
     for key in m.state_dict():
         assert key in m4.state_dict(), "wrong key in bmtrain model"
         assert (m.state_dict()[key] == m4.state_dict()[key].cuda()).all(), "wrong param in bmtrain model"
-    print("bmt.distributedmodule load_state_dict and state_dict test passed")
+    test_save_load(m2)
+    print("bmt.distributedmodule load_state_dict, state_dict, bmt.load/save test passed")
 
 if __name__ == "__main__":
     bmt.init_distributed()
